@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "MobileHarness"
 include(":app")
+include(":third_party:termux-terminal-emulator")
+include(":third_party:termux-terminal-view")
