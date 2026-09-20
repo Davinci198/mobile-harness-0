@@ -198,6 +198,7 @@ import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.runtime.RuntimeExecutionService
+import com.jarves.mh.runtime.RuntimeInstaller
 import com.jarves.mh.runtime.RuntimeSetupService
 import com.jarves.mh.runtime.supportsArm64Runtime
 import com.jarves.mh.runtime.AntigravityAuthStatus
@@ -238,6 +239,10 @@ private enum class WorkspaceTab(val label: String, val icon: ImageVector) {
     CHANGES("Changes", Icons.Default.Code),
     PREVIEW("Preview", Icons.Default.Preview),
 }
+
+/** PLAN-TERMINAL pas 3: true = TerminalView VT real (PtyTerminalScreen),
+ * false = ecranul vechi pe linii. Revenire instant la nevoie. */
+private const val USE_PTY_TERMINAL = true
 
 @Composable
 fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
@@ -4077,7 +4082,15 @@ private fun WorkspaceScreen(
                         exportProjectLauncher.launch("${state.activeProject?.slug ?: "project"}.zip")
                     },
                 )
-                WorkspaceTab.TERMINAL -> TerminalScreen(
+                 WorkspaceTab.TERMINAL -> if (USE_PTY_TERMINAL) {
+                    val ptyContext = LocalContext.current
+                    PtyTerminalScreen(
+                        installer = remember(ptyContext) {
+                            RuntimeInstaller(ptyContext.applicationContext)
+                        },
+                        projectSlug = state.activeProject?.slug ?: "pocket",
+                    )
+                } else TerminalScreen(
                     lines = state.projectTerminalLines,
                     isRunning = state.projectTerminalRunning,
                     onRun = onTerminalRun,
