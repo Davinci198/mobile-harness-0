@@ -177,6 +177,10 @@ private class PtySessionClient : TerminalSessionClient {
     override fun logError(tag: String, message: String) {}
     override fun logWarn(tag: String, message: String) {}
     override fun logInfo(tag: String, message: String) {}
+    override fun logDebug(tag: String, message: String) {}
+    override fun logVerbose(tag: String, message: String) {}
+    override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {}
+    override fun logStackTrace(tag: String, e: Exception) {}
 }
 
 private class PtyViewClient : TerminalViewClient {
@@ -194,10 +198,13 @@ private class PtyViewClient : TerminalViewClient {
     override fun readAltKey(): Boolean = false
     override fun readShiftKey(): Boolean = false
     override fun readFnKey(): Boolean = false
-    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession) {}
+    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean = false
     override fun onEmulatorSet() {}
     override fun logError(tag: String, message: String) {}
     override fun logWarn(tag: String, message: String) {}
     override fun logInfo(tag: String, message: String) {}
     override fun logDebug(tag: String, message: String) {}
+    override fun logVerbose(tag: String, message: String) {}
+    override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {}
+    override fun logStackTrace(tag: String, e: Exception) {}
 }
