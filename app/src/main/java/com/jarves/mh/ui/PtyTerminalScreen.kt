@@ -172,6 +172,7 @@ private class PtySessionClient : TerminalSessionClient {
     override fun onBell(session: TerminalSession) {}
     override fun onColorsChanged(session: TerminalSession) {}
     override fun onTerminalCursorStateChange(state: Boolean) {}
+    override fun getTerminalCursorStyle(): Int = 0
     override fun setTerminalShellPid(session: TerminalSession, pid: Int) {}
     override fun logError(tag: String, message: String) {}
     override fun logWarn(tag: String, message: String) {}
