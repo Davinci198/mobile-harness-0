@@ -84,6 +84,10 @@ fun PtyTerminalScreen(
             AndroidView(
                 factory = { ctx ->
                     TerminalView(ctx, null).apply {
+                        // Obligatoriu inainte de layout: mRenderer se creeaza
+                        // doar aici; altfel onSizeChanged -> updateSize() da
+                        // NullPointerException (mRenderer null).
+                        setTextSize(14)
                         setTerminalViewClient(PtyViewClient())
                         attachSession(backend.session)
                     }
