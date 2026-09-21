@@ -373,6 +373,16 @@ private fun PtyExtraKeys(
                         menuOpen = false
                         onVertical()
                     })
+                    DropdownMenuItem(text = { Text("Hide keyboard") }, onClick = {
+                        menuOpen = false
+                        val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                        ime.hideSoftInputFromWindow(view?.windowToken, 0)
+                    })
+                    DropdownMenuItem(text = { Text("Show keyboard") }, onClick = {
+                        menuOpen = false
+                        val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                        if (view != null) ime.showSoftInput(view, 0)
+                    })
                     for ((i, b) in sessions.withIndex()) {
                         val active = b === activeSession
                         DropdownMenuItem(
@@ -478,6 +488,16 @@ private fun PtyVerticalExtraKeys(
                 DropdownMenuItem(text = { Text("Paste") }, onClick = {
                     menuOpen = false
                     pasteClipboard()
+                })
+                DropdownMenuItem(text = { Text("Hide keyboard") }, onClick = {
+                    menuOpen = false
+                    val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                    ime.hideSoftInputFromWindow(view?.windowToken, 0)
+                })
+                DropdownMenuItem(text = { Text("Show keyboard") }, onClick = {
+                    menuOpen = false
+                    val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                    if (view != null) ime.showSoftInput(view, 0)
                 })
                 for ((i, b) in sessions.withIndex()) {
                     val active = b === activeSession
