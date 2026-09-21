@@ -3493,8 +3493,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             current.messages
         } else {
             val startedAt = current.workSegmentStartedAtMillis ?: current.taskStartedAtMillis ?: System.currentTimeMillis()
-            current.messages + ChatMessage(
-                id = "interrupted-${current.activeSessionId ?: chatId}",
+            // PersistMessages can be called repeatedly for the same turn. Only keep the
+            // latest interrupted bubble so its id never collides inside a LazyColumn key.
+            val baseMessages = current.messages.filterNot { it.id.startsWith("interrupted-") }
+            baseMessages + ChatMessage(
+                id = "interrupted-${current.activeSessionId ?: chatId}-${UUID.randomUUID()}",
                 fromUser = false,
                 text = "",
                 workItems = liveItems.map { it.copy(isComplete = true) } + ActivityItem(
