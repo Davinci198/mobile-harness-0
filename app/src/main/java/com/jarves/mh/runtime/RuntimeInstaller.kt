@@ -491,6 +491,7 @@ class RuntimeInstaller(private val context: Context) {
             timeoutMs = 10 * 60 * 1_000L,
             onProgress = onProgress,
             failureMessage = "OpenCode installation failed",
+            emulateHardLinks = false,
         )
         val version = readGuestVersion(proot, "$OPENCODE_GUEST_PATH --version")
         opencodeMarker.writeText(version)
@@ -509,7 +510,7 @@ class RuntimeInstaller(private val context: Context) {
         }
         runGuestCommand(
             proot = proot,
-            command = "set -e; export HOME=/root; " +
+            command = "set -e; export HOME=/root; export UV_LINK_MODE=copy; " +
                 "command -v python3 >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv curl); " +
                 "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --non-interactive; " +
                 "test -x \"${'$'}HERMES_GUEST_PATH\"",
@@ -518,6 +519,7 @@ class RuntimeInstaller(private val context: Context) {
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
             failureMessage = "Hermes installation failed",
+            emulateHardLinks = false,
         )
         val version = readGuestVersion(proot, "$HERMES_GUEST_PATH --version")
         hermesMarker.writeText(version)
@@ -1404,6 +1406,7 @@ class RuntimeInstaller(private val context: Context) {
         timeoutMs: Long,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
         failureMessage: String,
+        emulateHardLinks: Boolean = true,
     ) {
         onProgress(
             RuntimeInstallProgress(
@@ -1420,6 +1423,7 @@ class RuntimeInstaller(private val context: Context) {
             workspace = File(rootfs, "root"),
             environment = emptyMap(),
             guestCommand = listOf("/usr/bin/env", "bash", "-lc", command),
+            emulateHardLinks = emulateHardLinks,
         )
         val native = running as? NativeSpawnProcess
         val collected = StringBuilder()
@@ -2002,7 +2006,7 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
         const val OPENCODE_GUEST_PATH = "/root/.opencode/bin/opencode"
-        const val HERMES_GUEST_PATH = "/root/.local/bin/hermes"
+        const val HERMES_GUEST_PATH = "/usr/local/bin/hermes"
         private const val AGY_VERSION = "1.1.27"
         private const val AGY_RELEASE_URL = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz"
         private const val AGY_RELEASE_SHA512 = "ed45f6930785aa4b42f14e07ace1c9d91a94fb76e760f54acbd7d3d3951e1f957fd456a0dae2a3124dd9a3b689bf7afb7c9303a3e4ba95037fc10063424d9bf9"
