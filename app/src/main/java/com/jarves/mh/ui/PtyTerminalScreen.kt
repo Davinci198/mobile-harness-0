@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -373,15 +375,12 @@ private fun PtyExtraKeys(
                         menuOpen = false
                         onVertical()
                     })
-                    DropdownMenuItem(text = { Text("Hide keyboard") }, onClick = {
+                    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+                    DropdownMenuItem(text = { Text(if (keyboardVisible) "Hide keyboard" else "Show keyboard") }, onClick = {
                         menuOpen = false
                         val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                        ime.hideSoftInputFromWindow(view?.windowToken, 0)
-                    })
-                    DropdownMenuItem(text = { Text("Show keyboard") }, onClick = {
-                        menuOpen = false
-                        val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                        if (view != null) ime.showSoftInput(view, 0)
+                        if (keyboardVisible) ime.hideSoftInputFromWindow(view?.windowToken, 0)
+                        else if (view != null) ime.showSoftInput(view, 0)
                     })
                     for ((i, b) in sessions.withIndex()) {
                         val active = b === activeSession
@@ -489,15 +488,12 @@ private fun PtyVerticalExtraKeys(
                     menuOpen = false
                     pasteClipboard()
                 })
-                DropdownMenuItem(text = { Text("Hide keyboard") }, onClick = {
+                val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+                DropdownMenuItem(text = { Text(if (keyboardVisible) "Hide keyboard" else "Show keyboard") }, onClick = {
                     menuOpen = false
                     val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                    ime.hideSoftInputFromWindow(view?.windowToken, 0)
-                })
-                DropdownMenuItem(text = { Text("Show keyboard") }, onClick = {
-                    menuOpen = false
-                    val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                    if (view != null) ime.showSoftInput(view, 0)
+                    if (keyboardVisible) ime.hideSoftInputFromWindow(view?.windowToken, 0)
+                    else if (view != null) ime.showSoftInput(view, 0)
                 })
                 for ((i, b) in sessions.withIndex()) {
                     val active = b === activeSession
