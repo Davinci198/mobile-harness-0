@@ -16,6 +16,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Restore stable debug keystore
+        env:
+          MH_DEBUG_KEYSTORE_B64: ${{ secrets.MH_DEBUG_KEYSTORE_B64 }}
+        run: |
+          mkdir -p "$HOME/.android"
+          echo "$MH_DEBUG_KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          echo "debug.keystore restored ($(stat -c%s "$HOME/.android/debug.keystore") bytes)"
       - name: Build debug APK
         run: ./gradlew assembleDebug
       - name: Upload APK
