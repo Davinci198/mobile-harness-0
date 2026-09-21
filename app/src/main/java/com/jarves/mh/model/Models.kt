@@ -41,6 +41,14 @@ enum class ProviderKind(
         fixedBaseUrl = true,
         fixedProtocol = true,
     ),
+    FREE(
+        "Free (no key)",
+        "Works without an API key",
+        ProviderProtocol.ANTHROPIC_GATEWAY,
+        "",
+        "",
+        experimental = true,
+    ),
     CUSTOM("Custom API", "Anthropic-compatible endpoint", ProviderProtocol.ANTHROPIC_GATEWAY, "", "", true),
 }
 
@@ -71,6 +79,18 @@ enum class AgentKind(
         "Antigravity CLI",
         "Google's official coding agent · Google account",
         "39.9 MB",
+    ),
+    OPENCODE(
+        "opencode",
+        "OpenCode",
+        "Open source coding agent · auth & free providers",
+        "install script",
+    ),
+    HERMES(
+        "hermes",
+        "Hermes",
+        "Nous Research's coding agent · auth & free providers",
+        "install script",
     ),
     ;
 
@@ -132,9 +152,14 @@ fun providerProtocolForAgent(profile: ProviderProfile, agent: AgentKind): Provid
     }
 }
 
+/** Providers usable with OpenCode and Hermes: the same keyed set as DeepSeek Harness plus a key-free option. */
+val OPENCODE_PROVIDERS: Set<ProviderKind> = DEEPSEEK_HARNESS_PROVIDERS + ProviderKind.FREE
+
 /** Provider choices shown for the selected coding agent. */
 fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
     AgentKind.DEEPSEEK_HARNESS -> ProviderKind.entries.filter { it in DEEPSEEK_HARNESS_PROVIDERS }
+    AgentKind.OPENCODE -> ProviderKind.entries.filter { it in OPENCODE_PROVIDERS }
+    AgentKind.HERMES -> ProviderKind.entries.filter { it in OPENCODE_PROVIDERS }
     AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { it == ProviderKind.OPENCODE_ZEN }
     AgentKind.ANTIGRAVITY -> emptyList()
 }

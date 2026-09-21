@@ -250,6 +250,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val claudeRuntime = ClaudeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val dshRuntime = DshRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val installer = RuntimeInstaller(application)
+    private val openCodeRuntime = OpenCodeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
+    private val hermesRuntime = HermesRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val antigravityRuntime = AntigravityRuntimeBridge(
         application,
         model = { _state.value.antigravityModel },
@@ -261,7 +263,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.value.activeChatId?.let { preferences.saveAgentConversation(AgentKind.ANTIGRAVITY, projectId, it, id) }
         },
     )
-    private val agentRegistry = AgentRegistry.builtIns(claudeRuntime, dshRuntime, antigravityRuntime)
+    private val agentRegistry = AgentRegistry.builtIns(claudeRuntime, dshRuntime, antigravityRuntime, openCodeRuntime, hermesRuntime)
     private fun activeRuntime(): com.jarves.mh.runtime.RuntimeBridge = agentRegistry.require(_state.value.agentKind).runtime
     private val providerApi = ProviderApiClient()
     private fun appUpdater(): AppUpdater = AppUpdater(

@@ -1217,6 +1217,8 @@ private fun toolchainDownloadSummary(selected: Set<DevStack>, agent: AgentKind):
             AgentKind.CLAUDE_CODE -> CLAUDE_RUNTIME_DOWNLOAD_MB
             AgentKind.DEEPSEEK_HARNESS -> DSH_RUNTIME_DOWNLOAD_MB
             AgentKind.ANTIGRAVITY -> AGY_RUNTIME_DOWNLOAD_MB
+            AgentKind.OPENCODE -> 0
+            AgentKind.HERMES -> 0
         } +
         (if (DevStack.PYTHON in selected) PYTHON_RUNTIME_DOWNLOAD_MB else 0) +
         (if (DevStack.ANDROID in selected) ANDROID_RUNTIME_DOWNLOAD_MB else 0)
@@ -1302,11 +1304,15 @@ private fun AgentChoiceRow(
         AgentKind.CLAUDE_CODE -> Color(0xFFD97757)
         AgentKind.DEEPSEEK_HARNESS -> Color(0xFF4D6BFE)
         AgentKind.ANTIGRAVITY -> Color(0xFF4285F4)
+        AgentKind.OPENCODE -> Color(0xFF0F0F0F)
+        AgentKind.HERMES -> Color(0xFF7C3AED)
     }
     val mark = when (agent) {
         AgentKind.CLAUDE_CODE -> "CC"
         AgentKind.DEEPSEEK_HARNESS -> "DS"
         AgentKind.ANTIGRAVITY -> "AG"
+        AgentKind.OPENCODE -> "OC"
+        AgentKind.HERMES -> "HE"
     }
     Row(
         modifier = Modifier
@@ -2583,6 +2589,7 @@ private fun ProviderChoiceRow(
         ProviderKind.OPENCODE_ZEN -> Color(0xFF22C55E)
         ProviderKind.NVIDIA_NIM -> Color(0xFF76B900)
         ProviderKind.CUSTOM -> PocketOrange
+        ProviderKind.FREE -> Color(0xFF34D399)
     }
     val mark = when (provider) {
         ProviderKind.CLAUDE -> "C"
@@ -2593,6 +2600,7 @@ private fun ProviderChoiceRow(
         ProviderKind.OPENCODE_ZEN -> "Z"
         ProviderKind.NVIDIA_NIM -> "NV"
         ProviderKind.CUSTOM -> "<>"
+        ProviderKind.FREE -> "F"
     }
 
     Row(

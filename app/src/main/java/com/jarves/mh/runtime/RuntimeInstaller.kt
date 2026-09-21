@@ -67,6 +67,8 @@ class RuntimeInstaller(private val context: Context) {
     private val devStacksFile = File(rootfs, ".pocket-dev-stacks.json")
     private val dshMarker = File(rootfs, ".pocket-dsh-version")
     private val agyMarker = File(rootfs, ".pocket-agy-version")
+    private val opencodeMarker = File(rootfs, ".pocket-opencode-version")
+    private val hermesMarker = File(rootfs, ".pocket-hermes-version")
     private val githubCliMarker = File(rootfs, ".pocket-github-cli-version")
     private val dshAndroidCompatibilityMarker = File(rootfs, ".pocket-dsh-android-compat-version")
     private val macosMetadataRepairMarker = File(rootfs, ".pocket-macos-metadata-repair")
@@ -212,6 +214,8 @@ class RuntimeInstaller(private val context: Context) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(proot, 0.985f, onProgress)
             com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS -> ensureDshInstalled(proot, 0.985f, onProgress)
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(proot, 0.985f, onProgress)
+            com.jarves.mh.model.AgentKind.OPENCODE -> ensureOpencodeInstalled(proot, 0.985f, onProgress)
+            com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(proot, 0.985f, onProgress)
         }
         onProgress(RuntimeInstallProgress("Setup complete", 1f))
         return InstalledRuntime(proot, rootfs)
@@ -231,6 +235,8 @@ class RuntimeInstaller(private val context: Context) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> ensureClaudeInstalled(runtime.proot, 0.05f, onProgress)
             com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS -> ensureDshInstalled(runtime.proot, 0.05f, onProgress)
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> ensureAgyInstalled(runtime.proot, 0.05f, onProgress)
+            com.jarves.mh.model.AgentKind.OPENCODE -> ensureOpencodeInstalled(runtime.proot, 0.05f, onProgress)
+            com.jarves.mh.model.AgentKind.HERMES -> ensureHermesInstalled(runtime.proot, 0.05f, onProgress)
         }
         onProgress(RuntimeInstallProgress("${agent.title} is ready", 1f))
     }
@@ -250,6 +256,12 @@ class RuntimeInstaller(private val context: Context) {
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> isInstalled() &&
                 File(rootfs, AGY_GUEST_PATH.removePrefix("/")).canExecute() &&
                 !agyMarker.readTextOrNull().isNullOrBlank()
+            com.jarves.mh.model.AgentKind.OPENCODE -> isInstalled() &&
+                File(rootfs, OPENCODE_GUEST_PATH.removePrefix("/")).canExecute() &&
+                !opencodeMarker.readTextOrNull().isNullOrBlank()
+            com.jarves.mh.model.AgentKind.HERMES -> isInstalled() &&
+                File(rootfs, HERMES_GUEST_PATH.removePrefix("/")).canExecute() &&
+                !hermesMarker.readTextOrNull().isNullOrBlank()
         }
     }
 
@@ -337,6 +349,16 @@ class RuntimeInstaller(private val context: Context) {
             ?.trim()
             ?.takeIf { it.isNotEmpty() && File(rootfs, AGY_GUEST_PATH.removePrefix("/")).canExecute() }
             ?.let { put(com.jarves.mh.model.AgentKind.ANTIGRAVITY, it) }
+
+        opencodeMarker.readTextOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && File(rootfs, OPENCODE_GUEST_PATH.removePrefix("/")).canExecute() }
+            ?.let { put(com.jarves.mh.model.AgentKind.OPENCODE, it) }
+
+        hermesMarker.readTextOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && File(rootfs, HERMES_GUEST_PATH.removePrefix("/")).canExecute() }
+            ?.let { put(com.jarves.mh.model.AgentKind.HERMES, it) }
     }
 
     /** Checks each installed agent against its own authoritative release source. */
@@ -363,6 +385,13 @@ class RuntimeInstaller(private val context: Context) {
                         put(com.jarves.mh.model.AgentKind.ANTIGRAVITY, AgentUpdateInfo(current, latest))
                     }
             }
+            installed[com.jarves.mh.model.AgentKind.OPENCODE]?.let { current ->
+                runCatching {
+                    JSONObject(fetchText("https://registry.npmjs.org/@opencode-ai/opencode/latest")).getString("version")
+                }.getOrNull()?.takeIf { isVersionNewer(it, current) }?.let { latest ->
+                    put(com.jarves.mh.model.AgentKind.OPENCODE, AgentUpdateInfo(current, latest))
+                }
+            }
         }
     }
 
@@ -376,6 +405,8 @@ class RuntimeInstaller(private val context: Context) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> updateClaude(runtime, expectedVersion, onProgress)
             com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS -> updateDsh(runtime, expectedVersion, onProgress)
             com.jarves.mh.model.AgentKind.ANTIGRAVITY -> updateAgy(runtime, expectedVersion, onProgress)
+            com.jarves.mh.model.AgentKind.OPENCODE -> updateOpencode(runtime, expectedVersion, onProgress)
+            com.jarves.mh.model.AgentKind.HERMES -> updateHermes(runtime, expectedVersion, onProgress)
         }
         onProgress(RuntimeInstallProgress("${agent.title} $expectedVersion is ready", 1f, event = RuntimeInstallEvent.COMPLETED))
     }
@@ -439,6 +470,116 @@ class RuntimeInstaller(private val context: Context) {
         check(found) { "Antigravity update archive is incomplete" }
         verifyGuest(runtime.proot, "$AGY_GUEST_PATH --version", "Antigravity update verification failed")
         agyMarker.writeText(latest)
+    }
+
+    private suspend fun ensureOpencodeInstalled(
+        proot: File,
+        fraction: Float,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        val opencode = File(rootfs, OPENCODE_GUEST_PATH.removePrefix("/"))
+        if (opencode.canExecute()) {
+            opencodeMarker.writeText(readGuestVersion(proot, "$OPENCODE_GUEST_PATH --version"))
+            return
+        }
+        runGuestCommand(
+            proot = proot,
+            command = "set -e; export HOME=/root; export OPENCODE_DISABLE_AUTOUPDATE=1; " +
+                "curl -fsSL https://opencode.ai/v2/install | bash; test -x \"${'$'}OPENCODE_GUEST_PATH\"",
+            displayCommand = "curl -fsSL https://opencode.ai/v2/install | bash",
+            fraction = fraction,
+            timeoutMs = 10 * 60 * 1_000L,
+            onProgress = onProgress,
+            failureMessage = "OpenCode installation failed",
+        )
+        val version = readGuestVersion(proot, "$OPENCODE_GUEST_PATH --version")
+        opencodeMarker.writeText(version)
+        verifyGuest(proot, "$OPENCODE_GUEST_PATH --version", "OpenCode installation verification failed")
+    }
+
+    private suspend fun ensureHermesInstalled(
+        proot: File,
+        fraction: Float,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        val hermes = File(rootfs, HERMES_GUEST_PATH.removePrefix("/"))
+        if (hermes.canExecute()) {
+            hermesMarker.writeText(readGuestVersion(proot, "$HERMES_GUEST_PATH --version"))
+            return
+        }
+        runGuestCommand(
+            proot = proot,
+            command = "set -e; export HOME=/root; " +
+                "command -v python3 >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv curl); " +
+                "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --non-interactive; " +
+                "test -x \"${'$'}HERMES_GUEST_PATH\"",
+            displayCommand = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
+            fraction = fraction,
+            timeoutMs = 20 * 60 * 1_000L,
+            onProgress = onProgress,
+            failureMessage = "Hermes installation failed",
+        )
+        val version = readGuestVersion(proot, "$HERMES_GUEST_PATH --version")
+        hermesMarker.writeText(version)
+        verifyGuest(proot, "$HERMES_GUEST_PATH --version", "Hermes installation verification failed")
+    }
+
+    private suspend fun updateOpencode(
+        runtime: InstalledRuntime,
+        expectedVersion: String,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        ensureOpencodeInstalled(runtime.proot, 0.2f, onProgress)
+        val installed = opencodeMarker.readTextOrNull().orEmpty()
+        check(installed.isNotEmpty()) { "OpenCode verification failed" }
+        onProgress(
+            RuntimeInstallProgress(
+                "OpenCode $expectedVersion is ready",
+                1f,
+                event = RuntimeInstallEvent.COMPLETED,
+            ),
+        )
+    }
+
+    private suspend fun updateHermes(
+        runtime: InstalledRuntime,
+        expectedVersion: String,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        ensureHermesInstalled(runtime.proot, 0.2f, onProgress)
+        val installed = hermesMarker.readTextOrNull().orEmpty()
+        check(installed.isNotEmpty()) { "Hermes verification failed" }
+        onProgress(
+            RuntimeInstallProgress(
+                "Hermes $expectedVersion is ready",
+                1f,
+                event = RuntimeInstallEvent.COMPLETED,
+            ),
+        )
+    }
+
+    /** Runs a command in the guest and returns its trimmed standard output. */
+    private suspend fun readGuestVersion(proot: File, command: String): String {
+        return try {
+            val running = process(
+                proot = proot,
+                rootfs = rootfs,
+                workspace = File(rootfs, "root"),
+                environment = emptyMap(),
+                guestCommand = listOf("/usr/bin/env", "bash", "-lc", "$command 2>&1"),
+            )
+            withTimeout(60_000L) { while (running.isAlive) delay(50) }
+            val output = (running as? NativeSpawnProcess)?.outputFile
+                ?.let(::readProcessOutputSafely)
+                .orEmpty()
+                .trim()
+            val extracted = runCatching { Regex("(\\d+\\.\\d+(?:\\.\\d+)?)").find(output)?.groupValues?.get(1) }
+                .getOrNull()
+                .orNull()
+            if (!extracted.isNullOrBlank()) extracted else "installed"
+        } catch (_: Exception) {
+            "installed"
+        }
     }
 
     private suspend fun updateDsh(
@@ -1861,6 +2002,8 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
     companion object {
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
+        const val OPENCODE_GUEST_PATH = "/root/.opencode/bin/opencode"
+        const val HERMES_GUEST_PATH = "/root/.local/bin/hermes"
         private const val AGY_VERSION = "1.1.27"
         private const val AGY_RELEASE_URL = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz"
         private const val AGY_RELEASE_SHA512 = "ed45f6930785aa4b42f14e07ace1c9d91a94fb76e760f54acbd7d3d3951e1f957fd456a0dae2a3124dd9a3b689bf7afb7c9303a3e4ba95037fc10063424d9bf9"
