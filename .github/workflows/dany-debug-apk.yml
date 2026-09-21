@@ -23,6 +23,8 @@ jobs:
           mkdir -p "$HOME/.android"
           echo "$MH_DEBUG_KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
           echo "debug.keystore restored ($(stat -c%s "$HOME/.android/debug.keystore") bytes)"
+          sha256sum "$HOME/.android/debug.keystore"
+          ls -la "$HOME/.android/"
       - name: Build debug APK
         run: ./gradlew assembleDebug
       - name: Upload APK
