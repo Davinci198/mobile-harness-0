@@ -1,15 +1,18 @@
 package com.jarves.mh.ui
 
+import android.content.Context
+import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.inputmethod.InputMethodManager
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -59,6 +62,9 @@ fun PtyTerminalScreen(
         onDispose { sessionHolder?.close() }
     }
 
+    val viewState = remember { PtyViewState() }
+    var terminalView by remember { mutableStateOf<TerminalView?>(null) }
+
     Column(modifier = modifier.fillMaxSize()) {
         error?.let {
             Text(
@@ -74,7 +80,7 @@ fun PtyTerminalScreen(
                 .padding(4.dp),
         ) {
             for (cmd in quickCommands) {
-                Button(
+                OutlinedButton(
                     onClick = { sessionHolder?.write("$cmd\r") },
                     modifier = Modifier.padding(end = 4.dp),
                 ) { Text(cmd, maxLines = 1) }
@@ -88,16 +94,98 @@ fun PtyTerminalScreen(
                         // doar aici; altfel onSizeChanged -> updateSize() da
                         // NullPointerException (mRenderer null).
                         setTextSize(14)
-                        setTerminalViewClient(PtyViewClient())
+                        isFocusable = true
+                        isFocusableInTouchMode = true
+                        setTerminalViewClient(PtyViewClient(viewState))
+                        terminalView = this
                         attachSession(backend.session)
+                        requestFocus()
                     }
                 },
+                onRelease = { terminalView = null },
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(4.dp),
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 4.dp),
             )
         }
+        PtyExtraKeys(
+            view = terminalView,
+            session = sessionHolder?.session,
+            state = viewState,
+            context = context,
+        )
     }
+}
+
+/** Stare partajata intre clientul TerminalView si randul de taste extra. */
+private class PtyViewState {
+    var controlDown by mutableStateOf(false)
+    var altDown by mutableStateOf(false)
+    var shiftDown by mutableStateOf(false)
+}
+
+/** Rand de taste extra (pas 4): ESC/CTRL/ALT/TAB/`/`/sageti si toggle tastatura. */
+@Composable
+private fun PtyExtraKeys(
+    view: TerminalView?,
+    session: TerminalSession?,
+    state: PtyViewState,
+    context: Context,
+) {
+    fun sendKeyCode(keyCode: Int) {
+        val view = view ?: return
+        val meta = (if (state.controlDown) KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON else 0) or
+            (if (state.altDown) KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON else 0) or
+            (if (state.shiftDown) KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON else 0)
+        view.onKeyDown(keyCode, KeyEvent(0, 0, KeyEvent.ACTION_UP, keyCode, 0, meta))
+    }
+
+    fun write(raw: String) {
+        session?.write(raw)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(4.dp),
+    ) {
+        ExtraKeyButton("KEYBOARD", active = false) {
+            val view = view ?: return@ExtraKeyButton
+            val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            if (ime.isActive) ime.hideSoftInputFromWindow(view.windowToken, 0)
+            else {
+                view.requestFocus()
+                ime.showSoftInput(view, 0)
+            }
+        }
+        ExtraKeyButton("ESC", active = false) { sendKeyCode(KeyEvent.KEYCODE_ESCAPE) }
+        ExtraKeyButton("CTRL", active = state.controlDown) { state.controlDown = !state.controlDown }
+        ExtraKeyButton("ALT", active = state.altDown) { state.altDown = !state.altDown }
+        ExtraKeyButton("SHIFT", active = state.shiftDown) { state.shiftDown = !state.shiftDown }
+        ExtraKeyButton("TAB", active = false) { sendKeyCode(KeyEvent.KEYCODE_TAB) }
+        ExtraKeyButton("/", active = false) { write("/") }
+        ExtraKeyButton("~", active = false) { write("~") }
+        ExtraKeyButton("↑", active = false) { sendKeyCode(KeyEvent.KEYCODE_DPAD_UP) }
+        ExtraKeyButton("↓", active = false) { sendKeyCode(KeyEvent.KEYCODE_DPAD_DOWN) }
+        ExtraKeyButton("←", active = false) { sendKeyCode(KeyEvent.KEYCODE_DPAD_LEFT) }
+        ExtraKeyButton("→", active = false) { sendKeyCode(KeyEvent.KEYCODE_DPAD_RIGHT) }
+    }
+}
+
+@Composable
+private fun ExtraKeyButton(label: String, active: Boolean, onClick: () -> Unit) {
+    val colors = if (active) {
+        androidx.compose.material3.ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.primary)
+    } else {
+        androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
+    }
+    OutlinedButton(
+        onClick = onClick,
+        colors = colors,
+        modifier = Modifier.padding(end = 4.dp),
+    ) { Text(label) }
 }
 
 /** Construieste TerminalSession cu shell = proot spre Ubuntu guest. */
@@ -187,7 +275,9 @@ private class PtySessionClient : TerminalSessionClient {
     override fun logStackTrace(tag: String, e: Exception) {}
 }
 
-private class PtyViewClient : TerminalViewClient {
+private class PtyViewClient(
+    private val state: PtyViewState,
+) : TerminalViewClient {
     override fun onScale(scale: Float): Float = scale
     override fun onSingleTapUp(e: MotionEvent) {}
     override fun shouldBackButtonBeMappedToEscape(): Boolean = true
@@ -195,12 +285,14 @@ private class PtyViewClient : TerminalViewClient {
     override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
     override fun isTerminalViewSelected(): Boolean = true
     override fun copyModeChanged(copyMode: Boolean) {}
+    // Modificatorii extra (CTRL/ALT/SHIFT) sunt cititi de TerminalView din
+    // readControlKey()/readAltKey()/readShiftKey() la fiecare key event.
     override fun onKeyDown(keyCode: Int, e: android.view.KeyEvent, session: TerminalSession): Boolean = false
     override fun onKeyUp(keyCode: Int, e: android.view.KeyEvent): Boolean = false
     override fun onLongPress(event: MotionEvent): Boolean = false
-    override fun readControlKey(): Boolean = false
-    override fun readAltKey(): Boolean = false
-    override fun readShiftKey(): Boolean = false
+    override fun readControlKey(): Boolean = state.controlDown
+    override fun readAltKey(): Boolean = state.altDown
+    override fun readShiftKey(): Boolean = state.shiftDown
     override fun readFnKey(): Boolean = false
     override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean = false
     override fun onEmulatorSet() {}
