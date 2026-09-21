@@ -67,6 +67,22 @@ android {
                 keyPassword = checkNotNull(uploadKeyPassword)
             }
         }
+        // Keystore stabil pt debug: fara el, AGP genereaza un keystore nou
+        // aleatoriu la fiecare build (chiar daca ~/.android/debug.keystore
+        // exista), deci adb install -r esueaza intre build-uri. CI-ul il
+        // restaureaza din secretul MH_DEBUG_KEYSTORE_B64 la
+        // ~/.android/debug.keystore (PKCS12, pw android).
+        val stableStorePath = providers.gradleProperty("debugStoreFile").orNull
+            ?: "${System.getProperty("user.home")}/.android/debug.keystore"
+        val stableDebugStore = file(stableStorePath)
+        if (stableDebugStore.isFile) {
+            create("stableDebug") {
+                storeFile = stableDebugStore
+                storePassword = providers.gradleProperty("debugStorePassword").orNull ?: "android"
+                keyAlias = providers.gradleProperty("debugKeyAlias").orNull ?: "androiddebugkey"
+                keyPassword = providers.gradleProperty("debugKeyPassword").orNull ?: "android"
+            }
+        }
     }
 
     defaultConfig {
@@ -125,6 +141,7 @@ android {
                 "TEST_OPENROUTER_API_KEY",
                 buildConfigString(testSecrets.getProperty("openrouter.apiKey", "")),
             )
+            signingConfigs.findByName("stableDebug")?.let { signingConfig = it }
         }
         release {
             isMinifyEnabled = false
