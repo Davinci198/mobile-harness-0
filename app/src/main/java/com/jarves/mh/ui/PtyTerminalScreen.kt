@@ -51,10 +51,19 @@ fun PtyTerminalScreen(
 ) {
     val context = LocalContext.current
     var error by remember { mutableStateOf<String?>(null) }
+    val viewState = remember { PtyViewState() }
+    var terminalView by remember { mutableStateOf<TerminalView?>(null) }
 
     val sessionHolder = remember {
         try {
-            PtyTerminalBackend(installer, context, projectSlug)
+            // Fara aceasta legatura TerminalView nu e invalidat la output:
+            // onScreenUpdated() (care face invalidate()) nu e chemat nicaieri
+            // in lib; in Termux il apeleaza clientul din onTextChanged. Fara el
+            // ecranul se redeseneaza abia la urmatoarea recompozitie -> echo-ul
+            // tastelor (si orice output) apare cu intarziere.
+            PtyTerminalBackend(installer, context, projectSlug) {
+                terminalView?.onScreenUpdated()
+            }
         } catch (e: Exception) {
             error = e.message ?: e.toString()
             null
@@ -64,9 +73,6 @@ fun PtyTerminalScreen(
     DisposableEffect(sessionHolder) {
         onDispose { sessionHolder?.close() }
     }
-
-    val viewState = remember { PtyViewState() }
-    var terminalView by remember { mutableStateOf<TerminalView?>(null) }
 
     // Cand aplicatia revine in prim-plan, TerminalView trebuie sa isi reia
     // focusul, altfel IME-ul ramane indreptat spre alta fereastra si inputul
@@ -237,6 +243,7 @@ private class PtyTerminalBackend(
     installer: RuntimeInstaller,
     context: android.content.Context,
     projectSlug: String,
+    onScreenUpdate: () -> Unit,
 ) {
     val session: TerminalSession
     private val appContext = context.applicationContext
@@ -286,7 +293,7 @@ private class PtyTerminalBackend(
             argv.toTypedArray(),
             env,
             500,
-            PtySessionClient(),
+            PtySessionClient(onScreenUpdate),
         )
     }
 
@@ -299,8 +306,14 @@ private class PtyTerminalBackend(
     }
 }
 
-private class PtySessionClient : TerminalSessionClient {
-    override fun onTextChanged(changedSession: TerminalSession) {}
+private class PtySessionClient(
+    private val onScreenUpdate: () -> Unit,
+) : TerminalSessionClient {
+    // Apelat pe main thread din TerminalSession.MainThreadHandler la fiecare
+    // chunk de output; invalideaza TerminalView (randare imediata a echo-ului).
+    override fun onTextChanged(changedSession: TerminalSession) {
+        onScreenUpdate()
+    }
     override fun onTitleChanged(changedSession: TerminalSession) {}
     override fun onSessionFinished(finishedSession: TerminalSession) {}
     override fun onCopyTextToClipboard(session: TerminalSession, text: String) {}
