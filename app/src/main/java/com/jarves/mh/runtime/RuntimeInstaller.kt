@@ -1609,6 +1609,19 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         val dns = manager.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
         val servers = dns.mapNotNull { it.hostAddress }.ifEmpty { listOf("8.8.8.8", "1.1.1.1") }
         File(rootfs, "etc/resolv.conf").writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
+        writeAptSandboxConfig()
+    }
+
+    /**
+     * Disable the apt root-sandbox. The http method tries to setuid() to the
+     * `_apt` user, which fails under PRoot ("Could not switch saved set-user-ID",
+     * "Method gave invalid 400 URI", exit 112). Running methods as root sidesteps
+     * the setuid emulation gap.
+     */
+    private fun writeAptSandboxConfig() {
+        File(rootfs, "etc/apt/apt.conf.d/99phonebox").writeText(
+            "APT::Sandbox::User \"root\";\nAPT::Sandbox::NoUpdate \"true\";\n",
+        )
     }
 
     private fun extractRootfs(archive: File, destination: File) {
