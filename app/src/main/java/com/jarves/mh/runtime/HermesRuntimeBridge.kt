@@ -11,7 +11,7 @@ import com.jarves.mh.model.ProviderProfile
  * newline-delimited events. Model routing uses Hermes' own provider names and
  * the matching API-key environment variables; the Free provider omits them.
  */
-class HermesRuntimeBridge(
+internal class HermesRuntimeBridge(
     context: Context,
     secretFor: (ProviderProfile) -> String?,
 ) : HeadlessCliBridge(context, secretFor) {

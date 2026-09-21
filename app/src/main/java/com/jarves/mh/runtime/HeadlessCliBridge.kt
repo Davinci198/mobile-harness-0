@@ -213,8 +213,7 @@ internal abstract class HeadlessCliBridge(
                 pendingOutput.delete(0, newline + 1)
                 if (line.isNotBlank()) {
                     when (val parsed = parseJsonlLine(line, sessionId)) {
-                        CliParsed.IGNORED -> Unit
-                        else -> {
+                        is CliParsed.Events -> {
                             failed = parsed.failed ?: failed
                             parsed.events.forEach { event ->
                                 when (event) {
@@ -229,6 +228,7 @@ internal abstract class HeadlessCliBridge(
                                 }
                             }
                         }
+                        CliParsed.IGNORED -> Unit
                     }
                     if (failed != null) {
                         process.destroy()

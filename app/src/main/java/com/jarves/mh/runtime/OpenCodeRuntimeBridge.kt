@@ -15,7 +15,7 @@ import com.jarves.mh.model.ProviderProfile
  * prints newline-delimited events carrying text/reasoning/tool parts and a
  * terminal `error` object.
  */
-class OpenCodeRuntimeBridge(
+internal class OpenCodeRuntimeBridge(
     context: Context,
     secretFor: (ProviderProfile) -> String?,
 ) : HeadlessCliBridge(context, secretFor) {

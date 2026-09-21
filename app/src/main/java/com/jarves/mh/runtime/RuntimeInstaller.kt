@@ -575,7 +575,6 @@ class RuntimeInstaller(private val context: Context) {
                 .trim()
             val extracted = runCatching { Regex("(\\d+\\.\\d+(?:\\.\\d+)?)").find(output)?.groupValues?.get(1) }
                 .getOrNull()
-                .orNull()
             if (!extracted.isNullOrBlank()) extracted else "installed"
         } catch (_: Exception) {
             "installed"
