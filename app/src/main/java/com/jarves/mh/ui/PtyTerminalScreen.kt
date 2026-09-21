@@ -1,5 +1,7 @@
 package com.jarves.mh.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -9,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
@@ -93,7 +96,11 @@ fun PtyTerminalScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    // App-ul e edge-to-edge (enableEdgeToEdge) => adjustResize nu ridica
+    // singur continutul; fara imePadding randul de taste extra (si ultimele
+    // linii din terminal) raman sub tastatura, deci butoanele "nu functioneaza"
+    // (tap-ul ajunge in tastatura).
+    Column(modifier = modifier.fillMaxSize().imePadding()) {
         error?.let {
             Text(
                 text = "PTY error: $it",
@@ -293,7 +300,7 @@ private class PtyTerminalBackend(
             argv.toTypedArray(),
             env,
             500,
-            PtySessionClient(onScreenUpdate),
+            PtySessionClient(appContext, onScreenUpdate),
         )
     }
 
@@ -307,6 +314,7 @@ private class PtyTerminalBackend(
 }
 
 private class PtySessionClient(
+    private val context: Context,
     private val onScreenUpdate: () -> Unit,
 ) : TerminalSessionClient {
     // Apelat pe main thread din TerminalSession.MainThreadHandler la fiecare
@@ -316,8 +324,23 @@ private class PtySessionClient(
     }
     override fun onTitleChanged(changedSession: TerminalSession) {}
     override fun onSessionFinished(finishedSession: TerminalSession) {}
-    override fun onCopyTextToClipboard(session: TerminalSession, text: String) {}
-    override fun onPasteTextFromClipboard(session: TerminalSession?) {}
+
+    // Copy/paste: toolbar-ul de selectie din TerminalView apeleaza metodele astea
+    // pe client; daca sunt goale, Copy nu pune nimic in clipboard si Paste nu
+    // citeste nimic (de aici "copy/paste nu merge").
+    override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            ?: return
+        clipboard.setPrimaryClip(ClipData.newPlainText("Mobile Harness", text))
+    }
+
+    override fun onPasteTextFromClipboard(session: TerminalSession?) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            ?: return
+        val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        if (text.isNotEmpty()) session?.write(text)
+    }
     override fun onBell(session: TerminalSession) {}
     override fun onColorsChanged(session: TerminalSession) {}
     override fun onTerminalCursorStateChange(state: Boolean) {}
