@@ -1609,9 +1609,17 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         val dns = manager.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
         // The guest runs glibc on PRoot without an IPv6 stack, so IPv6
         // nameservers (common on cellular links) leave it unresolvable.
-        val servers = dns.mapNotNull { it.hostAddress }
-            .filter { !it.contains(':') }
-            .ifEmpty { listOf("8.8.8.8", "1.1.1.1") }
+        //
+        // Do not trust the network resolver first: some carrier/VPN resolvers
+        // (e.g. 100.100.x.x) answer NXDOMAIN for github.com / opencode.ai.
+        // glibc treats an authoritative NXDOMAIN as final and never tries the
+        // next nameserver, so those hosts become unreachable (opencode, gh,
+        // installers). Put known-good public resolvers first and keep the
+        // network ones as a fallback for captive/private zones.
+        val publicDns = listOf("1.1.1.1", "8.8.8.8")
+        val networkDns = dns.mapNotNull { it.hostAddress }
+            .filter { !it.contains(':') && it !in publicDns }
+        val servers = publicDns + networkDns
         File(rootfs, "etc/resolv.conf").writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
         writeAptSandboxConfig()
         writeNpmPathConfig()
