@@ -1,6 +1,7 @@
 package com.jarves.mh.ui
 
 import android.content.Context
+import android.util.AttributeSet
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
@@ -89,7 +90,7 @@ fun PtyTerminalScreen(
         sessionHolder?.let { backend ->
             AndroidView(
                 factory = { ctx ->
-                    TerminalView(ctx, null).apply {
+                    FocusAwareTerminalView(ctx, null).apply {
                         // Obligatoriu inainte de layout: mRenderer se creeaza
                         // doar aici; altfel onSizeChanged -> updateSize() da
                         // NullPointerException (mRenderer null).
@@ -273,6 +274,29 @@ private class PtySessionClient : TerminalSessionClient {
     override fun logVerbose(tag: String, message: String) {}
     override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {}
     override fun logStackTrace(tag: String, e: Exception) {}
+}
+
+/**
+ * TerminalView care isi recapata focusul (si implicit IME-ul) ori de cate ori
+ * fereastra revine in prim-plan. Fara asta, dupa ce aplicatia trece prin
+ * background/recents, tastatura ramane indreptata spre alta fereastra si
+ * inputul nu mai ajunge in terminal (outputul se vede, tastele nu).
+ */
+private class FocusAwareTerminalView(
+    context: Context,
+    attrs: AttributeSet?,
+) : TerminalView(context, attrs) {
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        val imeWasActive = ime.isActive
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus) {
+            post {
+                requestFocus()
+                if (imeWasActive) ime.showSoftInput(this, 0)
+            }
+        }
+    }
 }
 
 private class PtyViewClient(
