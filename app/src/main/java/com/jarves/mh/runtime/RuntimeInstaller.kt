@@ -1607,9 +1607,26 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
     private fun writeResolver() {
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val dns = manager.getLinkProperties(manager.activeNetwork)?.dnsServers.orEmpty()
-        val servers = dns.mapNotNull { it.hostAddress }.ifEmpty { listOf("8.8.8.8", "1.1.1.1") }
+        // The guest runs glibc on PRoot without an IPv6 stack, so IPv6
+        // nameservers (common on cellular links) leave it unresolvable.
+        val servers = dns.mapNotNull { it.hostAddress }
+            .filter { !it.contains(':') }
+            .ifEmpty { listOf("8.8.8.8", "1.1.1.1") }
         File(rootfs, "etc/resolv.conf").writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
         writeAptSandboxConfig()
+        writeNpmPathConfig()
+    }
+
+    /**
+     * npm global binaries land in `<npm-prefix>/bin` (here
+     * /usr/local/lib/nodejs/bin), which is not part of the default guest
+     * PATH. Profile the login shell so `bash --login` finds tools installed
+     * with `npm install -g`.
+     */
+    private fun writeNpmPathConfig() {
+        File(rootfs, "etc/profile.d/10-nodejs-bins.sh").writeText(
+            "export PATH=/usr/local/lib/nodejs/bin:\$PATH\n",
+        )
     }
 
     /**
