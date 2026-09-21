@@ -524,6 +524,7 @@ private fun ExtraKeyButton(
 }
 
 /** Tab-ul unei sesiuni: apasare scurta = comuta, lunga = inchide. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun SessionChip(
     label: String,
