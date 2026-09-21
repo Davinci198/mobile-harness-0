@@ -8,6 +8,7 @@ import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,7 +32,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -79,30 +83,25 @@ fun PtyTerminalScreen(
     var verticalKeys by rememberSaveable { mutableStateOf(false) }
     val setVerticalKeys: (Boolean) -> Unit = { verticalKeys = it }
 
-    val sessionHolder = remember {
-        // Terminalul traieste pe toata durata viata procesului, nu doar a
-        // ecranului: la iesirea din tab sesiunea NU se mai opreste (se pastreaza
-        // in registry) -> opencode / freebuff / orice proces lasat deschis
-        // ramane in viata. Se inlocuieste doar cand se intra pe alt proiect.
-        val existing = PtyTerminalRegistry.backend
-        if (existing != null && existing.projectSlug == projectSlug) {
-            existing
-        } else {
-            existing?.close()
+    // Prima sesiune pentru acest proiect se creaza la deschiderea tabului.
+    // Sesiunile traiesc in registry (obiect de top-level) -> la iesirea din tab
+    // procesele (opencode/freebuff) raman deschise.
+    LaunchedEffect(projectSlug) {
+        if (PtyTerminalRegistry.sessions(projectSlug).isEmpty() && error == null) {
             try {
-                PtyTerminalBackend(installer, context, projectSlug)
-                    .also { PtyTerminalRegistry.backend = it }
+                PtyTerminalRegistry.newSession(installer, context, projectSlug)
             } catch (e: Exception) {
                 error = e.message ?: e.toString()
-                null
             }
         }
     }
+    val backend = PtyTerminalRegistry.active(projectSlug)
+    val backendSessions = PtyTerminalRegistry.sessions(projectSlug)
 
     // Legarea onTextChanged -> onScreenUpdated se face acum prin backend (vezi
     // PtySessionClient.onTextChanged); actualizam callback-ul la fiecare
     // recompozitie fiindca TerminalView-ul se recreate la revenirea in tab.
-    sessionHolder?.onScreenUpdate = { terminalView?.onScreenUpdated() }
+    backend?.onScreenUpdate = { terminalView?.onScreenUpdated() }
 
     // NU inchidem sesiunea la iesirea din compozitie: ramane activa in fundal.
     // Instructiuni de inchidere cand se intra pe alt proiect: vezi mai sus.
@@ -146,12 +145,37 @@ fun PtyTerminalScreen(
         ) {
             for (cmd in quickCommands) {
                 OutlinedButton(
-                    onClick = { sessionHolder?.write("$cmd\r") },
+                    onClick = { backend?.write("$cmd\r") },
                     modifier = Modifier.padding(end = 4.dp),
                 ) { Text(cmd, maxLines = 1) }
             }
         }
-        sessionHolder?.let { backend ->
+        // Tab-uri de sesiuni (ca in Termux): numar = sesiune, cea activa e
+        // marcat; apasare scurta comuta, lunga inchide; + deschide sesiune noua.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            for ((i, b) in backendSessions.withIndex()) {
+                val isActive = b === backend
+                SessionChip(
+                    label = "${i + 1}",
+                    active = isActive,
+                    onClick = { PtyTerminalRegistry.select(b) },
+                    onLongClick = {
+                        if (backendSessions.size > 1) PtyTerminalRegistry.kill(b)
+                    },
+                )
+            }
+            SessionChip(label = "+", active = false, onClick = {
+                runCatching { PtyTerminalRegistry.newSession(installer, context, projectSlug) }
+                    .onFailure { error = it.message ?: it.toString() }
+            }, onLongClick = {})
+        }
+        backend?.let { backend ->
             Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 AndroidView(
                     factory = { ctx ->
@@ -173,6 +197,14 @@ fun PtyTerminalScreen(
                             requestFocus()
                         }
                     },
+                    // La comutarea intre sesiuni AndroidView-ul NU se recreeaza
+                    // (factory ruleaza o singura data), deci re-atacham sesiunea
+                    // activa din `update`.
+                    update = { v ->
+                        if (v.mTermSession !== backend.session) {
+                            v.attachSession(backend.session)
+                        }
+                    },
                     onRelease = {
                         viewState.terminalView = null
                         terminalView = null
@@ -189,6 +221,10 @@ fun PtyTerminalScreen(
                         state = viewState,
                         context = context,
                         onHorizontal = { setVerticalKeys(false) },
+                        onNewSession = { runCatching { PtyTerminalRegistry.newSession(installer, context, projectSlug) }.onFailure { error = it.message ?: it.toString() } },
+                        sessions = backendSessions,
+                        activeSession = backend,
+                        onSelectSession = { PtyTerminalRegistry.select(it) },
                     )
                 }
             }
@@ -196,10 +232,14 @@ fun PtyTerminalScreen(
         if (!verticalKeys) {
             PtyExtraKeys(
                 view = terminalView,
-                session = sessionHolder?.session,
+                session = backend?.session,
                 state = viewState,
                 context = context,
                 onVertical = { setVerticalKeys(true) },
+                onNewSession = { runCatching { PtyTerminalRegistry.newSession(installer, context, projectSlug) }.onFailure { error = it.message ?: it.toString() } },
+                sessions = backendSessions,
+                activeSession = backend,
+                onSelectSession = { PtyTerminalRegistry.select(it) },
             )
         }
     }
@@ -209,10 +249,56 @@ private const val MIN_TEXT_SIZE_SP = 8f
 private const val MAX_TEXT_SIZE_SP = 32f
 private const val DEFAULT_TEXT_SIZE_SP = 16f
 
-/** Sesiunea PTY traieste pe toata durata vietii procesului, nu doar a ecranului.
- *  Astfel iesirea din tab nu opreste procesele din guest (opencode/freebuff). */
+/**
+ * Sesiunile PTY traiesc pe toata durata vietii procesului, nu doar a ecranului:
+ * iesirea din tab nu opreste procesele din guest (opencode/freebuff). Sustinem
+ * mai multe sesiuni per proiect (ca tab-urile din Termux); una e activa, se
+ * poate comuta si inchide. Listele sunt snapshot-state Compose, deci modificarile
+ * declansate din tastatura (≡ -> New session) recompun interfata.
+ */
 private object PtyTerminalRegistry {
-    @Volatile var backend: PtyTerminalBackend? = null
+    val backends = mutableStateListOf<PtyTerminalBackend>()
+    private val activeByProject = mutableStateMapOf<String, Int>()
+
+    private fun globalIndexOf(backend: PtyTerminalBackend): Int =
+        backends.indexOfFirst { it === backend }
+
+    fun sessions(projectSlug: String): List<PtyTerminalBackend> =
+        backends.filter { it.projectSlug == projectSlug }
+
+    /** Sesiunea activa pentru un proiect (sau ultima creata, daca proiectul nu
+     *  are una marcata). */
+    fun active(projectSlug: String): PtyTerminalBackend? {
+        val idx = activeByProject[projectSlug]
+            ?: backends.indices.lastOrNull { backends[it].projectSlug == projectSlug }
+            ?: return null
+        return backends.getOrNull(idx)?.takeIf { it.projectSlug == projectSlug }
+    }
+
+    fun newSession(installer: RuntimeInstaller, context: android.content.Context, projectSlug: String): PtyTerminalBackend {
+        val backend = PtyTerminalBackend(installer, context, projectSlug)
+        backends.add(backend)
+        activeByProject[projectSlug] = backends.lastIndex
+        return backend
+    }
+
+    fun select(backend: PtyTerminalBackend) {
+        val idx = globalIndexOf(backend)
+        if (idx >= 0) activeByProject[backend.projectSlug] = idx
+    }
+
+    fun kill(backend: PtyTerminalBackend) {
+        val idx = globalIndexOf(backend)
+        if (idx < 0) return
+        backend.close()
+        backends.removeAt(idx)
+        for ((project, v) in activeByProject.toMap()) {
+            when {
+                v == idx -> activeByProject.remove(project)
+                v > idx -> activeByProject[project] = v - 1
+            }
+        }
+    }
 }
 
 /** Stare partajata intre clientul TerminalView si randul de taste extra. */
@@ -239,6 +325,10 @@ private fun PtyExtraKeys(
     state: PtyViewState,
     context: Context,
     onVertical: () -> Unit,
+    onNewSession: () -> Unit,
+    sessions: List<PtyTerminalBackend>,
+    activeSession: PtyTerminalBackend?,
+    onSelectSession: (PtyTerminalBackend) -> Unit,
 ) {
     // Comportament identic cu TerminalExtraKeys din Termux: KeyEvent ACTION_UP
     // trimis in TerminalView.onKeyDown; KeyHandler le mapeaza in secvente VT.
@@ -271,6 +361,10 @@ private fun PtyExtraKeys(
             Box(modifier = Modifier.weight(1f)) {
                 ExtraKeyButton("≡", modifier = Modifier.fillMaxWidth()) { menuOpen = true }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("New session") }, onClick = {
+                        menuOpen = false
+                        onNewSession()
+                    })
                     DropdownMenuItem(text = { Text("Paste") }, onClick = {
                         menuOpen = false
                         pasteClipboard()
@@ -279,6 +373,16 @@ private fun PtyExtraKeys(
                         menuOpen = false
                         onVertical()
                     })
+                    for ((i, b) in sessions.withIndex()) {
+                        val active = b === activeSession
+                        DropdownMenuItem(
+                            text = { Text(if (active) "• ${i + 1}  ${b.projectSlug}" else "${i + 1}  ${b.projectSlug}") },
+                            onClick = {
+                                menuOpen = false
+                                onSelectSession(b)
+                            },
+                        )
+                    }
                 }
             }
             ExtraKeyButton("↕", modifier = Modifier.weight(1f)) { onVertical() }
@@ -317,6 +421,10 @@ private fun PtyVerticalExtraKeys(
     state: PtyViewState,
     context: Context,
     onHorizontal: () -> Unit,
+    onNewSession: () -> Unit,
+    sessions: List<PtyTerminalBackend>,
+    activeSession: PtyTerminalBackend?,
+    onSelectSession: (PtyTerminalBackend) -> Unit,
 ) {
     fun sendKeyCode(keyCode: Int) {
         val v = view ?: return
@@ -363,10 +471,24 @@ private fun PtyVerticalExtraKeys(
         Box(modifier = Modifier.fillMaxWidth()) {
             ExtraKeyButton("≡", compact = true, modifier = Modifier.fillMaxWidth()) { menuOpen = true }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(text = { Text("New session") }, onClick = {
+                    menuOpen = false
+                    onNewSession()
+                })
                 DropdownMenuItem(text = { Text("Paste") }, onClick = {
                     menuOpen = false
                     pasteClipboard()
                 })
+                for ((i, b) in sessions.withIndex()) {
+                    val active = b === activeSession
+                    DropdownMenuItem(
+                        text = { Text(if (active) "• ${i + 1}  ${b.projectSlug}" else "${i + 1}  ${b.projectSlug}") },
+                        onClick = {
+                            menuOpen = false
+                            onSelectSession(b)
+                        },
+                    )
+                }
             }
         }
     }
@@ -398,6 +520,29 @@ private fun ExtraKeyButton(
             fontSize = if (compact) 11.sp else 12.sp,
             maxLines = 1,
         )
+    }
+}
+
+/** Tab-ul unei sesiuni: apasare scurta = comuta, lunga = inchide. */
+@Composable
+private fun SessionChip(
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val bg = if (active) Color(0xFF3A3A3A) else Color(0xFF1B1B1B)
+    val fg = if (active) Color(0xFFFFFFFF) else Color(0xFF9E9E9E)
+    Box(
+        modifier = Modifier
+            .padding(end = 4.dp)
+            .height(28.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(bg)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = fg, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 12.dp))
     }
 }
 
@@ -471,7 +616,6 @@ private class PtyTerminalBackend(
 
     fun close() {
         runCatching { session.finishIfRunning() }
-        PtyTerminalRegistry.backend = null
     }
 }
 
