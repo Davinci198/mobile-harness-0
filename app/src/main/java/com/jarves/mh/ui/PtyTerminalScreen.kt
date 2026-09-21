@@ -111,20 +111,28 @@ fun PtyTerminalScreen(
         sessionHolder?.let { backend ->
             AndroidView(
                 factory = { ctx ->
+                    // setTextSize() din TerminalView primeste pixeli (nu sp),
+                    // desi documentatia zice altfel; fara scalarea cu densitatea
+                    // textul iese minuscul (14px ~= 5.7sp pe 390dpi).
+                    viewState.density = ctx.resources.displayMetrics.density
                     TerminalView(ctx, null).apply {
                         // Obligatoriu inainte de layout: mRenderer se creeaza
                         // doar aici; altfel onSizeChanged -> updateSize() da
                         // NullPointerException (mRenderer null).
-                        setTextSize(14)
+                        setTextSize(viewState.textSizePx)
                         isFocusable = true
                         isFocusableInTouchMode = true
                         setTerminalViewClient(PtyViewClient(viewState))
+                        viewState.terminalView = this
                         terminalView = this
                         attachSession(backend.session)
                         requestFocus()
                     }
                 },
-                onRelease = { terminalView = null },
+                onRelease = {
+                    viewState.terminalView = null
+                    terminalView = null
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
@@ -140,11 +148,25 @@ fun PtyTerminalScreen(
     }
 }
 
+private const val MIN_TEXT_SIZE_SP = 8f
+private const val MAX_TEXT_SIZE_SP = 32f
+private const val DEFAULT_TEXT_SIZE_SP = 16f
+
 /** Stare partajata intre clientul TerminalView si randul de taste extra. */
 private class PtyViewState {
     var controlDown by mutableStateOf(false)
     var altDown by mutableStateOf(false)
     var shiftDown by mutableStateOf(false)
+
+    /** Marimea fontului in sp, pastrata intre recrearile view-ului. */
+    var textSizeSp: Float = DEFAULT_TEXT_SIZE_SP
+    var density: Float = 1f
+
+    /** TerminalView-ul activ, pentru zoom (onScale -> setTextSize). */
+    var terminalView: TerminalView? = null
+
+    /** setTextSize() asteapta pixeli; convertim din sp. */
+    val textSizePx: Int get() = (textSizeSp * density).toInt().coerceAtLeast(6)
 }
 
 /** Rand de taste extra (pas 4): ESC/CTRL/ALT/TAB/`/`/sageti si toggle tastatura. */
@@ -300,7 +322,22 @@ private class PtySessionClient : TerminalSessionClient {
 private class PtyViewClient(
     private val state: PtyViewState,
 ) : TerminalViewClient {
-    override fun onScale(scale: Float): Float = scale
+    // TerminalView acumuleaza mScaleFactor si ne cheama aici. Peste pragurile
+    // 0.9/1.1 schimbam marimea fontului cu 2sp si resetam acumulatorul (1f);
+    // sub prag intoarcem valoarea acumulata ca sa se adune in continuare.
+    override fun onScale(scale: Float): Float {
+        if (scale < 0.9f || scale > 1.1f) {
+            val view = state.terminalView ?: return 1f
+            val next = state.textSizeSp + if (scale > 1f) 2f else -2f
+            val clamped = next.coerceIn(MIN_TEXT_SIZE_SP, MAX_TEXT_SIZE_SP)
+            if (clamped != state.textSizeSp) {
+                state.textSizeSp = clamped
+                view.setTextSize(state.textSizePx)
+            }
+            return 1f
+        }
+        return scale
+    }
     override fun onSingleTapUp(e: MotionEvent) {}
     override fun shouldBackButtonBeMappedToEscape(): Boolean = true
     override fun shouldEnforceCharBasedInput(): Boolean = true
