@@ -6,14 +6,26 @@ import android.content.Context
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -22,11 +34,16 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -57,25 +74,38 @@ fun PtyTerminalScreen(
     val viewState = remember { PtyViewState() }
     var terminalView by remember { mutableStateOf<TerminalView?>(null) }
 
+    // Toggle ↕ (ca in Termux): taste extra verticale pe latura dreapta,
+    // pentru a lasa terminalul pe tot latimea (TUI / vim / ncmpcpp).
+    var verticalKeys by rememberSaveable { mutableStateOf(false) }
+    val setVerticalKeys: (Boolean) -> Unit = { verticalKeys = it }
+
     val sessionHolder = remember {
-        try {
-            // Fara aceasta legatura TerminalView nu e invalidat la output:
-            // onScreenUpdated() (care face invalidate()) nu e chemat nicaieri
-            // in lib; in Termux il apeleaza clientul din onTextChanged. Fara el
-            // ecranul se redeseneaza abia la urmatoarea recompozitie -> echo-ul
-            // tastelor (si orice output) apare cu intarziere.
-            PtyTerminalBackend(installer, context, projectSlug) {
-                terminalView?.onScreenUpdated()
+        // Terminalul traieste pe toata durata viata procesului, nu doar a
+        // ecranului: la iesirea din tab sesiunea NU se mai opreste (se pastreaza
+        // in registry) -> opencode / freebuff / orice proces lasat deschis
+        // ramane in viata. Se inlocuieste doar cand se intra pe alt proiect.
+        val existing = PtyTerminalRegistry.backend
+        if (existing != null && existing.projectSlug == projectSlug) {
+            existing
+        } else {
+            existing?.close()
+            try {
+                PtyTerminalBackend(installer, context, projectSlug)
+                    .also { PtyTerminalRegistry.backend = it }
+            } catch (e: Exception) {
+                error = e.message ?: e.toString()
+                null
             }
-        } catch (e: Exception) {
-            error = e.message ?: e.toString()
-            null
         }
     }
 
-    DisposableEffect(sessionHolder) {
-        onDispose { sessionHolder?.close() }
-    }
+    // Legarea onTextChanged -> onScreenUpdated se face acum prin backend (vezi
+    // PtySessionClient.onTextChanged); actualizam callback-ul la fiecare
+    // recompozitie fiindca TerminalView-ul se recreate la revenirea in tab.
+    sessionHolder?.onScreenUpdate = { terminalView?.onScreenUpdated() }
+
+    // NU inchidem sesiunea la iesirea din compozitie: ramane activa in fundal.
+    // Instructiuni de inchidere cand se intra pe alt proiect: vezi mai sus.
 
     // Cand aplicatia revine in prim-plan, TerminalView trebuie sa isi reia
     // focusul, altfel IME-ul ramane indreptat spre alta fereastra si inputul
@@ -122,42 +152,56 @@ fun PtyTerminalScreen(
             }
         }
         sessionHolder?.let { backend ->
-            AndroidView(
-                factory = { ctx ->
-                    // setTextSize() din TerminalView primeste pixeli (nu sp),
-                    // desi documentatia zice altfel; fara scalarea cu densitatea
-                    // textul iese minuscul (14px ~= 5.7sp pe 390dpi).
-                    viewState.density = ctx.resources.displayMetrics.density
-                    TerminalView(ctx, null).apply {
-                        // Obligatoriu inainte de layout: mRenderer se creeaza
-                        // doar aici; altfel onSizeChanged -> updateSize() da
-                        // NullPointerException (mRenderer null).
-                        setTextSize(viewState.textSizePx)
-                        isFocusable = true
-                        isFocusableInTouchMode = true
-                        setTerminalViewClient(PtyViewClient(viewState))
-                        viewState.terminalView = this
-                        terminalView = this
-                        attachSession(backend.session)
-                        requestFocus()
-                    }
-                },
-                onRelease = {
-                    viewState.terminalView = null
-                    terminalView = null
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 4.dp),
+            Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                AndroidView(
+                    factory = { ctx ->
+                        // setTextSize() din TerminalView primeste pixeli (nu sp),
+                        // desi documentatia zice altfel; fara scalarea cu densitatea
+                        // textul iese minuscul (14px ~= 5.7sp pe 390dpi).
+                        viewState.density = ctx.resources.displayMetrics.density
+                        TerminalView(ctx, null).apply {
+                            // Obligatoriu inainte de layout: mRenderer se creeaza
+                            // doar aici; altfel onSizeChanged -> updateSize() da
+                            // NullPointerException (mRenderer null).
+                            setTextSize(viewState.textSizePx)
+                            isFocusable = true
+                            isFocusableInTouchMode = true
+                            setTerminalViewClient(PtyViewClient(viewState))
+                            viewState.terminalView = this
+                            terminalView = this
+                            attachSession(backend.session)
+                            requestFocus()
+                        }
+                    },
+                    onRelease = {
+                        viewState.terminalView = null
+                        terminalView = null
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 4.dp),
+                )
+                if (verticalKeys) {
+                    PtyVerticalExtraKeys(
+                        view = terminalView,
+                        session = backend.session,
+                        state = viewState,
+                        context = context,
+                        onHorizontal = { setVerticalKeys(false) },
+                    )
+                }
+            }
+        }
+        if (!verticalKeys) {
+            PtyExtraKeys(
+                view = terminalView,
+                session = sessionHolder?.session,
+                state = viewState,
+                context = context,
+                onVertical = { setVerticalKeys(true) },
             )
         }
-        PtyExtraKeys(
-            view = terminalView,
-            session = sessionHolder?.session,
-            state = viewState,
-            context = context,
-        )
     }
 }
 
@@ -165,11 +209,16 @@ private const val MIN_TEXT_SIZE_SP = 8f
 private const val MAX_TEXT_SIZE_SP = 32f
 private const val DEFAULT_TEXT_SIZE_SP = 16f
 
+/** Sesiunea PTY traieste pe toata durata vietii procesului, nu doar a ecranului.
+ *  Astfel iesirea din tab nu opreste procesele din guest (opencode/freebuff). */
+private object PtyTerminalRegistry {
+    @Volatile var backend: PtyTerminalBackend? = null
+}
+
 /** Stare partajata intre clientul TerminalView si randul de taste extra. */
 private class PtyViewState {
     var controlDown by mutableStateOf(false)
     var altDown by mutableStateOf(false)
-    var shiftDown by mutableStateOf(false)
 
     /** Marimea fontului in sp, pastrata intre recrearile view-ului. */
     var textSizeSp: Float = DEFAULT_TEXT_SIZE_SP
@@ -182,78 +231,188 @@ private class PtyViewState {
     val textSizePx: Int get() = (textSizeSp * density).toInt().coerceAtLeast(6)
 }
 
-/** Rand de taste extra (pas 4): ESC/CTRL/ALT/TAB/`/`/sageti si toggle tastatura. */
+/** Tastatura compacta neagra 2x7 ca in Termux (text alb). */
 @Composable
 private fun PtyExtraKeys(
     view: TerminalView?,
     session: TerminalSession?,
     state: PtyViewState,
     context: Context,
+    onVertical: () -> Unit,
 ) {
+    // Comportament identic cu TerminalExtraKeys din Termux: KeyEvent ACTION_UP
+    // trimis in TerminalView.onKeyDown; KeyHandler le mapeaza in secvente VT.
     fun sendKeyCode(keyCode: Int) {
-        val view = view ?: return
+        val v = view ?: return
         val meta = (if (state.controlDown) KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON else 0) or
-            (if (state.altDown) KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON else 0) or
-            (if (state.shiftDown) KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON else 0)
-        view.onKeyDown(keyCode, KeyEvent(0, 0, KeyEvent.ACTION_UP, keyCode, 0, meta))
+            (if (state.altDown) KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON else 0)
+        v.onKeyDown(keyCode, KeyEvent(0, 0, KeyEvent.ACTION_UP, keyCode, 0, meta))
     }
 
     fun write(raw: String) {
         session?.write(raw)
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(4.dp),
-    ) {
-        ExtraKeyButton("KEYBOARD", active = false) {
-            val view = view ?: return@ExtraKeyButton
-            val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            if (ime.isActive) ime.hideSoftInputFromWindow(view.windowToken, 0)
-            else {
-                view.requestFocus()
-                ime.showSoftInput(view, 0)
+    fun pasteClipboard() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+        val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        if (text.isNotEmpty()) write(text)
+    }
+
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 3.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            ExtraKeyButton("ESC", modifier = Modifier.weight(1f)) { sendKeyCode(KeyEvent.KEYCODE_ESCAPE) }
+            Box(modifier = Modifier.weight(1f)) {
+                ExtraKeyButton("≡", modifier = Modifier.fillMaxWidth()) { menuOpen = true }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("Paste") }, onClick = {
+                        menuOpen = false
+                        pasteClipboard()
+                    })
+                    DropdownMenuItem(text = { Text("→ vertical") }, onClick = {
+                        menuOpen = false
+                        onVertical()
+                    })
+                }
             }
+            ExtraKeyButton("↕", modifier = Modifier.weight(1f)) { onVertical() }
+            ExtraKeyButton("HOME", modifier = Modifier.weight(1f)) { sendKeyCode(KeyEvent.KEYCODE_MOVE_HOME) }
+            ExtraKeyButton("↑", modifier = Modifier.weight(1f)) { sendKeyCode(KeyEvent.KEYCODE_DPAD_UP) }
+            ExtraKeyButton("END", modifier = Modifier.weight(1f)) { sendKeyCode(KeyEvent.KEYCODE_MOVE_END) }
+            ExtraKeyButton("PGUP", modifier = Modifier.weight(1f)) { sendKeyCode(KeyEvent.KEYCODE_PAGE_UP) }
         }
-        ExtraKeyButton("ESC", active = false) { sendKeyCode(KeyEvent.KEYCODE_ESCAPE) }
-        ExtraKeyButton("CTRL", active = state.controlDown) { state.controlDown = !state.controlDown }
-        ExtraKeyButton("ALT", active = state.altDown) { state.altDown = !state.altDown }
-        ExtraKeyButton("SHIFT", active = state.shiftDown) { state.shiftDown = !state.shiftDown }
-        ExtraKeyButton("TAB", active = false) { sendKeyCode(KeyEvent.KEYCODE_TAB) }
-        ExtraKeyButton("/", active = false) { write("/") }
-        ExtraKeyButton("~", active = false) { write("~") }
-        ExtraKeyButton("↑", active = false) { sendKeyCode(KeyEvent.KEYCODE_DPAD_UP) }
-        ExtraKeyButton("↓", active = false) { sendKeyCode(KeyEvent.KEYCODE_DPAD_DOWN) }
-        ExtraKeyButton("←", active = false) { sendKeyCode(KeyEvent.KEYCODE_DPAD_LEFT) }
-        ExtraKeyButton("→", active = false) { sendKeyCode(KeyEvent.KEYCODE_DPAD_RIGHT) }
+        Spacer(Modifier.height(3.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            // ⇄: switch la urmatorul IME daca exista mai multe; altfel TAB.
+            ExtraKeyButton("⇄", modifier = Modifier.weight(1f)) {
+                val v = view
+                val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                val switched = v != null && ime.switchToNextInputMethod(v.windowToken, false)
+                if (!switched) sendKeyCode(KeyEvent.KEYCODE_TAB)
+            }
+            ExtraKeyButton("CTRL", active = state.controlDown, modifier = Modifier.weight(1f)) { state.controlDown = !state.controlDown }
+            ExtraKeyButton("ALT", active = state.altDown, modifier = Modifier.weight(1f)) { state.altDown = !state.altDown }
+            ExtraKeyButton("←", modifier = Modifier.weight(1f)) { sendKeyCode(KeyEvent.KEYCODE_DPAD_LEFT) }
+            ExtraKeyButton("↓", modifier = Modifier.weight(1f)) { sendKeyCode(KeyEvent.KEYCODE_DPAD_DOWN) }
+            ExtraKeyButton("→", modifier = Modifier.weight(1f)) { sendKeyCode(KeyEvent.KEYCODE_DPAD_RIGHT) }
+            ExtraKeyButton("PGDN", modifier = Modifier.weight(1f)) { sendKeyCode(KeyEvent.KEYCODE_PAGE_DOWN) }
+        }
     }
 }
 
+/** Tastele extra in mod vertical (↕): panel pe latura dreapta, 2 coloane x 7. */
 @Composable
-private fun ExtraKeyButton(label: String, active: Boolean, onClick: () -> Unit) {
-    val colors = if (active) {
-        androidx.compose.material3.ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.primary)
-    } else {
-        androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
+private fun PtyVerticalExtraKeys(
+    view: TerminalView?,
+    session: TerminalSession?,
+    state: PtyViewState,
+    context: Context,
+    onHorizontal: () -> Unit,
+) {
+    fun sendKeyCode(keyCode: Int) {
+        val v = view ?: return
+        val meta = (if (state.controlDown) KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON else 0) or
+            (if (state.altDown) KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON else 0)
+        v.onKeyDown(keyCode, KeyEvent(0, 0, KeyEvent.ACTION_UP, keyCode, 0, meta))
     }
-    OutlinedButton(
-        onClick = onClick,
-        colors = colors,
-        modifier = Modifier.padding(end = 4.dp),
-    ) { Text(label) }
+    fun write(raw: String) { session?.write(raw) }
+    fun pasteClipboard() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+        val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        if (text.isNotEmpty()) write(text)
+    }
+
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .width(100.dp)
+            .fillMaxHeight()
+            .verticalScroll(rememberScrollState())
+            .padding(2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        ExtraKeyButton("↕", compact = true, modifier = Modifier.fillMaxWidth()) { onHorizontal() }
+        ExtraKeyButton("ESC", compact = true, modifier = Modifier.fillMaxWidth()) { sendKeyCode(KeyEvent.KEYCODE_ESCAPE) }
+        ExtraKeyButton("⇄", compact = true, modifier = Modifier.fillMaxWidth()) {
+            val v = view
+            val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            if (v == null || !ime.switchToNextInputMethod(v.windowToken, false)) sendKeyCode(KeyEvent.KEYCODE_TAB)
+        }
+        ExtraKeyButton("CTRL", active = state.controlDown, compact = true, modifier = Modifier.fillMaxWidth()) { state.controlDown = !state.controlDown }
+        ExtraKeyButton("ALT", active = state.altDown, compact = true, modifier = Modifier.fillMaxWidth()) { state.altDown = !state.altDown }
+        ExtraKeyButton("HOME", compact = true, modifier = Modifier.fillMaxWidth()) { sendKeyCode(KeyEvent.KEYCODE_MOVE_HOME) }
+        ExtraKeyButton("END", compact = true, modifier = Modifier.fillMaxWidth()) { sendKeyCode(KeyEvent.KEYCODE_MOVE_END) }
+        ExtraKeyButton("PGUP", compact = true, modifier = Modifier.fillMaxWidth()) { sendKeyCode(KeyEvent.KEYCODE_PAGE_UP) }
+        ExtraKeyButton("PGDN", compact = true, modifier = Modifier.fillMaxWidth()) { sendKeyCode(KeyEvent.KEYCODE_PAGE_DOWN) }
+        ExtraKeyButton("↑", compact = true, modifier = Modifier.fillMaxWidth()) { sendKeyCode(KeyEvent.KEYCODE_DPAD_UP) }
+        ExtraKeyButton("←", compact = true, modifier = Modifier.fillMaxWidth()) { sendKeyCode(KeyEvent.KEYCODE_DPAD_LEFT) }
+        ExtraKeyButton("↓", compact = true, modifier = Modifier.fillMaxWidth()) { sendKeyCode(KeyEvent.KEYCODE_DPAD_DOWN) }
+        ExtraKeyButton("→", compact = true, modifier = Modifier.fillMaxWidth()) { sendKeyCode(KeyEvent.KEYCODE_DPAD_RIGHT) }
+        Box(modifier = Modifier.fillMaxWidth()) {
+            ExtraKeyButton("≡", compact = true, modifier = Modifier.fillMaxWidth()) { menuOpen = true }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(text = { Text("Paste") }, onClick = {
+                    menuOpen = false
+                    pasteClipboard()
+                })
+            }
+        }
+    }
+}
+
+/** Buton compact, inchis la culoare, text alb (stil Termux). */
+@Composable
+private fun ExtraKeyButton(
+    label: String,
+    active: Boolean = false,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val height = if (compact) 38.dp else 44.dp
+    val bg = if (active) Color(0xFF3A3A3A) else Color(0xFF1B1B1B)
+    val fg = if (active) Color(0xFFFFFFFF) else Color(0xFFE6E6E6)
+    Box(
+        modifier = modifier
+            .height(height)
+            .clip(RoundedCornerShape(5.dp))
+            .background(bg)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = fg,
+            fontSize = if (compact) 11.sp else 12.sp,
+            maxLines = 1,
+        )
+    }
 }
 
 /** Construieste TerminalSession cu shell = proot spre Ubuntu guest. */
 private class PtyTerminalBackend(
     installer: RuntimeInstaller,
     context: android.content.Context,
-    projectSlug: String,
-    onScreenUpdate: () -> Unit,
+    val projectSlug: String,
 ) {
     val session: TerminalSession
     private val appContext = context.applicationContext
+
+    /** Setat de ecran la fiecare recompozitie: creeaza legatura output -> redraw.
+     *  Mutabil fiindca TerminalView-ul se recreate la revenirea in tab. */
+    var onScreenUpdate: () -> Unit = {}
 
     init {
         val installed = installer.installedRuntime()
@@ -300,7 +459,9 @@ private class PtyTerminalBackend(
             argv.toTypedArray(),
             env,
             500,
-            PtySessionClient(appContext, onScreenUpdate),
+            PtySessionClient(appContext).also { client ->
+                client.onScreenUpdate = { onScreenUpdate() }
+            },
         )
     }
 
@@ -310,15 +471,17 @@ private class PtyTerminalBackend(
 
     fun close() {
         runCatching { session.finishIfRunning() }
+        PtyTerminalRegistry.backend = null
     }
 }
 
 private class PtySessionClient(
     private val context: Context,
-    private val onScreenUpdate: () -> Unit,
 ) : TerminalSessionClient {
-    // Apelat pe main thread din TerminalSession.MainThreadHandler la fiecare
-    // chunk de output; invalideaza TerminalView (randare imediata a echo-ului).
+    /** Apelat pe main thread din TerminalSession.MainThreadHandler la fiecare
+     *  chunk de output; invalideaza TerminalView (randare imediata a echo-ului). */
+    var onScreenUpdate: () -> Unit = {}
+
     override fun onTextChanged(changedSession: TerminalSession) {
         onScreenUpdate()
     }
@@ -387,7 +550,7 @@ private class PtyViewClient(
     override fun onLongPress(event: MotionEvent): Boolean = false
     override fun readControlKey(): Boolean = state.controlDown
     override fun readAltKey(): Boolean = state.altDown
-    override fun readShiftKey(): Boolean = state.shiftDown
+    override fun readShiftKey(): Boolean = false
     override fun readFnKey(): Boolean = false
     override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean = false
     override fun onEmulatorSet() {}
