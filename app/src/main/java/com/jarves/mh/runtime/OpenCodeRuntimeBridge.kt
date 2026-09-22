@@ -35,11 +35,18 @@ internal class OpenCodeRuntimeBridge(
         add("--format")
         add("json")
         add("--auto")
-        val prefix = if (gatewayUrl != null) "openai" else opencodeModelPrefix(provider.kind)
+        // NVIDIA's catalog id already embeds `openai/…`; force the `nvidia`
+        // namespace so gateway sessions resolve `nvidia/openai/gpt-oss-20b`
+        // instead of the non-existent `openai/gpt-oss-20b` route.
+        val prefix = when {
+            provider.kind == ProviderKind.NVIDIA_NIM -> "nvidia"
+            gatewayUrl != null -> "openai"
+            else -> opencodeModelPrefix(provider.kind)
+        }
         val model = provider.model.ifBlank { provider.kind.defaultModel }
         if (model.isNotBlank()) {
             add("--model")
-            add(if (prefix != null && !provider.model.startsWith("$prefix/")) "$prefix/$model" else model)
+            add(if (prefix != null && !model.startsWith("$prefix/")) "$prefix/$model" else model)
         }
         add(prompt)
     }
@@ -56,8 +63,18 @@ internal class OpenCodeRuntimeBridge(
         val kind = provider.kind
         if (kind == ProviderKind.FREE || secret.isNullOrBlank()) return environment
         if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
-            environment["OPENAI_API_KEY"] = secret
-            environment["OPENAI_BASE_URL"] = gatewayUrl
+            when (kind) {
+                ProviderKind.NVIDIA_NIM -> {
+                    environment["NVIDIA_API_KEY"] = secret
+                    environment["NIM_API_KEY"] = secret
+                    environment["OPENCODE_CONFIG_CONTENT"] =
+                        """{"provider":{"nvidia":{"options":{"baseURL":"$gatewayUrl"}}}}"""
+                }
+                else -> {
+                    environment["OPENAI_API_KEY"] = secret
+                    environment["OPENAI_BASE_URL"] = gatewayUrl
+                }
+            }
             return environment
         }
         when (kind) {

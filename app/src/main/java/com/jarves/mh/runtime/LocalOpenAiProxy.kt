@@ -74,21 +74,25 @@ internal class LocalOpenAiProxy(
             if (split > 0) headers[line.substring(0, split).lowercase()] = line.substring(split + 1).trim()
         }
         val output = BufferedOutputStream(socket.getOutputStream())
-        if (headers["expect"].equals("100-continue", ignoreCase = true)) {
-            output.write("HTTP/1.1 100 Continue\r\n\r\n".toByteArray())
-            output.flush()
-        }
-        val body = readBody(input, headers)
-        runCatching {
-            val (connection, code) = forward(method, rawTarget, headers, body)
-            try {
-                writeUpstreamResponse(output, connection, code)
-            } finally {
-                connection.disconnect()
+        try {
+            if (headers["expect"].equals("100-continue", ignoreCase = true)) {
+                output.write("HTTP/1.1 100 Continue\r\n\r\n".toByteArray())
+                output.flush()
             }
-        }.onFailure { error ->
-            Log.w("OpenAiProxy", "Upstream call failed for ${profile.kind}: ${error.message}")
-            writeJson(output, 502, openAiError(error.message ?: "Provider request failed"))
+            val body = readBody(input, headers)
+            runCatching {
+                val (connection, code) = forward(method, rawTarget, headers, body)
+                try {
+                    writeUpstreamResponse(output, connection, code)
+                } finally {
+                    connection.disconnect()
+                }
+            }.onFailure { error ->
+                Log.w("OpenAiProxy", "Upstream call failed for ${profile.kind}: ${error.message}")
+                runCatching { writeJson(output, 502, openAiError(error.message ?: "Provider request failed")) }
+            }
+        } catch (error: Exception) {
+            Log.w("OpenAiProxy", "Proxy request handling failed: ${error.message}")
         }
     }
 
