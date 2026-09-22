@@ -1765,8 +1765,79 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
             .filter { !it.contains(':') && it !in publicDns }
         val servers = publicDns + networkDns
         File(rootfs, "etc/resolv.conf").writeText(servers.joinToString("\n") { "nameserver $it" } + "\n")
+        writeGuestIpv4Pins()
         writeAptSandboxConfig()
         writeNpmPathConfig()
+    }
+
+    /**
+     * The guest has no IPv6 stack. Some hosts (models.opencode.ai is on
+     * Cloudflare) can resolve AAAA-only depending on the link, and Bun —
+     * opencode's runtime — then stalls on connect at server startup, which
+     * blocks every headless `opencode run`. Refresh an A-record pin in
+     * /etc/hosts while the host still has connectivity (keep the previous pin
+     * when resolution fails) and bias glibc toward IPv4-mapped precedence.
+     */
+    private fun writeGuestIpv4Pins() {
+        val hostsFile = File(rootfs, "etc/hosts")
+        val previous = runCatching { hostsFile.readText() }.getOrDefault("")
+        val previousPin = previous.lineSequence()
+            .firstOrNull { it.contains(" models.opencode.ai") }
+            ?.substringBefore(" models.opencode.ai")
+            ?.trim()
+        val fresh = runCatching {
+            java.net.InetAddress.getAllByName("models.opencode.ai")
+                .firstOrNull { it is java.net.Inet4Address }?.hostAddress
+        }.getOrNull()
+        val pin = fresh ?: previousPin
+        if (pin != null) {
+            val body = previous.lineSequence()
+                .filter { it.isNotBlank() && !it.contains(" models.opencode.ai") }
+                .joinToString("\n")
+            val updated = buildString {
+                append(body)
+                if (isNotEmpty()) append("\n")
+                append(pin).append(" models.opencode.ai\n")
+            }
+            hostsFile.parentFile?.mkdirs()
+            hostsFile.writeText(updated)
+        }
+        val gai = File(rootfs, "etc/gai.conf")
+        val gaiText = runCatching { gai.readText() }.getOrDefault("")
+        if (!gaiText.contains("precedence ::ffff:0:0/96")) {
+            gai.parentFile?.mkdirs()
+            gai.writeText("$gaiText\nprecedence ::ffff:0:0/96  100\n")
+        }
+    }
+
+    /**
+     * A killed PRoot wrapper leaves guest children (bun/node/python) alive:
+     * they reparent to init and a stale `opencode serve` then blocks the next
+     * headless run at startup (socket/DB handshake against a dead instance).
+     * Kill same-uid orphans (ppid == 1) whose cmdline matches guest agent
+     * binaries. Interactive PTY sessions keep a live parent chain and are
+     * never touched.
+     */
+    fun killGuestOrphans() {
+        val markers = listOf("libproot.so", OPENCODE_GUEST_PATH, HERMES_GUEST_PATH, CLAUDE_GUEST_PATH, "hermes-agent")
+        val mine = android.os.Process.myPid()
+        val candidates = File("/proc").listFiles { file -> file.name.toIntOrNull() != null } ?: return
+        for (dir in candidates) {
+            runCatching {
+                val pid = dir.name.toInt()
+                if (pid == mine) return@runCatching
+                val stat = File(dir, "stat").readText()
+                val ppid = stat.substringAfterLast(')').trim().split(' ').getOrNull(1)?.toIntOrNull()
+                    ?: return@runCatching
+                if (ppid != 1) return@runCatching
+                val cmdline = File(dir, "cmdline").inputStream().use { stream ->
+                    stream.readBytes().decodeToString()
+                }
+                if (cmdline.isNotBlank() && markers.any { it in cmdline }) {
+                    android.os.Process.killProcess(pid)
+                }
+            }
+        }
     }
 
     /**
