@@ -530,9 +530,14 @@ class RuntimeInstaller(private val context: Context) {
         }
         runGuestCommand(
             proot = proot,
-            command = "set -e; export HOME=/root; export UV_LINK_MODE=copy; " +
-                "command -v python3 >/dev/null 2>&1 && command -v g++ >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv curl build-essential); " +
-                "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --non-interactive || true; " +
+            command = "set -euo pipefail; export HOME=/root; export UV_LINK_MODE=copy; " +
+                "export DEBIAN_FRONTEND=noninteractive; " +
+                "apt-get update -qq && apt-get install -y -qq " +
+                "python3 python3-pip python3-venv curl git build-essential python3-dev libffi-dev; " +
+                "if [ -d /usr/local/lib/hermes-agent ] && [ ! -d /usr/local/lib/hermes-agent/.git ]; then rm -rf /usr/local/lib/hermes-agent; fi; " +
+                "if [ -d \"\$HOME/.hermes/hermes-agent\" ] && [ ! -d \"\$HOME/.hermes/hermes-agent/.git\" ]; then rm -rf \"\$HOME/.hermes/hermes-agent\"; fi; " +
+                "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | " +
+                "bash -s -- --skip-setup --non-interactive --skip-browser --skip-computer-use; " +
                 "test -x $HERMES_GUEST_PATH",
             displayCommand = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
             fraction = fraction,
