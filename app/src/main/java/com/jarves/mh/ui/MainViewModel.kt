@@ -408,6 +408,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preferences.saveProjects(cleanedProjects)
             _state.update { it.copy(projects = cleanedProjects) }
         }
+        // Runtime setup snapshot and Claude events — collected here alongside the other
+        // agent event streams so all collectors live in one init block.
+        viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
+        viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
+        viewModelScope.launch { bootstrap() }
     }
 
     val state: StateFlow<AppUiState> = _state.asStateFlow()
@@ -982,12 +987,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         claudeRuntime.configureProjectRoot(projectId, rootPath)
         dshRuntime.configureProjectRoot(projectId, rootPath)
         antigravityRuntime.configureProjectRoot(projectId, rootPath)
-    }
-
-    init {
-        viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
-        viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
-        viewModelScope.launch { bootstrap() }
     }
 
     private suspend fun bootstrap() {

@@ -390,6 +390,9 @@ class AntigravityRuntimeBridge(
         if (activeSessionId == sessionId) {
             userStopRequested = true
             activeProcess?.destroy()
+            delay(500)
+            if (activeProcess?.isAlive == true) activeProcess?.destroyForcibly()
+            runCatching { installer.killGuestOrphans() }
             emitFailure(sessionId, "Stopped by user")
         }
     }
