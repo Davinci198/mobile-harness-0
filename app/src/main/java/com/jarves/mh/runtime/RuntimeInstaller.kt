@@ -491,7 +491,8 @@ class RuntimeInstaller(private val context: Context) {
         runGuestCommand(
             proot = proot,
             command = "set -e; export HOME=/root; export OPENCODE_DISABLE_AUTOUPDATE=1; " +
-                "curl -fsSL https://opencode.ai/v2/install | bash; test -x \"${'$'}OPENCODE_GUEST_PATH\"",
+                "curl -fsSL https://opencode.ai/v2/install | bash || true; " +
+                "test -x $OPENCODE_GUEST_PATH",
             displayCommand = "curl -fsSL https://opencode.ai/v2/install | bash",
             fraction = fraction,
             timeoutMs = 10 * 60 * 1_000L,
@@ -531,8 +532,8 @@ class RuntimeInstaller(private val context: Context) {
             proot = proot,
             command = "set -e; export HOME=/root; export UV_LINK_MODE=copy; " +
                 "command -v python3 >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv curl); " +
-                "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --non-interactive; " +
-                "test -x \"${'$'}HERMES_GUEST_PATH\"",
+                "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --non-interactive || true; " +
+                "test -x $HERMES_GUEST_PATH",
             displayCommand = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
             fraction = fraction,
             timeoutMs = 20 * 60 * 1_000L,
