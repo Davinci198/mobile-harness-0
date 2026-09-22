@@ -59,6 +59,11 @@ internal class OpenCodeRuntimeBridge(
         val environment = linkedMapOf<String, String>(
             "HOME" to "/root",
             "OPENCODE_DISABLE_AUTOUPDATE" to "1",
+            // models.dev / models.opencode.ai fetches hang for minutes when guest
+            // DNS is dead (app backgrounded) and can stall `opencode run` until
+            // the process is killed with zero stdout. The bundled catalog already
+            // resolves nvidia/* models offline.
+            "OPENCODE_DISABLE_MODELS_FETCH" to "true",
         )
         val kind = provider.kind
         if (kind == ProviderKind.FREE || secret.isNullOrBlank()) return environment

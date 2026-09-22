@@ -1840,7 +1840,7 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
      * never touched.
      */
     fun killGuestOrphans() {
-        val markers = listOf("libproot.so", OPENCODE_GUEST_PATH, HERMES_GUEST_PATH, CLAUDE_GUEST_PATH, "hermes-agent")
+        val markers = listOf("libproot.so", OPENCODE_GUEST_PATH, HERMES_GUEST_PATH, CLAUDE_GUEST_PATH, "hermes-agent", "opencode serve")
         val mine = android.os.Process.myPid()
         val candidates = File("/proc").listFiles { file -> file.name.toIntOrNull() != null } ?: return
         for (dir in candidates) {
@@ -1858,6 +1858,27 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
                     android.os.Process.killProcess(pid)
                 }
             }
+        }
+        clearStaleOpencodeServiceRegistration()
+    }
+
+    /**
+     * `opencode run --standalone` registers a managed service in
+     * `~/.local/state/opencode/service.json`. If that process is later killed
+     * without deregistering, the next run tries to talk to the dead pid and
+     * exits with zero stdout (empty runtime-output log). Drop the registration
+     * whenever the recorded pid is gone.
+     */
+    private fun clearStaleOpencodeServiceRegistration() {
+        val serviceState = File(rootfs, "root/.local/state/opencode/service.json")
+        if (!serviceState.isFile) return
+        runCatching {
+            val json = JSONObject(serviceState.readText())
+            val pid = json.optInt("pid", -1)
+            if (pid > 0 && File("/proc/$pid").exists()) return
+            serviceState.delete()
+        }.onFailure {
+            runCatching { serviceState.delete() }
         }
     }
 
