@@ -23,6 +23,7 @@ internal class HermesRuntimeBridge(
         provider: ProviderProfile,
         secret: String?,
         guestWorkspacePath: String,
+        gatewayUrl: String?,
     ): List<String> = buildList {
         add(guestExecutable)
         add("chat")
@@ -43,10 +44,19 @@ internal class HermesRuntimeBridge(
         add(prompt)
     }
 
-    override fun environmentFor(provider: ProviderProfile, secret: String?): Map<String, String> {
+    override fun environmentFor(
+        provider: ProviderProfile,
+        secret: String?,
+        gatewayUrl: String?,
+    ): Map<String, String> {
         val environment = linkedMapOf<String, String>("HOME" to "/root")
         val kind = provider.kind
         if (kind == ProviderKind.FREE || secret.isNullOrBlank()) return environment
+        if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
+            environment["OPENAI_API_KEY"] = secret
+            environment["OPENAI_BASE_URL"] = gatewayUrl
+            return environment
+        }
         when (kind) {
             ProviderKind.DEEPSEEK -> environment["DEEPSEEK_API_KEY"] = secret
             ProviderKind.ANTHROPIC -> {

@@ -27,6 +27,7 @@ internal class OpenCodeRuntimeBridge(
         provider: ProviderProfile,
         secret: String?,
         guestWorkspacePath: String,
+        gatewayUrl: String?,
     ): List<String> = buildList {
         add(guestExecutable)
         add("run")
@@ -34,7 +35,7 @@ internal class OpenCodeRuntimeBridge(
         add("--format")
         add("json")
         add("--auto")
-        val prefix = opencodeModelPrefix(provider.kind)
+        val prefix = if (gatewayUrl != null) "openai" else opencodeModelPrefix(provider.kind)
         val model = provider.model.ifBlank { provider.kind.defaultModel }
         if (model.isNotBlank()) {
             add("--model")
@@ -43,13 +44,22 @@ internal class OpenCodeRuntimeBridge(
         add(prompt)
     }
 
-    override fun environmentFor(provider: ProviderProfile, secret: String?): Map<String, String> {
+    override fun environmentFor(
+        provider: ProviderProfile,
+        secret: String?,
+        gatewayUrl: String?,
+    ): Map<String, String> {
         val environment = linkedMapOf<String, String>(
             "HOME" to "/root",
             "OPENCODE_DISABLE_AUTOUPDATE" to "1",
         )
         val kind = provider.kind
         if (kind == ProviderKind.FREE || secret.isNullOrBlank()) return environment
+        if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
+            environment["OPENAI_API_KEY"] = secret
+            environment["OPENAI_BASE_URL"] = gatewayUrl
+            return environment
+        }
         when (kind) {
             ProviderKind.DEEPSEEK -> environment["DEEPSEEK_API_KEY"] = secret
             ProviderKind.ANTHROPIC -> {
