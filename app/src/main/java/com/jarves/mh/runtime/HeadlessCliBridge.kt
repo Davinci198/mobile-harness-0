@@ -65,10 +65,15 @@ internal abstract class HeadlessCliBridge(
         provider: ProviderProfile,
         secret: String?,
         guestWorkspacePath: String,
+        gatewayUrl: String?,
     ): List<String>
 
     /** Process environment carrying the provider credentials for the guest. */
-    protected abstract fun environmentFor(provider: ProviderProfile, secret: String?): Map<String, String>
+    protected abstract fun environmentFor(
+        provider: ProviderProfile,
+        secret: String?,
+        gatewayUrl: String?,
+    ): Map<String, String>
 
     /**
      * Maps one JSONL line to bridge events. Returns [CliParsed.IGNORED] for
@@ -113,6 +118,7 @@ internal abstract class HeadlessCliBridge(
             return@withContext sessionId
         }
 
+        var openAiProxy: LocalOpenAiProxy? = null
         runCatching {
             RuntimeTaskController.stopAction = {
                 userStopRequested = true
@@ -133,18 +139,28 @@ internal abstract class HeadlessCliBridge(
             // Leftovers from a previous killed session (orphaned guest children
             // like `opencode serve`) can block the new run at startup.
             runCatching { installer.killGuestOrphans() }
+            // OpenAI-compatible providers are reached through a loopback proxy so
+            // the TLS call to the provider lives in the app process and survives
+            // guest network suspension when the app loses focus.
+            openAiProxy = if (secret.isNotBlank() && provider.routesThroughOpenAiProxy()) {
+                runCatching { LocalOpenAiProxy(provider, secret).start() }
+                    .onFailure { Log.w("HeadlessBridge", "Could not start local OpenAI proxy", it) }
+                    .getOrNull()
+            } else null
+            val gatewayUrl = openAiProxy?.url
+            Log.d("HeadlessBridge", "Local OpenAI proxy: ${gatewayUrl ?: "disabled"}")
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
             val guestWorkspacePath = "/workspace/$projectSlug"
             val contextPrompt = buildContextPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind)
-            val command = commandFor(contextPrompt, provider, secret, guestWorkspacePath)
+            val command = commandFor(contextPrompt, provider, secret, guestWorkspacePath, gatewayUrl)
             Log.d("HeadlessBridge", "${kind.title} command: $command")
             val process = installer.process(
                 installed.proot,
                 installed.rootfs,
                 workspace,
-                environmentFor(provider, secret),
+                environmentFor(provider, secret, gatewayUrl),
                 command,
                 guestWorkspacePath = guestWorkspacePath,
                 emulateHardLinks = false,
@@ -190,6 +206,7 @@ internal abstract class HeadlessCliBridge(
                 finishForegroundRuntime(completed = false, projectName = projectSlug, detail = message)
             }
         }
+        runCatching { openAiProxy?.close() }
         activeProcess = null
         activeSessionId = null
         RuntimeTaskController.stopAction = null
