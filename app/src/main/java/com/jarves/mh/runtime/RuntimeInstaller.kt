@@ -479,6 +479,7 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         val opencode = File(rootfs, OPENCODE_GUEST_PATH.removePrefix("/"))
         if (opencode.canExecute()) {
+            ensureOpencodeWrapper()
             opencodeMarker.writeText(readGuestVersion(proot, "$OPENCODE_GUEST_PATH --version"))
             return
         }
@@ -493,9 +494,19 @@ class RuntimeInstaller(private val context: Context) {
             failureMessage = "OpenCode installation failed",
             emulateHardLinks = false,
         )
+        ensureOpencodeWrapper()
         val version = readGuestVersion(proot, "$OPENCODE_GUEST_PATH --version")
         opencodeMarker.writeText(version)
         verifyGuest(proot, "$OPENCODE_GUEST_PATH --version", "OpenCode installation verification failed")
+    }
+
+    private fun ensureOpencodeWrapper() {
+        val wrapper = File(rootfs, OPENCODE2_GUEST_PATH.removePrefix("/"))
+        if (wrapper.parentFile?.isDirectory != true) return
+        val expected = "#!/bin/sh\nexec \"\$(dirname \"\$0\")/opencode\" \"\$@\""
+        if (wrapper.readTextOrNull() == expected && wrapper.canExecute()) return
+        wrapper.writeText(expected + "\n")
+        Os.chmod(wrapper.absolutePath, 0b111101101)
     }
 
     private suspend fun ensureHermesInstalled(
@@ -2077,6 +2088,7 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
         const val OPENCODE_GUEST_PATH = "/root/.opencode/bin/opencode"
+        const val OPENCODE2_GUEST_PATH = "/root/.opencode/bin/opencode2"
         const val HERMES_GUEST_PATH = "/usr/local/bin/hermes"
         private const val AGY_VERSION = "1.1.27"
         private const val AGY_RELEASE_URL = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz"
