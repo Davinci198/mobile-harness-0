@@ -532,6 +532,9 @@ class RuntimeInstaller(private val context: Context) {
             proot = proot,
             command = "set -euo pipefail; export HOME=/root; export UV_LINK_MODE=copy; " +
                 "export DEBIAN_FRONTEND=noninteractive; " +
+                "rm -f /var/lib/apt/lists/lock /var/lib/apt/lists/partial/.lock " +
+                "/var/cache/apt/archives/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null || true; " +
+                "dpkg --configure -a || true; " +
                 "apt-get update -qq && apt-get install -y -qq " +
                 "python3 python3-pip python3-venv curl git build-essential python3-dev libffi-dev; " +
                 "if [ -d /usr/local/lib/hermes-agent ] && [ ! -d /usr/local/lib/hermes-agent/.git ]; then rm -rf /usr/local/lib/hermes-agent; fi; " +
@@ -544,7 +547,7 @@ class RuntimeInstaller(private val context: Context) {
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
             failureMessage = "Hermes installation failed",
-            emulateHardLinks = false,
+            emulateHardLinks = true,
         )
         ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
         val version = readGuestVersion(proot, "$HERMES_GUEST_PATH --version")
