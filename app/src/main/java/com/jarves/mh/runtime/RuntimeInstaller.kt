@@ -241,6 +241,11 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("${agent.title} is ready", 1f))
     }
 
+    fun ensureAgentWrappers() {
+        ensureShWrapper(OPENCODE_GUEST_PATH, OPENCODE2_GUEST_PATH)
+        ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
+    }
+
     fun isAgentInstalled(agent: com.jarves.mh.model.AgentKind): Boolean {
         return when (agent) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> {
@@ -479,13 +484,15 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         val opencode = File(rootfs, OPENCODE_GUEST_PATH.removePrefix("/"))
         if (opencode.canExecute()) {
+            ensureShWrapper(OPENCODE_GUEST_PATH, OPENCODE2_GUEST_PATH)
             opencodeMarker.writeText(readGuestVersion(proot, "$OPENCODE_GUEST_PATH --version"))
             return
         }
         runGuestCommand(
             proot = proot,
             command = "set -e; export HOME=/root; export OPENCODE_DISABLE_AUTOUPDATE=1; " +
-                "curl -fsSL https://opencode.ai/v2/install | bash; test -x \"${'$'}OPENCODE_GUEST_PATH\"",
+                "curl -fsSL https://opencode.ai/v2/install | bash || true; " +
+                "test -x $OPENCODE_GUEST_PATH",
             displayCommand = "curl -fsSL https://opencode.ai/v2/install | bash",
             fraction = fraction,
             timeoutMs = 10 * 60 * 1_000L,
@@ -493,9 +500,21 @@ class RuntimeInstaller(private val context: Context) {
             failureMessage = "OpenCode installation failed",
             emulateHardLinks = false,
         )
+        ensureShWrapper(OPENCODE_GUEST_PATH, OPENCODE2_GUEST_PATH)
         val version = readGuestVersion(proot, "$OPENCODE_GUEST_PATH --version")
         opencodeMarker.writeText(version)
         verifyGuest(proot, "$OPENCODE_GUEST_PATH --version", "OpenCode installation verification failed")
+    }
+
+    private fun ensureShWrapper(binaryGuestPath: String, wrapperGuestPath: String) {
+        val binary = File(rootfs, binaryGuestPath.removePrefix("/"))
+        if (!binary.canExecute()) return
+        val wrapper = File(rootfs, wrapperGuestPath.removePrefix("/"))
+        val expected = "#!/bin/sh\nexec \"\$(dirname \"\$0\")/${binaryGuestPath.substringAfterLast('/')}\" \"\$@\""
+        if (wrapper.readTextOrNull() == expected && wrapper.canExecute()) return
+        wrapper.parentFile?.mkdirs()
+        wrapper.writeText(expected + "\n")
+        Os.chmod(wrapper.absolutePath, 0b111101101)
     }
 
     private suspend fun ensureHermesInstalled(
@@ -505,22 +524,32 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         val hermes = File(rootfs, HERMES_GUEST_PATH.removePrefix("/"))
         if (hermes.canExecute()) {
+            ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
             hermesMarker.writeText(readGuestVersion(proot, "$HERMES_GUEST_PATH --version"))
             return
         }
         runGuestCommand(
             proot = proot,
-            command = "set -e; export HOME=/root; export UV_LINK_MODE=copy; " +
-                "command -v python3 >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv curl); " +
-                "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --non-interactive; " +
-                "test -x \"${'$'}HERMES_GUEST_PATH\"",
+            command = "set -euo pipefail; export HOME=/root; export UV_LINK_MODE=copy; " +
+                "export DEBIAN_FRONTEND=noninteractive; " +
+                "rm -f /var/lib/apt/lists/lock /var/lib/apt/lists/partial/.lock " +
+                "/var/cache/apt/archives/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null || true; " +
+                "dpkg --configure -a || true; " +
+                "apt-get update -qq && apt-get install -y -qq " +
+                "python3 python3-pip python3-venv curl git build-essential python3-dev libffi-dev; " +
+                "if [ -d /usr/local/lib/hermes-agent ] && [ ! -d /usr/local/lib/hermes-agent/.git ]; then rm -rf /usr/local/lib/hermes-agent; fi; " +
+                "if [ -d \"\$HOME/.hermes/hermes-agent\" ] && [ ! -d \"\$HOME/.hermes/hermes-agent/.git\" ]; then rm -rf \"\$HOME/.hermes/hermes-agent\"; fi; " +
+                "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | " +
+                "bash -s -- --skip-setup --non-interactive --skip-browser --skip-computer-use; " +
+                "test -x $HERMES_GUEST_PATH",
             displayCommand = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
             fraction = fraction,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
             failureMessage = "Hermes installation failed",
-            emulateHardLinks = false,
+            emulateHardLinks = true,
         )
+        ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
         val version = readGuestVersion(proot, "$HERMES_GUEST_PATH --version")
         hermesMarker.writeText(version)
         verifyGuest(proot, "$HERMES_GUEST_PATH --version", "Hermes installation verification failed")
@@ -1819,7 +1848,7 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
      * never touched.
      */
     fun killGuestOrphans() {
-        val markers = listOf("libproot.so", OPENCODE_GUEST_PATH, HERMES_GUEST_PATH, CLAUDE_GUEST_PATH, "hermes-agent")
+        val markers = listOf("libproot.so", OPENCODE_GUEST_PATH, HERMES_GUEST_PATH, CLAUDE_GUEST_PATH, "hermes-agent", "opencode serve")
         val mine = android.os.Process.myPid()
         val candidates = File("/proc").listFiles { file -> file.name.toIntOrNull() != null } ?: return
         for (dir in candidates) {
@@ -1837,6 +1866,27 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
                     android.os.Process.killProcess(pid)
                 }
             }
+        }
+        clearStaleOpencodeServiceRegistration()
+    }
+
+    /**
+     * `opencode run --standalone` registers a managed service in
+     * `~/.local/state/opencode/service.json`. If that process is later killed
+     * without deregistering, the next run tries to talk to the dead pid and
+     * exits with zero stdout (empty runtime-output log). Drop the registration
+     * whenever the recorded pid is gone.
+     */
+    private fun clearStaleOpencodeServiceRegistration() {
+        val serviceState = File(rootfs, "root/.local/state/opencode/service.json")
+        if (!serviceState.isFile) return
+        runCatching {
+            val json = JSONObject(serviceState.readText())
+            val pid = json.optInt("pid", -1)
+            if (pid > 0 && File("/proc/$pid").exists()) return
+            serviceState.delete()
+        }.onFailure {
+            runCatching { serviceState.delete() }
         }
     }
 
@@ -2077,7 +2127,9 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
         const val OPENCODE_GUEST_PATH = "/root/.opencode/bin/opencode"
+        const val OPENCODE2_GUEST_PATH = "/root/.opencode/bin/opencode2"
         const val HERMES_GUEST_PATH = "/usr/local/bin/hermes"
+        const val HERMES2_GUEST_PATH = "/usr/local/bin/hermes2"
         private const val AGY_VERSION = "1.1.27"
         private const val AGY_RELEASE_URL = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz"
         private const val AGY_RELEASE_SHA512 = "ed45f6930785aa4b42f14e07ace1c9d91a94fb76e760f54acbd7d3d3951e1f957fd456a0dae2a3124dd9a3b689bf7afb7c9303a3e4ba95037fc10063424d9bf9"

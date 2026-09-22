@@ -1012,7 +1012,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Upgrades from the old single-bundle layout keep every already-installed tool.
             installer.migrateLegacyToolMarkers()
             installer.isInstalled().also { ready ->
-                if (ready) installer.cleanupLegacyWorkspaceScaffolding()
+                if (ready) {
+                    installer.cleanupLegacyWorkspaceScaffolding()
+                    installer.ensureAgentWrappers()
+                }
             }
         }
         _state.update { current ->

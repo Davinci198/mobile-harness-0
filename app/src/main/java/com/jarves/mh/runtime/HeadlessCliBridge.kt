@@ -136,6 +136,7 @@ internal abstract class HeadlessCliBridge(
             check(installer.isAgentInstalled(kind)) {
                 "${kind.title} is not installed. Open Settings → Coding agent to install it."
             }
+            runCatching { installer.ensureAgentWrappers() }
             // Leftovers from a previous killed session (orphaned guest children
             // like `opencode serve`) can block the new run at startup.
             runCatching { installer.killGuestOrphans() }
@@ -189,11 +190,17 @@ internal abstract class HeadlessCliBridge(
             } else {
                 if (userStopRequested) throw CliSessionException("Stopped by user")
                 error(
-                    result.failed ?: if (exit != 0) {
-                        "${kind.title} was terminated early (exit $exit). The phone suspends guest processes when the app leaves the screen; keep mobile-harness in the foreground and retry."
-                    } else {
-                        "${kind.title} stopped with exit code $exit"
-                    },
+                    result.failed
+                        ?: if (!result.sawAnyOutput) {
+                            // HarnessRouter-style: opencode can exit non-zero (or be killed)
+                            // before emitting any event; never leave the trace blank.
+                            "${kind.title} exited $exit without reporting an error (empty output). " +
+                                "A stale managed service or dead models fetch usually causes this; retry with the app in the foreground."
+                        } else if (exit != 0) {
+                            "${kind.title} was terminated early (exit $exit). The phone suspends guest processes when the app leaves the screen; keep mobile-harness in the foreground and retry."
+                        } else {
+                            "${kind.title} stopped with exit code $exit"
+                        },
                 )
             }
         }.onFailure { error ->
@@ -220,6 +227,7 @@ internal abstract class HeadlessCliBridge(
         val pendingOutput = StringBuilder()
         var lastBlockId = 0L
         var failed: String? = null
+        var sawAnyOutput = false
         while (process.isAlive || nativeProcess.outputFile.length() > outputOffset) {
             val available = nativeProcess.outputFile.length() - outputOffset
             if (available <= 0) {
@@ -233,6 +241,7 @@ internal abstract class HeadlessCliBridge(
             }
             if (count <= 0) continue
             outputOffset += count
+            sawAnyOutput = true
             pendingOutput.append(bytes.decodeToString(0, count))
             var newline = pendingOutput.indexOf("\n")
             while (newline >= 0) {
@@ -271,7 +280,7 @@ internal abstract class HeadlessCliBridge(
                 newline = pendingOutput.indexOf("\n")
             }
         }
-        return CliRunResult(failed = failed)
+        return CliRunResult(failed = failed, sawAnyOutput = sawAnyOutput)
     }
 
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
@@ -574,7 +583,7 @@ internal abstract class HeadlessCliBridge(
     }
 }
 
-private data class CliRunResult(val failed: String?)
+private data class CliRunResult(val failed: String?, val sawAnyOutput: Boolean = false)
 
 /** Result of classifying a single JSONL line; [IGNORED] skips the line. */
 internal sealed interface CliParsed {

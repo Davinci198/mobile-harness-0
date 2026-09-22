@@ -35,11 +35,20 @@ internal class OpenCodeRuntimeBridge(
         add("--format")
         add("json")
         add("--auto")
-        val prefix = if (gatewayUrl != null) "openai" else opencodeModelPrefix(provider.kind)
+        // Emit reasoning parts; without this the JSONL stream has no thinking blocks.
+        add("--thinking")
+        // NVIDIA's catalog id already embeds `openai/…`; force the `nvidia`
+        // namespace so gateway sessions resolve `nvidia/openai/gpt-oss-20b`
+        // instead of the non-existent `openai/gpt-oss-20b` route.
+        val prefix = when {
+            provider.kind == ProviderKind.NVIDIA_NIM -> "nvidia"
+            gatewayUrl != null -> "openai"
+            else -> opencodeModelPrefix(provider.kind)
+        }
         val model = provider.model.ifBlank { provider.kind.defaultModel }
         if (model.isNotBlank()) {
             add("--model")
-            add(if (prefix != null && !provider.model.startsWith("$prefix/")) "$prefix/$model" else model)
+            add(if (prefix != null && !model.startsWith("$prefix/")) "$prefix/$model" else model)
         }
         add(prompt)
     }
@@ -52,12 +61,38 @@ internal class OpenCodeRuntimeBridge(
         val environment = linkedMapOf<String, String>(
             "HOME" to "/root",
             "OPENCODE_DISABLE_AUTOUPDATE" to "1",
+            // models.dev / models.opencode.ai fetches hang for minutes when guest
+            // DNS is dead (app backgrounded) and can stall `opencode run` until
+            // the process is killed with zero stdout. The bundled catalog already
+            // resolves nvidia/* models offline.
+            "OPENCODE_DISABLE_MODELS_FETCH" to "true",
         )
         val kind = provider.kind
         if (kind == ProviderKind.FREE || secret.isNullOrBlank()) return environment
         if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
-            environment["OPENAI_API_KEY"] = secret
-            environment["OPENAI_BASE_URL"] = gatewayUrl
+            when (kind) {
+                ProviderKind.NVIDIA_NIM -> {
+                    environment["NVIDIA_API_KEY"] = secret
+                    environment["NIM_API_KEY"] = secret
+                    // Full offline config (HarnessRouter pattern): pin npm package,
+                    // baseURL, env-resolved key, the one model for this turn, and
+                    // disable workspace snapshots. Catalog fetch is already off above,
+                    // so the explicit `models` map is what `--model nvidia/…` resolves.
+                    val modelId = provider.model.ifBlank { provider.kind.defaultModel }
+                        .removePrefix("nvidia/")
+                    environment["OPENCODE_CONFIG_CONTENT"] = buildString {
+                        append("""{"${'$'}schema":"https://opencode.ai/config.json","snapshot":false,""")
+                        append(""""provider":{"nvidia":{""")
+                        append(""""npm":"@ai-sdk/openai-compatible",""")
+                        append(""""options":{"baseURL":"$gatewayUrl","apiKey":"{env:NVIDIA_API_KEY}"},""")
+                        append(""""models":{"$modelId":{}}}}}""")
+                    }
+                }
+                else -> {
+                    environment["OPENAI_API_KEY"] = secret
+                    environment["OPENAI_BASE_URL"] = gatewayUrl
+                }
+            }
             return environment
         }
         when (kind) {
@@ -77,6 +112,18 @@ internal class OpenCodeRuntimeBridge(
             ProviderKind.NVIDIA_NIM -> {
                 environment["NIM_API_KEY"] = secret
                 environment["NVIDIA_API_KEY"] = secret
+                // Direct (no proxy): still pin the model + baseURL offline so a
+                // disabled catalog fetch cannot leave `--model nvidia/…` unresolved.
+                val modelId = provider.model.ifBlank { provider.kind.defaultModel }
+                    .removePrefix("nvidia/")
+                val base = provider.resolvedBaseUrl.ifBlank { "https://integrate.api.nvidia.com/v1" }
+                environment["OPENCODE_CONFIG_CONTENT"] = buildString {
+                    append("""{"${'$'}schema":"https://opencode.ai/config.json","snapshot":false,""")
+                    append(""""provider":{"nvidia":{""")
+                    append(""""npm":"@ai-sdk/openai-compatible",""")
+                    append(""""options":{"baseURL":"$base","apiKey":"{env:NVIDIA_API_KEY}"},""")
+                    append(""""models":{"$modelId":{}}}}}""")
+                }
             }
             ProviderKind.CUSTOM -> {
                 val api = provider.dshApi.ifBlank { "anthropic-messages" }
