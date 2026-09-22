@@ -136,6 +136,7 @@ internal abstract class HeadlessCliBridge(
             check(installer.isAgentInstalled(kind)) {
                 "${kind.title} is not installed. Open Settings → Coding agent to install it."
             }
+            runCatching { installer.ensureAgentWrappers() }
             // Leftovers from a previous killed session (orphaned guest children
             // like `opencode serve`) can block the new run at startup.
             runCatching { installer.killGuestOrphans() }

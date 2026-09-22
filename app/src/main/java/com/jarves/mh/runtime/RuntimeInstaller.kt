@@ -241,6 +241,11 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("${agent.title} is ready", 1f))
     }
 
+    fun ensureAgentWrappers() {
+        ensureShWrapper(OPENCODE_GUEST_PATH, OPENCODE2_GUEST_PATH)
+        ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
+    }
+
     fun isAgentInstalled(agent: com.jarves.mh.model.AgentKind): Boolean {
         return when (agent) {
             com.jarves.mh.model.AgentKind.CLAUDE_CODE -> {
@@ -501,11 +506,12 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     private fun ensureShWrapper(binaryGuestPath: String, wrapperGuestPath: String) {
+        val binary = File(rootfs, binaryGuestPath.removePrefix("/"))
+        if (!binary.canExecute()) return
         val wrapper = File(rootfs, wrapperGuestPath.removePrefix("/"))
-        if (wrapper.parentFile?.isDirectory != true) return
-        val name = binaryGuestPath.substringAfterLast('/')
-        val expected = "#!/bin/sh\nexec \"\$(dirname \"\$0\")/$name\" \"\$@\""
+        val expected = "#!/bin/sh\nexec \"\$(dirname \"\$0\")/${binaryGuestPath.substringAfterLast('/')}\" \"\$@\""
         if (wrapper.readTextOrNull() == expected && wrapper.canExecute()) return
+        wrapper.parentFile?.mkdirs()
         wrapper.writeText(expected + "\n")
         Os.chmod(wrapper.absolutePath, 0b111101101)
     }
