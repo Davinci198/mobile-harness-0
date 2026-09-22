@@ -2,7 +2,16 @@ name: dany-debug-apk
 
 on:
   push:
-    branches: [main, 'dany/**']
+    branches:
+      - main
+      - 'dany/**'
+      - 'fix/**'
+      - 'feat/**'
+      - 'ci/**'
+      - 'refactor/**'
+      - 'test/**'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:

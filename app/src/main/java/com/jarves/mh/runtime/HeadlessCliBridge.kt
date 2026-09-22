@@ -130,6 +130,9 @@ internal abstract class HeadlessCliBridge(
             check(installer.isAgentInstalled(kind)) {
                 "${kind.title} is not installed. Open Settings → Coding agent to install it."
             }
+            // Leftovers from a previous killed session (orphaned guest children
+            // like `opencode serve`) can block the new run at startup.
+            runCatching { installer.killGuestOrphans() }
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
@@ -151,6 +154,7 @@ internal abstract class HeadlessCliBridge(
             val result = runCliSession(process, sessionId)
             val exit = process.waitFor()
             Log.d("HeadlessBridge", "${kind.title} process exited with code $exit")
+            if (exit != 0) runCatching { installer.killGuestOrphans() }
             val changed = checkpoints.changedFiles(workspace, before)
             if (changed.isNotEmpty()) {
                 checkpoints.saveChangedPaths(projectId, changed)
@@ -168,7 +172,13 @@ internal abstract class HeadlessCliBridge(
                 )
             } else {
                 if (userStopRequested) throw CliSessionException("Stopped by user")
-                error(result.failed ?: "${kind.title} stopped with exit code $exit")
+                error(
+                    result.failed ?: if (exit != 0) {
+                        "${kind.title} was terminated early (exit $exit). The phone suspends guest processes when the app leaves the screen; keep mobile-harness in the foreground and retry."
+                    } else {
+                        "${kind.title} stopped with exit code $exit"
+                    },
+                )
             }
         }.onFailure { error ->
             Log.e("HeadlessBridge", "Session failed", error)
@@ -212,9 +222,11 @@ internal abstract class HeadlessCliBridge(
                 val line = pendingOutput.substring(0, newline).trimEnd('\r')
                 pendingOutput.delete(0, newline + 1)
                 if (line.isNotBlank()) {
+                    var terminalSeen = false
                     when (val parsed = parseJsonlLine(line, sessionId)) {
                         is CliParsed.Events -> {
                             failed = parsed.failed ?: failed
+                            terminalSeen = parsed.terminal
                             parsed.events.forEach { event ->
                                 when (event) {
                                     is RuntimeEvent.ReasoningSummary -> emitReasoningSummary(
@@ -230,7 +242,12 @@ internal abstract class HeadlessCliBridge(
                         }
                         CliParsed.IGNORED -> Unit
                     }
-                    if (failed != null) {
+                    if (failed != null || terminalSeen) {
+                        // Either a reported failure or a final result envelope:
+                        // the agent already answered, so a still-live process only
+                        // means a stuck shutdown path (e.g. hermes crashing in its
+                        // cleanup). Tear it down; the drain loop above keeps
+                        // reading whatever is left in the capture file.
                         process.destroy()
                     }
                 }
@@ -250,6 +267,10 @@ internal abstract class HeadlessCliBridge(
             activeProcess?.destroy()
             delay(500)
             if (activeProcess?.isAlive == true) activeProcess?.destroyForcibly()
+            // A dead PRoot wrapper leaves guest children (bun/node/python) alive
+            // and reparented to init; a stale `opencode serve` then blocks every
+            // later headless run at startup. Sweep them with the next session.
+            runCatching { installer.killGuestOrphans() }
             emitFailureOnce(sessionId, "Stopped by user")
         }
     }
@@ -349,6 +370,13 @@ internal abstract class HeadlessCliBridge(
         val message = error.message.orEmpty()
         return when {
             error is CliSessionException -> message
+            message.contains("connection error", true) ||
+                message.contains("connection reset", true) ||
+                message.contains("getaddrinfo", true) ||
+                message.contains("etimeout", true) ||
+                message.contains("temporary failure in name resolution", true) ||
+                message.contains("network is unreachable", true) ->
+                "Network inside the runtime stopped responding (the phone suspends guest sockets when the app leaves the screen). Keep mobile-harness in the foreground and try again."
             message.contains("authentication", true) ||
                 message.contains("invalid api key", true) ||
                 message.contains("autherror", true) ||
@@ -537,6 +565,8 @@ internal sealed interface CliParsed {
     data class Events(
         val events: List<RuntimeEvent> = emptyList(),
         val failed: String? = null,
+        /** The CLI emitted its final envelope; the process can be torn down. */
+        val terminal: Boolean = false,
     ) : CliParsed
 }
 
@@ -550,8 +580,12 @@ internal object OpenCodeJsonlParser {
     fun parseLine(line: String, sessionId: String): CliParsed {
         val event = runCatching { JSONObject(line) }.getOrNull() ?: return CliParsed.IGNORED
         val type = event.optString("type")
-        if (type == "message.complete" || type == "session.idle" || type == "session.end") {
-            return CliParsed.Events(emptyList())
+        when (type) {
+            // Final envelopes of a one-shot run. The process can outlive them
+            // (Bun shutdown hangs), so they terminate the session immediately.
+            "message.complete", "session.end" -> return CliParsed.Events(terminal = true)
+            // Can fire between turns; not treated as the end of the run.
+            "session.idle" -> return CliParsed.Events(emptyList())
         }
         if (type == "error") {
             val error = event.optJSONObject("error")
@@ -623,6 +657,22 @@ internal object HermesJsonlParser {
         }
         if (type.contains("completed", true) || type.contains("done", true) || event.optBoolean("done")) {
             return CliParsed.Events(emptyList())
+        }
+        if (type == "result") {
+            // The CLI keeps running after the result envelope (its cleanup can
+            // crash on optional deps like nemo_relay), so the envelope itself is
+            // terminal: a non-zero exit surfaces as a failure and a zero exit
+            // completes the run — runCliSession then tears the process down
+            // instead of waiting forever for an exit that never comes.
+            val exitCode = event.optInt("exit_code", 0)
+            if (exitCode != 0) {
+                val reason = event.optString("error").ifBlank {
+                    "Hermes was interrupted before the provider answered (exit $exitCode). " +
+                        "This usually means the phone suspended guest networking — keep the app in the foreground and retry."
+                }
+                return CliParsed.Events(failed = reason, terminal = true)
+            }
+            return CliParsed.Events(terminal = true)
         }
         val part = event.optJSONObject("part")
         val partType = part?.optString("type").orEmpty()
