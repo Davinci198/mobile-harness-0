@@ -479,7 +479,7 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         val opencode = File(rootfs, OPENCODE_GUEST_PATH.removePrefix("/"))
         if (opencode.canExecute()) {
-            ensureOpencodeWrapper()
+            ensureShWrapper(OPENCODE_GUEST_PATH, OPENCODE2_GUEST_PATH)
             opencodeMarker.writeText(readGuestVersion(proot, "$OPENCODE_GUEST_PATH --version"))
             return
         }
@@ -494,16 +494,17 @@ class RuntimeInstaller(private val context: Context) {
             failureMessage = "OpenCode installation failed",
             emulateHardLinks = false,
         )
-        ensureOpencodeWrapper()
+        ensureShWrapper(OPENCODE_GUEST_PATH, OPENCODE2_GUEST_PATH)
         val version = readGuestVersion(proot, "$OPENCODE_GUEST_PATH --version")
         opencodeMarker.writeText(version)
         verifyGuest(proot, "$OPENCODE_GUEST_PATH --version", "OpenCode installation verification failed")
     }
 
-    private fun ensureOpencodeWrapper() {
-        val wrapper = File(rootfs, OPENCODE2_GUEST_PATH.removePrefix("/"))
+    private fun ensureShWrapper(binaryGuestPath: String, wrapperGuestPath: String) {
+        val wrapper = File(rootfs, wrapperGuestPath.removePrefix("/"))
         if (wrapper.parentFile?.isDirectory != true) return
-        val expected = "#!/bin/sh\nexec \"\$(dirname \"\$0\")/opencode\" \"\$@\""
+        val name = binaryGuestPath.substringAfterLast('/')
+        val expected = "#!/bin/sh\nexec \"\$(dirname \"\$0\")/$name\" \"\$@\""
         if (wrapper.readTextOrNull() == expected && wrapper.canExecute()) return
         wrapper.writeText(expected + "\n")
         Os.chmod(wrapper.absolutePath, 0b111101101)
@@ -516,6 +517,7 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         val hermes = File(rootfs, HERMES_GUEST_PATH.removePrefix("/"))
         if (hermes.canExecute()) {
+            ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
             hermesMarker.writeText(readGuestVersion(proot, "$HERMES_GUEST_PATH --version"))
             return
         }
@@ -532,6 +534,7 @@ class RuntimeInstaller(private val context: Context) {
             failureMessage = "Hermes installation failed",
             emulateHardLinks = false,
         )
+        ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
         val version = readGuestVersion(proot, "$HERMES_GUEST_PATH --version")
         hermesMarker.writeText(version)
         verifyGuest(proot, "$HERMES_GUEST_PATH --version", "Hermes installation verification failed")
@@ -2090,6 +2093,7 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
         const val OPENCODE_GUEST_PATH = "/root/.opencode/bin/opencode"
         const val OPENCODE2_GUEST_PATH = "/root/.opencode/bin/opencode2"
         const val HERMES_GUEST_PATH = "/usr/local/bin/hermes"
+        const val HERMES2_GUEST_PATH = "/usr/local/bin/hermes2"
         private const val AGY_VERSION = "1.1.27"
         private const val AGY_RELEASE_URL = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz"
         private const val AGY_RELEASE_SHA512 = "ed45f6930785aa4b42f14e07ace1c9d91a94fb76e760f54acbd7d3d3951e1f957fd456a0dae2a3124dd9a3b689bf7afb7c9303a3e4ba95037fc10063424d9bf9"
