@@ -15,7 +15,53 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
-data class DiscoveredModel(val id: String, val displayName: String = id, val isFree: Boolean = false)
+data class DiscoveredModel(
+    val id: String,
+    val displayName: String = id,
+    val isFree: Boolean = false,
+    /** Last measured probe latency in ms; null until a health scan runs. */
+    val latencyMs: Long? = null,
+    val httpCode: Int? = null,
+    /** [ModelHealthStatus] name from the last scan; null until scanned. */
+    val health: String? = null,
+) {
+    val isBroken: Boolean get() = health != null && health != ModelHealthStatus.OK.name
+
+    val latencyLabel: String?
+        get() = latencyMs?.let { "%.1fs".format(it / 1000.0) }
+}
+
+/** One endpoint's discovered models + scan health, kept until manually deleted or re-scanned. */
+data class EndpointModelCatalog(
+    val kindName: String,
+    val baseUrl: String,
+    val models: List<DiscoveredModel>,
+    val updatedAtMillis: Long = System.currentTimeMillis(),
+) {
+    val key: String get() = catalogKey(kindName, baseUrl)
+
+    fun matches(kindName: String, baseUrl: String): Boolean =
+        this.kindName == kindName && this.baseUrl.trim().trimEnd('/') == baseUrl.trim().trimEnd('/')
+
+    companion object {
+        fun catalogKey(kindName: String, baseUrl: String): String =
+            "$kindName|${baseUrl.trim().trimEnd('/')}"
+    }
+}
+
+/** Keep prior scan health for model IDs that still exist after a rediscovery. */
+fun mergeCatalogModels(
+    fresh: List<DiscoveredModel>,
+    previous: List<DiscoveredModel>,
+): List<DiscoveredModel> {
+    if (previous.isEmpty()) return fresh
+    val priorById = previous.associateBy(DiscoveredModel::id)
+    return fresh.map { model ->
+        val prior = priorById[model.id] ?: return@map model
+        if (prior.latencyMs == null && prior.health == null) model
+        else model.copy(latencyMs = prior.latencyMs, httpCode = prior.httpCode, health = prior.health)
+    }
+}
 
 enum class ModelHealthStatus { OK, FAIL, TIMEOUT, ERROR, INSUFFICIENT_CREDITS }
 
@@ -131,11 +177,13 @@ class ProviderApiClient {
         var last: ModelHealth = ModelHealth(modelId, ModelHealthStatus.ERROR, 0L, 0, "No endpoint")
         for (endpoint in endpoints) {
             var attempt = 0
+            var lastCode = 0
             while (true) {
                 attempt++
                 val started = System.currentTimeMillis()
                 val response = request(endpoint, "POST", apiKey, body, protocol, connectTimeoutMs = 12_000, readTimeoutMs = 30_000)
                 val elapsed = System.currentTimeMillis() - started
+                lastCode = response.code
                 last = healthFromResponse(modelId, response.code, response.body, response.error, elapsed)
                 // Retry 429 with exponential backoff (max 3 attempts)
                 if (response.code == 429 && attempt < 3) {
@@ -145,7 +193,7 @@ class ProviderApiClient {
                 }
                 break
             }
-            if (response.code != 404 && response.code != 0) return last
+            if (lastCode != 404 && lastCode != 0) return last
         }
         return last
     }
