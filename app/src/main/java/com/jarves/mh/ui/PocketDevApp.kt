@@ -212,6 +212,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
+import com.jarves.mh.network.EndpointModelCatalog
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.network.GitHubRepository
 import com.jarves.mh.ui.theme.PocketBlue
@@ -310,6 +311,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onboarding = true,
             agentKind = state.agentKind,
             initialStep = 1,
+            modelCatalogs = state.modelCatalogs,
             onSave = viewModel::finishOnboarding,
             onDiscover = viewModel::discoverModels,
             onValidate = viewModel::validateProvider,
@@ -2126,6 +2128,7 @@ private fun RootScreenHost(
                     onScanModels = viewModel::scanModels,
                     onHideBrokenChange = viewModel::setHideBrokenModels,
                     onAutoScanChange = viewModel::setAutoScanEnabled,
+                    onDeleteModelCatalog = viewModel::deleteModelCatalog,
                 )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,
@@ -2265,6 +2268,7 @@ private fun ProviderSetupScreen(
     agentKind: AgentKind = AgentKind.CLAUDE_CODE,
     initialStep: Int = if (onboarding) 0 else 1,
     onBack: (() -> Unit)? = null,
+    modelCatalogs: List<EndpointModelCatalog> = emptyList(),
     onSave: (ProviderProfile, String) -> Unit,
     onDiscover: suspend (ProviderProfile, String) -> ModelDiscoveryResult,
     onValidate: suspend (ProviderProfile, String, List<DiscoveredModel>) -> ConnectionValidation,
@@ -2355,6 +2359,7 @@ private fun ProviderSetupScreen(
                     model = model,
                     dshApi = dshApi,
                     apiKey = apiKey,
+                    modelCatalogs = modelCatalogs,
                     onBaseUrl = {
                         baseUrl = it
                         if (agentKind == AgentKind.DEEPSEEK_HARNESS && selected == ProviderKind.CUSTOM) {
@@ -2682,6 +2687,7 @@ private fun ProviderCredentialsStep(
     model: String,
     dshApi: String = "anthropic-messages",
     apiKey: String,
+    modelCatalogs: List<EndpointModelCatalog> = emptyList(),
     onBaseUrl: (String) -> Unit,
     onModel: (String) -> Unit,
     onDshApi: (String) -> Unit = {},
@@ -2693,7 +2699,12 @@ private fun ProviderCredentialsStep(
     onChangeAgent: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    var models by remember(baseUrl) { mutableStateOf(emptyList<DiscoveredModel>()) }
+    var models by remember(baseUrl, provider, modelCatalogs) {
+        val kindName = provider.name
+        val url = if (provider.fixedBaseUrl) provider.defaultBaseUrl else baseUrl
+        val catalog = modelCatalogs.find { it.matches(kindName, url) }
+        mutableStateOf(catalog?.models ?: emptyList())
+    }
     var isDiscovering by remember { mutableStateOf(false) }
     var isValidating by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -2804,8 +2815,19 @@ private fun ProviderCredentialsStep(
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
+                                        option.latencyLabel?.let { label ->
+                                            Text(
+                                                label,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = latencyColor(option),
+                                                modifier = Modifier.padding(end = 6.dp),
+                                            )
+                                        }
                                         Text(option.displayName, modifier = Modifier.weight(1f, fill = false), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         if (option.isFree) Text("  FREE", color = Color(0xFF58C99C), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        if (option.isBroken) Text("  BROKEN", color = MaterialTheme.colorScheme.error, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                     if (option.displayName != option.id) {
                                         Text(option.id, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -2868,7 +2890,7 @@ private fun ProviderCredentialsStep(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     OutlinedTextField(
                         baseUrl,
-                        { onBaseUrl(it); status = null; statusDetails = null; models = emptyList() },
+                        { onBaseUrl(it); status = null; statusDetails = null },
                         label = { Text("Base URL") },
                         supportingText = {
                             if (provider.fixedBaseUrl) Text("Fixed by ${provider.title}")

@@ -58,4 +58,49 @@ class ModelHealthTest {
         assertEquals("nvidia/nemotron-3-super-120b-a12b", body.getString("model"))
         assertTrue(body.getInt("max_tokens") in 1..32)
     }
+
+    @Test
+    fun mergeCatalogKeepsScanHealthForSurvivingModels() {
+        val previous = listOf(
+            DiscoveredModel("keep", "Keep", latencyMs = 800, httpCode = 200, health = "OK"),
+            DiscoveredModel("fail", "Fail", latencyMs = 12_000, httpCode = 404, health = "FAIL"),
+        )
+        val fresh = listOf(
+            DiscoveredModel("keep", "Keep Renamed"),
+            DiscoveredModel("new", "Brand New"),
+        )
+        val merged = mergeCatalogModels(fresh, previous)
+        assertEquals(2, merged.size)
+        val keep = merged.first { it.id == "keep" }
+        assertEquals(800L, keep.latencyMs)
+        assertEquals(200, keep.httpCode)
+        assertEquals("OK", keep.health)
+        assertFalse(merged.first { it.id == "new" }.isBroken)
+    }
+
+    @Test
+    fun mergeCatalogWithoutPreviousKeepsFreshModels() {
+        val fresh = listOf(DiscoveredModel("a"), DiscoveredModel("b"))
+        assertEquals(fresh, mergeCatalogModels(fresh, emptyList()))
+    }
+
+    @Test
+    fun endpointCatalogKeyNormalizesTrailingSlash() {
+        val catalog = EndpointModelCatalog(
+            kindName = "CUSTOM",
+            baseUrl = "https://api.example.com/v1/",
+            models = emptyList(),
+        )
+        assertEquals("CUSTOM|https://api.example.com/v1", catalog.key)
+        assertTrue(catalog.matches("CUSTOM", "https://api.example.com/v1"))
+        assertFalse(catalog.matches("OPENAI", "https://api.example.com/v1"))
+    }
+
+    @Test
+    fun discoveredModelIsBrokenOnlyWhenScannedAndNotOk() {
+        assertFalse(DiscoveredModel("a").isBroken)
+        assertFalse(DiscoveredModel("a", health = "OK").isBroken)
+        assertTrue(DiscoveredModel("a", health = "FAIL").isBroken)
+        assertEquals("0.8s", DiscoveredModel("a", latencyMs = 800).latencyLabel)
+    }
 }

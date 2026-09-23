@@ -247,6 +247,8 @@ data class AppUiState(
     val hideBrokenModels: Boolean = false,
     val autoScanEnabled: Boolean = true,
     val autoScanDone: Boolean = false,
+    /** Persisted endpoint→models catalogs for the active agent (manual delete only). */
+    val modelCatalogs: List<com.jarves.mh.network.EndpointModelCatalog> = emptyList(),
     val androidBuildRunning: Boolean = false,
     val androidBuildMessage: String? = null,
     val appUpdate: AppUpdateInfo? = null,
@@ -1330,8 +1332,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 hideBrokenModels = preferences.hideBrokenModels(agent),
                 autoScanEnabled = preferences.autoScanEnabled(agent),
                 autoScanDone = preferences.autoScanDone(agent),
+                modelCatalogs = preferences.loadModelCatalogs(agent),
             )
         }
+    }
+
+    fun deleteModelCatalog(key: String) {
+        val agent = _state.value.agentKind
+        preferences.deleteModelCatalog(agent, key)
+        _state.update { it.copy(modelCatalogs = preferences.loadModelCatalogs(agent)) }
     }
 
     /**
@@ -1407,11 +1416,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val okCount = results.size - broken.size
             preferences.setBrokenModels(agent, broken)
             preferences.setAutoScanDone(agent, true)
+            val healthById = results.associateBy(ModelHealth::modelId)
+            preferences.saveModelCatalog(
+                agent,
+                com.jarves.mh.network.EndpointModelCatalog(
+                    kindName = profile.kind.name,
+                    baseUrl = profile.baseUrl,
+                    models = catalog.map { m ->
+                        val h = healthById[m.id]
+                        if (h == null) m
+                        else m.copy(latencyMs = h.latencyMs, httpCode = h.httpCode, health = h.status.name)
+                    },
+                ),
+                keepHealth = false,
+            )
             _state.update {
                 it.copy(
                     isModelScanning = false,
                     brokenModelIds = broken,
                     autoScanDone = true,
+                    modelCatalogs = preferences.loadModelCatalogs(agent),
                     modelScanLines = it.modelScanLines +
                         "Done: $okCount/${results.size} work · ${broken.size} broken",
                 )
@@ -1887,7 +1911,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun discoverModels(profile: ProviderProfile, secret: String): ModelDiscoveryResult {
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
-        return providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, _state.value.agentKind))
+        val agent = _state.value.agentKind
+        val result = providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, agent))
+        if (result is ModelDiscoveryResult.Success) {
+            preferences.saveModelCatalog(
+                agent,
+                com.jarves.mh.network.EndpointModelCatalog(
+                    kindName = profile.kind.name,
+                    baseUrl = profile.baseUrl,
+                    models = result.models,
+                ),
+                keepHealth = true,
+            )
+            val catalogs = preferences.loadModelCatalogs(agent)
+            _state.update { it.copy(modelCatalogs = catalogs) }
+            val keyNorm = com.jarves.mh.network.EndpointModelCatalog.catalogKey(profile.kind.name, profile.baseUrl)
+            val stored = catalogs.find { it.key == keyNorm }?.models ?: result.models
+            return ModelDiscoveryResult.Success(stored, result.endpoint)
+        }
+        return result
     }
 
     suspend fun validateProvider(

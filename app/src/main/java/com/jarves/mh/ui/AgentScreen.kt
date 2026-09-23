@@ -38,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
@@ -106,6 +107,7 @@ import com.jarves.mh.model.inferredDshApiForUrl
 import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
+import com.jarves.mh.network.EndpointModelCatalog
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.ui.theme.PocketBlue
@@ -118,6 +120,15 @@ private data class KeyConnectionStatus(
     val providerMessage: String? = null,
     val label: String = if (successful == true) "Verified" else "Failed",
 )
+
+/** Latency badge color: green under 2s, yellow under 5s, red when broken or slower. */
+internal fun latencyColor(model: DiscoveredModel): Color = when {
+    model.isBroken -> Color(0xFFE53935)
+    model.latencyMs == null -> Color(0xFF9E9E9E)
+    model.latencyMs!! < 2_000 -> Color(0xFF58C99C)
+    model.latencyMs!! < 5_000 -> Color(0xFFF0B429)
+    else -> Color(0xFFE53935)
+}
 
 /** Formats Antigravity model identifiers into clean, human-friendly names. */
 internal fun formatAntigravityModelName(id: String): String = when (id) {
@@ -182,6 +193,7 @@ fun AgentScreen(
     onScanModels: (ProviderProfile, String, List<DiscoveredModel>) -> Unit = { _, _, _ -> },
     onHideBrokenChange: (Boolean) -> Unit = {},
     onAutoScanChange: (Boolean) -> Unit = {},
+    onDeleteModelCatalog: (String) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var selectedKind by rememberSaveable(state.provider.kind) { mutableStateOf(state.provider.kind) }
@@ -195,7 +207,12 @@ fun AgentScreen(
     var newKeyName by rememberSaveable(selectedKind) { mutableStateOf("") }
     var newApiKey by rememberSaveable(selectedKind) { mutableStateOf("") }
     var newKeyVisible by rememberSaveable(selectedKind, savedKeys.isEmpty()) { mutableStateOf(savedKeys.isEmpty()) }
-    var models by remember(selectedKind, baseUrl) { mutableStateOf(emptyList<DiscoveredModel>()) }
+    var models by remember(selectedKind, baseUrl, state.modelCatalogs) {
+        val kindName = selectedKind.name
+        val url = if (selectedKind.fixedBaseUrl) selectedKind.defaultBaseUrl else baseUrl
+        val catalog = state.modelCatalogs.find { it.matches(kindName, url) }
+        mutableStateOf(catalog?.models ?: emptyList())
+    }
     var modelSearch by rememberSaveable(selectedKind) { mutableStateOf("") }
     var showModels by rememberSaveable { mutableStateOf(false) }
     var isDiscovering by remember { mutableStateOf(false) }
@@ -221,10 +238,14 @@ fun AgentScreen(
     val providerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val antigravitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val filteredModels = remember(models, modelSearch, state.hideBrokenModels, state.brokenModelIds) {
+    val activeBrokenIds = remember(models, state.brokenModelIds) {
+        val fromModels = models.filter(DiscoveredModel::isBroken).map(DiscoveredModel::id).toSet()
+        if (fromModels.isNotEmpty()) fromModels else state.brokenModelIds
+    }
+    val filteredModels = remember(models, modelSearch, state.hideBrokenModels, activeBrokenIds) {
         var list = models
-        if (state.hideBrokenModels && state.brokenModelIds.isNotEmpty()) {
-            list = list.filterNot { it.id in state.brokenModelIds }
+        if (state.hideBrokenModels && activeBrokenIds.isNotEmpty()) {
+            list = list.filterNot { it.id in activeBrokenIds }
         }
         val q = modelSearch.trim()
         if (q.isBlank()) list else list.filter {
@@ -541,6 +562,51 @@ fun AgentScreen(
                     Spacer(Modifier.height(10.dp))
                 }
 
+                if (state.modelCatalogs.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Saved model lists",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    state.modelCatalogs.forEach { catalog ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "${catalog.kindName} · ${catalog.models.size} models",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                Text(
+                                    catalog.baseUrl,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            IconButton(
+                                onClick = { onDeleteModelCatalog(catalog.key) },
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete saved model list",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+
                 if (status != null) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -754,42 +820,53 @@ fun AgentScreen(
                                         modelSearch = ""
                                         showModels = false
                                     },
-                            ) {
-                                Row(
-                                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                option.displayName,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 14.sp,
-                                                color = if (isSelected) PocketOrange else MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            if (option.isFree) {
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("FREE", color = Color(0xFF58C99C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Row(
+                                        Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                option.latencyLabel?.let { label ->
+                                                    Text(
+                                                        label,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        color = latencyColor(option),
+                                                        modifier = Modifier.padding(end = 6.dp),
+                                                    )
+                                                }
+                                                Text(
+                                                    option.displayName,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 14.sp,
+                                                    color = if (isSelected) PocketOrange else MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                if (option.isFree) {
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("FREE", color = Color(0xFF58C99C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                                if (option.isBroken || option.id in activeBrokenIds) {
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("BROKEN", color = MaterialTheme.colorScheme.error, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
-                                            if (option.id in state.brokenModelIds) {
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("BROKEN", color = MaterialTheme.colorScheme.error, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            if (option.displayName != option.id) {
+                                                Text(
+                                                    option.id,
+                                                    fontSize = 11.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
                                             }
                                         }
-                                        if (option.displayName != option.id) {
-                                            Text(
-                                                option.id,
-                                                fontSize = 11.sp,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
+                                        AgentSelectionDot(selected = isSelected)
                                     }
-                                    AgentSelectionDot(selected = isSelected)
                                 }
                             }
                         }
@@ -797,7 +874,6 @@ fun AgentScreen(
                 }
             }
         }
-    }
 
     Scaffold(
         topBar = {
@@ -1060,7 +1136,6 @@ fun AgentScreen(
                             baseUrl = kind.defaultBaseUrl
                             model = kind.defaultModel
                             dshApi = defaultDshApiForProvider(kind)
-                            models = emptyList()
                             modelSearch = ""
                             showModels = false
                             newKeyName = ""
@@ -1073,7 +1148,6 @@ fun AgentScreen(
                             if (state.agentKind == AgentKind.DEEPSEEK_HARNESS && selectedKind == ProviderKind.CUSTOM) {
                                 dshApi = inferredDshApiForUrl(it)
                             }
-                            models = emptyList()
                             status = null
                             statusProviderMessage = null
                             keyConnectionStatuses = emptyMap()

@@ -122,7 +122,12 @@ private fun LegacySettingsScreen(
     var isValidating by remember { mutableStateOf(false) }
     var validationStatus by remember { mutableStateOf<String?>(null) }
     var validationOk by remember { mutableStateOf(false) }
-    var discoveredModels by remember(baseUrl) { mutableStateOf(emptyList<DiscoveredModel>()) }
+    var discoveredModels by remember(baseUrl, selectedKind, state.modelCatalogs) {
+        val kindName = selectedKind.name
+        val url = if (selectedKind.fixedBaseUrl) selectedKind.defaultBaseUrl else baseUrl
+        val catalog = state.modelCatalogs.find { it.matches(kindName, url) }
+        mutableStateOf(catalog?.models ?: emptyList<DiscoveredModel>())
+    }
     var terminalClearedMessage by remember { mutableStateOf(false) }
     var showChildProcessHelp by rememberSaveable { mutableStateOf(false) }
 

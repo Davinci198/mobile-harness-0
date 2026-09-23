@@ -12,6 +12,9 @@ import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.defaultDshApiForProvider
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.providersForAgent
+import com.jarves.mh.network.DiscoveredModel
+import com.jarves.mh.network.EndpointModelCatalog
+import com.jarves.mh.network.mergeCatalogModels
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -230,6 +233,99 @@ class AppPreferences(private val context: Context) {
         val arr = JSONArray()
         ids.sorted().forEach(arr::put)
         preferences.edit().putString("${providerPrefix(agent)}broken_models", arr.toString()).apply()
+    }
+
+    fun loadModelCatalogs(agent: AgentKind): List<EndpointModelCatalog> {
+        val raw = preferences.getString("${providerPrefix(agent)}model_catalogs", null) ?: return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { index ->
+                val obj = arr.optJSONObject(index) ?: return@mapNotNull null
+                val kind = obj.optString("kind").ifBlank { return@mapNotNull null }
+                val baseUrl = obj.optString("baseUrl")
+                val modelsArr = obj.optJSONArray("models") ?: JSONArray()
+                val models = (0 until modelsArr.length()).mapNotNull { m ->
+                    val mo = modelsArr.optJSONObject(m) ?: return@mapNotNull null
+                    val id = mo.optString("id").ifBlank { return@mapNotNull null }
+                    DiscoveredModel(
+                        id = id,
+                        displayName = mo.optString("displayName").ifBlank { id },
+                        isFree = mo.optBoolean("isFree", false),
+                        latencyMs = if (mo.has("latencyMs") && !mo.isNull("latencyMs")) mo.getLong("latencyMs") else null,
+                        httpCode = if (mo.has("httpCode") && !mo.isNull("httpCode")) mo.getInt("httpCode") else null,
+                        health = if (mo.has("health") && !mo.isNull("health")) mo.getString("health") else null,
+                    )
+                }
+                EndpointModelCatalog(
+                    kindName = kind,
+                    baseUrl = baseUrl,
+                    models = models,
+                    updatedAtMillis = obj.optLong("updatedAtMillis", 0L),
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * Upsert the catalog for this endpoint. Existing scan health for model IDs
+     * that still exist is preserved when [keepHealth] is true (rediscovery);
+     * a health scan passes keepHealth=false after writing new latency/status.
+     */
+    fun saveModelCatalog(
+        agent: AgentKind,
+        catalog: EndpointModelCatalog,
+        keepHealth: Boolean = true,
+    ) {
+        val existing = loadModelCatalogs(agent)
+        val previous = existing.find { it.key == catalog.key }?.models.orEmpty()
+        val models = if (keepHealth) mergeCatalogModels(catalog.models, previous) else catalog.models
+        val toStore = catalog.copy(models = models, updatedAtMillis = System.currentTimeMillis())
+        val arr = JSONArray()
+        (existing.filterNot { it.key == toStore.key } + toStore).forEach { c ->
+            arr.put(JSONObject().apply {
+                put("kind", c.kindName)
+                put("baseUrl", c.baseUrl)
+                put("updatedAtMillis", c.updatedAtMillis)
+                put("models", JSONArray().apply {
+                    c.models.forEach { m ->
+                        put(JSONObject().apply {
+                            put("id", m.id)
+                            put("displayName", m.displayName)
+                            put("isFree", m.isFree)
+                            if (m.latencyMs != null) put("latencyMs", m.latencyMs) else put("latencyMs", JSONObject.NULL)
+                            if (m.httpCode != null) put("httpCode", m.httpCode) else put("httpCode", JSONObject.NULL)
+                            if (m.health != null) put("health", m.health) else put("health", JSONObject.NULL)
+                        })
+                    }
+                })
+            })
+        }
+        preferences.edit().putString("${providerPrefix(agent)}model_catalogs", arr.toString()).apply()
+    }
+
+    fun deleteModelCatalog(agent: AgentKind, key: String) {
+        val remaining = loadModelCatalogs(agent).filterNot { it.key == key }
+        val arr = JSONArray()
+        remaining.forEach { c ->
+            arr.put(JSONObject().apply {
+                put("kind", c.kindName)
+                put("baseUrl", c.baseUrl)
+                put("updatedAtMillis", c.updatedAtMillis)
+                put("models", JSONArray().apply {
+                    c.models.forEach { m ->
+                        put(JSONObject().apply {
+                            put("id", m.id)
+                            put("displayName", m.displayName)
+                            put("isFree", m.isFree)
+                            if (m.latencyMs != null) put("latencyMs", m.latencyMs) else put("latencyMs", JSONObject.NULL)
+                            if (m.httpCode != null) put("httpCode", m.httpCode) else put("httpCode", JSONObject.NULL)
+                            if (m.health != null) put("health", m.health) else put("health", JSONObject.NULL)
+                        })
+                    }
+                })
+            })
+        }
+        preferences.edit().putString("${providerPrefix(agent)}model_catalogs", arr.toString()).apply()
     }
 
     fun hideBrokenModels(agent: AgentKind): Boolean =
