@@ -150,7 +150,11 @@ class ExpressionEvaluator(private val src: String) {
             "floor" -> { expectArity(1); Math.floor(arg(0)) }
             "ceil" -> { expectArity(1); Math.ceil(arg(0)) }
             "round" -> { expectArity(1); Math.round(arg(0)).toDouble() }
-            "trunc" -> { expectArity(1); Math.trunc(arg(0)) }
+            "trunc" -> {
+                expectArity(1)
+                val x = arg(0)
+                if (x >= 0.0) Math.floor(x) else Math.ceil(x)
+            }
             "sign" -> { expectArity(1); Math.signum(arg(0)) }
             "exp" -> { expectArity(1); Math.exp(arg(0)) }
             "ln" -> { expectArity(1); Math.log(arg(0)) }
