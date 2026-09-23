@@ -1706,21 +1706,48 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureSettingsAndHooks() {
         val hook = File(rootfs, "opt/pocket/permission-hook.sh")
         hook.parentFile?.mkdirs()
+        // Bridge each PermissionRequest through /pocket-bridge so the Android
+        // ToolPermissionGate can ALLOW / ASK / FORBID. The guest waits for a
+        // .response file written by ClaudeRuntimeBridge.respondToApproval.
         hook.writeText(
             """#!/bin/sh
-cat > /dev/null
-printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+INPUT=${'$'}(cat)
+ID="${'$'}(date +%s%N 2>/dev/null || date +%s)-${'$'}${'$'}"
+BRIDGE="/pocket-bridge"
+REQUEST="${'$'}BRIDGE/${'$'}ID.request"
+RESPONSE="${'$'}BRIDGE/${'$'}ID.response"
+printf '%s' "${'$'}INPUT" > "${'$'}REQUEST" || exit 0
+i=0
+while [ ! -f "${'$'}RESPONSE" ] && [ "${'$'}i" -lt 600 ]; do
+  sleep 0.1
+  i=${'$'}((i+1))
+done
+if [ -f "${'$'}RESPONSE" ]; then
+  DECISION=${'$'}(cat "${'$'}RESPONSE")
+  rm -f "${'$'}REQUEST" "${'$'}RESPONSE"
+  if [ "${'$'}DECISION" = "allow" ]; then
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+  else
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied by Mobile Harness permission policy"}}}'
+  fi
+else
+  rm -f "${'$'}REQUEST"
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Permission request timed out"}}}'
+fi
 """,
         )
         Os.chmod(hook.absolutePath, 0b111101101)
 
+        // Only read-only tools stay in permissions.allow. Bash / Edit / Write /
+        // NotebookEdit must hit the PermissionRequest hook so ToolPermissionGate
+        // can enforce per-tool policy (ASK would never fire if pre-allowed).
         val settingsContent = JSONObject()
             .put("disableAllHooks", false)
             .put(
                 "permissions",
                 JSONObject()
                     .put("allow", claudeWorkspaceToolRules())
-                    .put("defaultMode", "acceptEdits"),
+                    .put("defaultMode", "default"),
             )
             .put(
                 "hooks",
@@ -1768,10 +1795,7 @@ printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decis
     }
 
     private fun claudeWorkspaceToolRules() = org.json.JSONArray().apply {
-        put("Bash")
-        put("Edit")
-        put("Write")
-        put("NotebookEdit")
+        // Read-only tools only; mutating tools go through ToolPermissionGate.
         put("Read")
         put("Glob")
         put("Grep")

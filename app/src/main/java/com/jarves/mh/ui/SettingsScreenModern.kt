@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
@@ -106,7 +107,7 @@ import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { APPEARANCE, TOOLS, RUNTIME, UPDATE_CHANNEL }
+private enum class SettingsSection { APPEARANCE, TOOLS, PERMISSIONS, RUNTIME, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -137,6 +138,8 @@ fun SettingsScreen(
     initialDebugUpdateManifestUrl: String = "",
     onSetDebugUpdateManifestUrl: (String) -> Unit = {},
     onClearDebugUpdateManifestUrl: () -> Unit = {},
+    onSetToolPermissionGlobal: (com.jarves.mh.tools.ToolPermissionLevel) -> Unit = {},
+    onSetToolPermissionOverride: (String, com.jarves.mh.tools.ToolPermissionLevel?) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     var expanded by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
@@ -308,6 +311,110 @@ fun SettingsScreen(
                             )
                         }
                         if (index != DevStack.entries.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    }
+                }
+            }
+
+            item {
+                SettingsAccordion(
+                    title = "Tool permissions",
+                    subtitle = when (state.toolPermissionGlobal) {
+                        com.jarves.mh.tools.ToolPermissionLevel.ALLOW -> "Global: allow"
+                        com.jarves.mh.tools.ToolPermissionLevel.ASK -> "Global: ask"
+                        com.jarves.mh.tools.ToolPermissionLevel.FORBID -> "Global: forbid"
+                    },
+                    icon = Icons.Default.Security,
+                    expanded = expanded == SettingsSection.PERMISSIONS,
+                    onClick = { toggle(SettingsSection.PERMISSIONS) },
+                ) {
+                    Text(
+                        "Controls how agent tools (Bash, Edit, Write…) are approved. Ask waits for your confirmation; an override for a tool always wins over the global default.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text("Global default", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PermissionLevelChoice(
+                            label = "Allow",
+                            selected = state.toolPermissionGlobal == com.jarves.mh.tools.ToolPermissionLevel.ALLOW,
+                            onClick = { onSetToolPermissionGlobal(com.jarves.mh.tools.ToolPermissionLevel.ALLOW) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        PermissionLevelChoice(
+                            label = "Ask",
+                            selected = state.toolPermissionGlobal == com.jarves.mh.tools.ToolPermissionLevel.ASK,
+                            onClick = { onSetToolPermissionGlobal(com.jarves.mh.tools.ToolPermissionLevel.ASK) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        PermissionLevelChoice(
+                            label = "Forbid",
+                            selected = state.toolPermissionGlobal == com.jarves.mh.tools.ToolPermissionLevel.FORBID,
+                            onClick = { onSetToolPermissionGlobal(com.jarves.mh.tools.ToolPermissionLevel.FORBID) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text("Per-tool overrides", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    com.jarves.mh.tools.ToolPermissionStore.knownTools.forEach { tool ->
+                        val effective = state.toolPermissionOverrides[tool] ?: state.toolPermissionGlobal
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(tool, fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                            PermissionLevelChoice(
+                                label = "Allow",
+                                selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ALLOW &&
+                                    state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.ALLOW,
+                                onClick = {
+                                    onSetToolPermissionOverride(
+                                        tool,
+                                        if (state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.ALLOW) {
+                                            null
+                                        } else {
+                                            com.jarves.mh.tools.ToolPermissionLevel.ALLOW
+                                        },
+                                    )
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            PermissionLevelChoice(
+                                label = "Ask",
+                                selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ASK &&
+                                    state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.ASK,
+                                onClick = {
+                                    onSetToolPermissionOverride(
+                                        tool,
+                                        if (state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.ASK) {
+                                            null
+                                        } else {
+                                            com.jarves.mh.tools.ToolPermissionLevel.ASK
+                                        },
+                                    )
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            PermissionLevelChoice(
+                                label = "Forbid",
+                                selected = effective == com.jarves.mh.tools.ToolPermissionLevel.FORBID &&
+                                    state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.FORBID,
+                                onClick = {
+                                    onSetToolPermissionOverride(
+                                        tool,
+                                        if (state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.FORBID) {
+                                            null
+                                        } else {
+                                            com.jarves.mh.tools.ToolPermissionLevel.FORBID
+                                        },
+                                    )
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                 }
             }
@@ -859,6 +966,30 @@ private fun RuntimeInfoRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
         Text(value, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun PermissionLevelChoice(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick).padding(vertical = 4.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = if (selected) PocketOrange.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) PocketOrange else MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Text(
+            label,
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp),
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) PocketOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
     }
 }
 

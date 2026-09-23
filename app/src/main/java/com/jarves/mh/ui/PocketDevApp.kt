@@ -2159,6 +2159,8 @@ private fun RootScreenHost(
                     initialDebugUpdateManifestUrl = viewModel.debugUpdateManifestUrl(),
                     onSetDebugUpdateManifestUrl = viewModel::setDebugUpdateManifestUrl,
                     onClearDebugUpdateManifestUrl = viewModel::clearDebugUpdateManifestUrl,
+                    onSetToolPermissionGlobal = viewModel::setToolPermissionGlobal,
+                    onSetToolPermissionOverride = viewModel::setToolPermissionOverride,
                 )
             }
         }
