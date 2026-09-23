@@ -12,6 +12,8 @@ on:
       - 'test/**'
   pull_request:
     branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
@@ -35,11 +37,19 @@ jobs:
           sha256sum "$HOME/.android/debug.keystore"
           ls -la "$HOME/.android/"
       - name: Unit tests
+        if: github.event_name != 'release'
         run: ./gradlew :app:testOnlineDebugUnitTest :app:testOfflineDebugUnitTest
       - name: Build debug APK
         run: ./gradlew assembleDebug
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: mh-dany-debug
           path: app/build/outputs/apk/**/*.apk
+      - name: Attach APKs to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/build/outputs/apk/online/debug/*.apk
+            app/build/outputs/apk/offline/debug/*.apk
