@@ -13,6 +13,10 @@ import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RiskLevel
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
+import com.jarves.mh.tools.ToolPermissionGate
+import com.jarves.mh.tools.ToolPermissionGateDecision
+import com.jarves.mh.tools.ToolPermissionLevel
+import com.jarves.mh.tools.ToolPermissionStore
 import java.io.File
 import java.io.RandomAccessFile
 import java.security.MessageDigest
@@ -66,11 +70,15 @@ internal object ProviderRuntimeErrorDetector {
 class ClaudeRuntimeBridge(
     private val context: Context,
     private val secretFor: (ProviderProfile) -> String?,
+    private val permissionGate: ToolPermissionGate = ToolPermissionGate(
+        ToolPermissionStore.fromContext(context),
+    ),
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
     override val events: Flow<RuntimeEvent> = eventBus
     private val pending = ConcurrentHashMap<String, PendingPermission>()
+    private val seenPermissionIds = ConcurrentHashMap.newKeySet<String>()
     private val toolNames = ConcurrentHashMap<String, String>()
     private val seenToolCalls = ConcurrentHashMap.newKeySet<String>()
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
@@ -100,6 +108,7 @@ class ClaudeRuntimeBridge(
         foregroundResultPosted = false
         toolNames.clear()
         seenToolCalls.clear()
+        seenPermissionIds.clear()
         lastReasoningTokens = 0
         lastReasoningUpdateAt = 0L
         lastThinkingUpdateAt = 0L
@@ -229,6 +238,9 @@ class ClaudeRuntimeBridge(
                 pending.values.filter { it.request.sessionId == sessionId }.forEach { permission ->
                     permission.response.writeText("deny")
                     pending.remove(permission.request.approvalId)
+                    eventBus.emit(
+                        RuntimeEvent.ToolRejected(sessionId, permission.request.approvalId),
+                    )
                 }
                 val changed = changedFiles(workspace, before)
                 if (changed.isNotEmpty()) {
@@ -369,6 +381,8 @@ class ClaudeRuntimeBridge(
         while (kotlin.coroutines.coroutineContext.isActive) {
             bridge.listFiles { file -> file.name.endsWith(".request") }.orEmpty().forEach { file ->
                 val approvalId = file.name.removeSuffix(".request")
+                if (pending.containsKey(approvalId) || !seenPermissionIds.add(approvalId)) return@forEach
+                val response = File(file.parentFile, "$approvalId.response")
                 runCatching {
                     val json = JSONObject(file.readText())
                     val toolName = json.optString("tool_name", "Tool")
@@ -380,13 +394,46 @@ class ClaudeRuntimeBridge(
                         .ifBlank { command.orEmpty() }
                         .ifBlank { "$toolName running in project" }
 
-                    Log.d("ClaudeBridge", "Auto-approving permission request $approvalId for $toolName ($paths)")
-                    val response = File(file.parentFile, "$approvalId.response")
-                    response.writeText("allow")
-
-                    eventBus.emit(RuntimeEvent.ToolCompleted(sessionId, toolName, explanation))
-                }.onFailure {
-                    File(file.parentFile, "$approvalId.response").writeText("allow")
+                    when (val decision = permissionGate.evaluate(toolName, explanation)) {
+                        is ToolPermissionGateDecision.Allowed -> {
+                            Log.d("ClaudeBridge", "Policy allow $approvalId for $toolName ($paths)")
+                            response.writeText("allow")
+                            file.delete()
+                        }
+                        is ToolPermissionGateDecision.Blocked -> {
+                            Log.d("ClaudeBridge", "Policy deny $approvalId for $toolName: ${decision.reason}")
+                            response.writeText("deny")
+                            file.delete()
+                            eventBus.emit(
+                                RuntimeEvent.RuntimeLog(sessionId, "Permission denied", decision.reason),
+                            )
+                        }
+                        is ToolPermissionGateDecision.NeedsApproval -> {
+                            val request = ToolRequest(
+                                approvalId = approvalId,
+                                sessionId = sessionId,
+                                toolName = toolName,
+                                explanation = explanation,
+                                affectedPaths = paths,
+                                commandPreview = command,
+                                risk = classifyRisk(toolName, command),
+                            )
+                            pending[approvalId] = PendingPermission(request, response)
+                            Log.d("ClaudeBridge", "Ask user $approvalId for $toolName ($paths)")
+                            eventBus.emit(RuntimeEvent.ToolRequested(sessionId, request))
+                        }
+                    }
+                }.onFailure { error ->
+                    Log.e("ClaudeBridge", "Permission parse failed for $approvalId", error)
+                    response.writeText("deny")
+                    file.delete()
+                    eventBus.emit(
+                        RuntimeEvent.RuntimeLog(
+                            sessionId,
+                            "Permission denied",
+                            "Could not read the tool permission request",
+                        ),
+                    )
                 }
             }
             delay(50)

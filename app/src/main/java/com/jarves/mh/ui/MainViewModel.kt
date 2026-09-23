@@ -240,6 +240,8 @@ data class AppUiState(
     val antigravityModel: String = "",
     val antigravityEffort: String = "high",
     val antigravityModels: List<String> = emptyList(),
+    val toolPermissionGlobal: com.jarves.mh.tools.ToolPermissionLevel = com.jarves.mh.tools.ToolPermissionLevel.ASK,
+    val toolPermissionOverrides: Map<String, com.jarves.mh.tools.ToolPermissionLevel> = emptyMap(),
     val antigravityModelsLoading: Boolean = false,
     val modelScanLines: List<String> = emptyList(),
     val isModelScanning: Boolean = false,
@@ -261,7 +263,13 @@ data class AppUiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val vault = ApiKeyVault(application)
     private val preferences = AppPreferences(application)
-    private val claudeRuntime = ClaudeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
+    private val toolPermissionStore = com.jarves.mh.tools.ToolPermissionStore.fromContext(application)
+    private val toolPermissionGate = com.jarves.mh.tools.ToolPermissionGate(toolPermissionStore)
+    private val claudeRuntime = ClaudeRuntimeBridge(
+        application,
+        secretFor = { profile -> vault.get(profile.kind.name) },
+        permissionGate = toolPermissionGate,
+    )
     private val dshRuntime = DshRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val installer = RuntimeInstaller(application)
     private val openCodeRuntime = OpenCodeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
@@ -333,6 +341,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             selectedDevStacks = preferences.selectedDevStacks.mapNotNull { name ->
                 runCatching { DevStack.valueOf(name) }.getOrNull()
             }.toSet() + DevStack.WEB,
+            toolPermissionGlobal = toolPermissionStore.globalDefault,
+            toolPermissionOverrides = com.jarves.mh.tools.ToolPermissionStore.knownTools
+                .mapNotNull { tool -> toolPermissionStore.overrideFor(tool)?.let { tool to it } }
+                .toMap(),
         ),
     )
 
@@ -1715,6 +1727,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 antigravityEffort = effort,
                 antigravityModel = matchingModel ?: it.antigravityModel,
             )
+        }
+    }
+
+    fun setToolPermissionGlobal(level: com.jarves.mh.tools.ToolPermissionLevel) {
+        toolPermissionGate.setGlobalDefault(level)
+        _state.update { it.copy(toolPermissionGlobal = level) }
+    }
+
+    fun setToolPermissionOverride(tool: String, level: com.jarves.mh.tools.ToolPermissionLevel?) {
+        toolPermissionGate.setOverride(tool, level)
+        _state.update { current ->
+            val overrides = current.toolPermissionOverrides.toMutableMap()
+            if (level == null) overrides.remove(tool) else overrides[tool] = level
+            current.copy(toolPermissionOverrides = overrides)
         }
     }
 
