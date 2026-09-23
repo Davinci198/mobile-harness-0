@@ -15,7 +15,7 @@ import kotlin.concurrent.thread
 
 private class FakeMcpTransport : McpProcessTransport {
     private val serverInput = PipedInputStream()
-    private val serverOutput = PipedOutputStream(serverInput)
+    val serverOutput = PipedOutputStream(serverInput)
     private val clientInput = PipedInputStream()
     private val clientOutput = PipedOutputStream(clientInput)
     @Volatile var alive = true
