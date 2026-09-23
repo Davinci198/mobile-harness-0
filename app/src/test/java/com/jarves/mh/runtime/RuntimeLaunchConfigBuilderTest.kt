@@ -87,4 +87,20 @@ class RuntimeLaunchConfigBuilderTest {
         assertEquals("http://127.0.0.1:12345", config.environment["ANTHROPIC_BASE_URL"])
         assertEquals("claude-sonnet-4-6", config.environment["ANTHROPIC_MODEL"])
     }
+
+    @Test
+    fun customGatewayWithTrailingV1IsNormalizedForClaudeCode() {
+        val config = RuntimeLaunchConfigBuilder.build(
+            ProviderProfile(ProviderKind.CUSTOM, "https://gateway.example/v1/", "custom-model", true),
+        )
+
+        assertEquals("https://gateway.example", config.environment["ANTHROPIC_BASE_URL"])
+    }
+
+    @Test
+    fun kimiAnthropicSuffixIsNotStrippedAsV1() {
+        val config = RuntimeLaunchConfigBuilder.build(ProviderProfile(ProviderKind.KIMI))
+
+        assertEquals("https://api.moonshot.ai/anthropic", config.environment["ANTHROPIC_BASE_URL"])
+    }
 }

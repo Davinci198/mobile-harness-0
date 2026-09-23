@@ -197,6 +197,7 @@ data class AppUiState(
     val previewReady: Boolean = false,
     val previewUrl: String? = null,
     val isRunning: Boolean = false,
+    val isSending: Boolean = false,
     val activeSessionId: String? = null,
     val toastMessage: String? = null,
     val projectTerminalLines: List<TerminalOutputLine> = emptyList(),
@@ -408,6 +409,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preferences.saveProjects(cleanedProjects)
             _state.update { it.copy(projects = cleanedProjects) }
         }
+        // Runtime setup snapshot and Claude events — collected here alongside the other
+        // agent event streams so all collectors live in one init block.
+        viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
+        viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
+        viewModelScope.launch { bootstrap() }
     }
 
     val state: StateFlow<AppUiState> = _state.asStateFlow()
@@ -982,12 +988,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         claudeRuntime.configureProjectRoot(projectId, rootPath)
         dshRuntime.configureProjectRoot(projectId, rootPath)
         antigravityRuntime.configureProjectRoot(projectId, rootPath)
-    }
-
-    init {
-        viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
-        viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
-        viewModelScope.launch { bootstrap() }
     }
 
     private suspend fun bootstrap() {
@@ -3028,6 +3028,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 messages = it.messages + ChatMessage(fromUser = true, text = prompt.trim(), attachments = attachments),
                 pendingAttachments = emptyList(),
                 isRunning = true,
+                isSending = true,
                 activity = listOf(ActivityItem("Understanding your request", "Preparing a safe plan", false)) + it.activity,
                 liveProcess = listOf(ActivityItem("Think", requestPlanningSummary(requestText, it.agentKind), false)),
                 liveThinking = true,
@@ -3080,6 +3081,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopTask() {
         if (!_state.value.isRunning) return
+        _state.update { it.copy(isSending = false) }
         viewModelScope.launch { activeRuntime().stopActiveSession() }
     }
 
@@ -3243,6 +3245,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else when (event) {
                 is RuntimeEvent.SessionStarted -> current.copy(
                     activeSessionId = event.sessionId,
+                    isSending = false,
                     activity = current.activity.mapIndexed { index, item -> if (index == 0) item.copy(isComplete = true) else item },
                 )
                 is RuntimeEvent.AssistantDelta -> {
@@ -3392,6 +3395,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val finishedAt = System.currentTimeMillis()
                     attachTaskDuration(finishWorkSegment(current, finishedAt), finishedAt).copy(
                         isRunning = false,
+                        isSending = false,
                         activeSessionId = null,
                         activity = listOf(ActivityItem("Task completed", "${current.agentKind.title} finished successfully")) +
                             current.activity.map { if (!it.isComplete) it.copy(isComplete = true) else it },
@@ -3409,6 +3413,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         finishedAt,
                     ).copy(
                         isRunning = false,
+                        isSending = false,
                         activeSessionId = null,
                         pendingApproval = null,
                         toastMessage = event.reason.takeIf { reason ->

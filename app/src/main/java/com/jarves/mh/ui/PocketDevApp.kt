@@ -3797,6 +3797,7 @@ private fun ReadOnlyProjectScreen(
                 approval = null,
                 liveProcess = emptyList(),
                 isRunning = false,
+                isSending = false,
                 onSend = {},
                 onStop = {},
                 onApproval = {},
@@ -4059,6 +4060,7 @@ private fun WorkspaceScreen(
                     state.pendingApproval,
                     state.liveProcess,
                     state.isRunning,
+                    state.isSending,
                     onSend,
                     onStop,
                     onApproval,
@@ -4445,6 +4447,7 @@ private fun ChatTab(
     approval: ToolRequest?,
     liveProcess: List<ActivityItem>,
     isRunning: Boolean,
+    isSending: Boolean,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onApproval: (Boolean) -> Unit,
@@ -4673,6 +4676,23 @@ private fun ChatTab(
                                     contentDescription = "Stop AI task",
                                     tint = MaterialTheme.colorScheme.onError,
                                     modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        } else if (isSending) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                        shape = CircleShape,
+                                    )
+                                    .clickable(enabled = false, onClick = {}),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
                                 )
                             }
                         } else {
