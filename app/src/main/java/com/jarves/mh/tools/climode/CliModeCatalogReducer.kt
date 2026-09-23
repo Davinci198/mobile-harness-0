@@ -84,17 +84,13 @@ object CliModeCatalogReducer {
     }
 
     private fun estimateChars(tool: CliModeTool): Int {
-        val schema = tool.inputSchema
-        return buildString {
-            append(tool.name.length)
-            append(tool.group.length)
-            append(tool.description.length)
-            schema?.let {
-                append(it.propertyNames.sumOf(String::length))
-                append(it.requiredNames.sumOf(String::length))
-                append(it.typeByName.entries.sumOf { entry -> entry.key.length + entry.value.length })
-            }
-        }.length
+        var size = tool.name.length + tool.group.length + tool.description.length
+        tool.inputSchema?.let { schema ->
+            size += schema.propertyNames.sumOf(String::length)
+            size += schema.requiredNames.sumOf(String::length)
+            size += schema.typeByName.entries.sumOf { entry -> entry.key.length + entry.value.length }
+        }
+        return size
     }
 
     private data class IndexedTool(val index: Int, val tool: CliModeTool)
