@@ -54,7 +54,7 @@ class CalculateToolTest {
         assertEquals(8.0, value("2 ^ 3"), 1e-9)
         assertEquals(-4.0, value("-2 ^ 2"), 1e-9)
         assertEquals(0.5, value("2 ^ -1"), 1e-9)
-        assertEquals(9.0, value("2 * 3 ^ 2"), 1e-9)
+        assertEquals(18.0, value("2 * 3 ^ 2"), 1e-9)
         assertEquals(3.0, value("+3"), 1e-9)
     }
 
@@ -64,7 +64,8 @@ class CalculateToolTest {
         assertEquals(Math.E, value("e"), 1e-9)
         assertEquals(4.0, value("sqrt(16)"), 1e-9)
         assertEquals(5.0, value("abs(-5)"), 1e-9)
-        assertEquals(1.0, value("sin(0)"), 1e-9)
+        assertEquals(0.0, value("sin(0)"), 1e-9)
+        assertEquals(1.0, value("sin(PI / 2)"), 1e-9)
         assertEquals(2.0, value("log(100)"), 1e-9)
         assertEquals(3.0, value("max(1, 3)"), 1e-9)
         assertEquals(8.0, value("pow(2, 3)"), 1e-9)
