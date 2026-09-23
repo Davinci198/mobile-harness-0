@@ -198,15 +198,15 @@ class SkillLoaderTest {
     @Test
     fun permissionExplanationIsBounded() {
         val name = "n".repeat(500)
-        var explanation = ""
+        val explanations = mutableListOf<String>()
         val hooks = listOf(object : AIToolHook {
             override fun onToolCallIntercept(toolName: String, explanation: String): AIToolHookDecision {
-                this@SkillLoaderTest.explanation = explanation
+                explanations += explanation
                 return AIToolHookDecision.Block("stop")
             }
         })
         newLoader(hooks).activate(name)
-        assertTrue(explanation.length <= 240)
+        assertTrue(explanations.single().length <= 240)
     }
 
     @Test
