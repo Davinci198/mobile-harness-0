@@ -806,7 +806,7 @@ internal object OpenCodeJsonlParser {
             ?.optJSONObject("message")
             ?.optJSONArray("content")
         val text = contentText(content)
-        if (text.isBlank()) CliParsed.IGNORED else CliParsed.Events(finalText = text)
+        return if (text.isBlank()) CliParsed.IGNORED else CliParsed.Events(finalText = text)
     }
 
     private fun toolDetailFromArguments(arguments: String, name: String): String {
