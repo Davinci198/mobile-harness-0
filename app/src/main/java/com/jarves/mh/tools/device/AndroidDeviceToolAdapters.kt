@@ -1,7 +1,7 @@
 package com.jarves.mh.tools.device
 
 import android.Manifest
-import android.app.ActivityNotFoundException
+import android.content.ActivityNotFoundException
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ClipDescription
