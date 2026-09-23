@@ -44,6 +44,7 @@ class FileTools(
             is FileToolResult.FileApplied -> "applied ${r.replacements} replacements"
             is FileToolResult.GrepMatches -> "${r.matches.size} matches"
             is FileToolResult.FoundFiles -> "${r.files.size} files"
+            is FileToolResult.GrepMatch -> "grep match"
             is FileToolResult.FileToolError -> r.message
         }
         hooks.forEach { it.onToolExecutionResult(toolName, ok, summary) }
@@ -120,7 +121,7 @@ class FileTools(
             } else {
                 file.writeText(content)
             }
-            val r = FileToolResult.FileWritten(path, content.toByteArray().size, append)
+            val r = FileToolResult.FileWritten(path, content.toByteArray().size.toLong(), append)
             result(tool, r)
             return r
         } catch (t: Throwable) {
