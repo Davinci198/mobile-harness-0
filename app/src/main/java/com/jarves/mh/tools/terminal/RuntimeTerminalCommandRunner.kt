@@ -28,6 +28,7 @@ class RuntimeTerminalCommandRunner(
         val deadline = System.nanoTime() + timeoutMs * 1_000_000
         var offset = 0L
         var timedOut = false
+        var exitCode = 0
         try {
             while (process.isAlive) {
                 if (System.nanoTime() >= deadline) {
