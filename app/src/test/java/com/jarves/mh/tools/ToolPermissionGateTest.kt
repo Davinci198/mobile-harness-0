@@ -63,9 +63,10 @@ class ToolPermissionGateTest {
     }
 
     @Test
-    fun knownToolsIncludeCalculateAndSleep() {
+    fun knownToolsIncludeCalculateSleepAndUseSkill() {
         assertTrue(ToolPermissionStore.knownTools.contains("Calculate"))
         assertTrue(ToolPermissionStore.knownTools.contains("Sleep"))
+        assertTrue(ToolPermissionStore.knownTools.contains("UseSkill"))
     }
 
     @Test

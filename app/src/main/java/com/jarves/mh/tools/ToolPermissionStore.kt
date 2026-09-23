@@ -79,6 +79,7 @@ class ToolPermissionStore(private val storage: ToolPermissionStorage) {
             "Grep",
             "Calculate",
             "Sleep",
+            "UseSkill",
         )
 
         fun overrideKey(toolName: String) = "$KEY_OVERRIDE_PREFIX$toolName"
