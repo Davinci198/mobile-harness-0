@@ -80,6 +80,15 @@ class ToolPermissionStore(private val storage: ToolPermissionStorage) {
             "Calculate",
             "Sleep",
             "UseSkill",
+            "MemoryCreate",
+            "MemoryRead",
+            "MemoryUpdate",
+            "MemoryDelete",
+            "MemorySearch",
+            "MemoryList",
+            "MemoryLink",
+            "MemoryUnlink",
+            "MemoryLinkList",
         )
 
         fun overrideKey(toolName: String) = "$KEY_OVERRIDE_PREFIX$toolName"

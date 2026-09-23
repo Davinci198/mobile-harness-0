@@ -63,10 +63,22 @@ class ToolPermissionGateTest {
     }
 
     @Test
-    fun knownToolsIncludeCalculateSleepAndUseSkill() {
-        assertTrue(ToolPermissionStore.knownTools.contains("Calculate"))
-        assertTrue(ToolPermissionStore.knownTools.contains("Sleep"))
-        assertTrue(ToolPermissionStore.knownTools.contains("UseSkill"))
+    fun knownToolsIncludeAppTools() {
+        val expected = listOf(
+            "Calculate",
+            "Sleep",
+            "UseSkill",
+            "MemoryCreate",
+            "MemoryRead",
+            "MemoryUpdate",
+            "MemoryDelete",
+            "MemorySearch",
+            "MemoryList",
+            "MemoryLink",
+            "MemoryUnlink",
+            "MemoryLinkList",
+        )
+        assertTrue(ToolPermissionStore.knownTools.containsAll(expected))
     }
 
     @Test
