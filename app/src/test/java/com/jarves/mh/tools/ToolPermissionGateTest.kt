@@ -77,6 +77,11 @@ class ToolPermissionGateTest {
             "MemoryLink",
             "MemoryUnlink",
             "MemoryLinkList",
+            "ClipboardCopy",
+            "ClipboardRead",
+            "DeviceToast",
+            "DeviceNotification",
+            "DeviceOpenHttpsLink",
         )
         assertTrue(ToolPermissionStore.knownTools.containsAll(expected))
     }
