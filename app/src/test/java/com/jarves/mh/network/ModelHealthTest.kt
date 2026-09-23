@@ -35,6 +35,15 @@ class ModelHealthTest {
     }
 
     @Test
+    fun insufficientCreditsBecomes402() {
+        val health = client.healthFromResponse("m", 402, """{"error":{"message":"insufficient_credits"}}""", null, 100)
+        assertEquals(ModelHealthStatus.INSUFFICIENT_CREDITS, health.status)
+        assertTrue(health.isBroken)
+        assertEquals(402, health.httpCode)
+        assertEquals("insufficient credits", health.detail)
+    }
+
+    @Test
     fun networkErrorBecomesError() {
         val health = client.healthFromResponse("m", 0, "", "Connection refused", 5)
         assertEquals(ModelHealthStatus.ERROR, health.status)

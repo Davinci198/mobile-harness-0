@@ -1388,7 +1388,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             _state.update {
-                it.copy(modelScanLines = it.modelScanLines + "$ concurrency 5, timeout 30s")
+                it.copy(modelScanLines = it.modelScanLines + "$ concurrency 5, timeout 30s, 429 backoff")
             }
             val protocol = providerProtocolForAgent(profile, agent)
             val results = providerApi.validateModels(
@@ -1431,6 +1431,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return when (health.status) {
             ModelHealthStatus.OK -> "✓ ${health.modelId.padEnd(48)} $latency OK"
             ModelHealthStatus.TIMEOUT -> "T ${health.modelId.padEnd(48)} $latency TIMEOUT"
+            ModelHealthStatus.INSUFFICIENT_CREDITS ->
+                "$ ${health.modelId.padEnd(48)} $latency 402 insufficient credits"
             ModelHealthStatus.FAIL ->
                 "✗ ${health.modelId.padEnd(48)} $latency FAIL ${health.httpCode} ${health.detail.orEmpty().take(60)}"
             ModelHealthStatus.ERROR ->

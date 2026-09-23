@@ -17,7 +17,7 @@ import kotlinx.coroutines.withContext
 
 data class DiscoveredModel(val id: String, val displayName: String = id, val isFree: Boolean = false)
 
-enum class ModelHealthStatus { OK, FAIL, TIMEOUT, ERROR }
+enum class ModelHealthStatus { OK, FAIL, TIMEOUT, ERROR, INSUFFICIENT_CREDITS }
 
 data class ModelHealth(
     val modelId: String,
@@ -121,7 +121,7 @@ class ProviderApiClient {
         results.toList()
     }
 
-    private fun probeModel(
+    private suspend fun probeModel(
         endpoints: List<String>,
         modelId: String,
         apiKey: String,
@@ -130,10 +130,21 @@ class ProviderApiClient {
         val body = validationBody(modelId, protocol)
         var last: ModelHealth = ModelHealth(modelId, ModelHealthStatus.ERROR, 0L, 0, "No endpoint")
         for (endpoint in endpoints) {
-            val started = System.currentTimeMillis()
-            val response = request(endpoint, "POST", apiKey, body, protocol, connectTimeoutMs = 12_000, readTimeoutMs = 30_000)
-            val elapsed = System.currentTimeMillis() - started
-            last = healthFromResponse(modelId, response.code, response.body, response.error, elapsed)
+            var attempt = 0
+            while (true) {
+                attempt++
+                val started = System.currentTimeMillis()
+                val response = request(endpoint, "POST", apiKey, body, protocol, connectTimeoutMs = 12_000, readTimeoutMs = 30_000)
+                val elapsed = System.currentTimeMillis() - started
+                last = healthFromResponse(modelId, response.code, response.body, response.error, elapsed)
+                // Retry 429 with exponential backoff (max 3 attempts)
+                if (response.code == 429 && attempt < 3) {
+                    val delayMs = (500L * (1L shl (attempt - 1))).coerceAtMost(4000L)
+                    kotlinx.coroutines.delay(delayMs)
+                    continue
+                }
+                break
+            }
             if (response.code != 404 && response.code != 0) return last
         }
         return last
@@ -147,6 +158,7 @@ class ProviderApiClient {
         elapsedMs: Long,
     ): ModelHealth = when {
         code in 200..299 -> ModelHealth(modelId, ModelHealthStatus.OK, elapsedMs, code)
+        code == 402 -> ModelHealth(modelId, ModelHealthStatus.INSUFFICIENT_CREDITS, elapsedMs, code, "insufficient credits")
         error != null && (error.contains("timeout", ignoreCase = true) || error.contains("timed out", ignoreCase = true)) ->
             ModelHealth(modelId, ModelHealthStatus.TIMEOUT, elapsedMs, 0, error.take(160))
         code in 400..599 ->
