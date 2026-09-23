@@ -137,7 +137,8 @@ class TerminalToolsTest {
                 columns: Int,
             ): TerminalCommandRun = throw IllegalStateException("spawn failed")
         }
-        val result = tools(store).execute("project", "pwd")
+        store.globalDefault = ToolPermissionLevel.ALLOW
+        val result = TerminalTools(runner, ToolPermissionGate(store)).execute("project", "pwd")
         assertTrue(result is TerminalToolResult.Error)
         assertTrue((result as TerminalToolResult.Error).message.contains("spawn failed"))
     }
