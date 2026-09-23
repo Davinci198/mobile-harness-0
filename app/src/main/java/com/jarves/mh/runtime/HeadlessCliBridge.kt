@@ -167,6 +167,11 @@ internal abstract class HeadlessCliBridge(
                 emulateHardLinks = false,
             )
             activeProcess = process
+            // One-shot headless CLIs take the prompt via argv. An open stdin
+            // pipe whose write end the JVM never closes blocks opencode in
+            // epoll_wait before the first API call (0-byte hang). Close it so
+            // the guest sees EOF immediately.
+            runCatching { process.outputStream.close() }
             if (userStopRequested) process.destroy()
             val result = runCliSession(process, sessionId)
             val exit = process.waitFor()
