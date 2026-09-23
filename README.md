@@ -10,7 +10,7 @@
 
   <br />
 
-  [![Release v1.0.4](https://img.shields.io/badge/Release-v1.0.4-F28C52?style=flat-square&logo=github&logoColor=white)](https://github.com/techjarves/Mobile-Harness/releases/tag/v1.0.4)
+  [![Release v1.0.4](https://img.shields.io/badge/Release-v1.0.4-F28C52?style=flat-square&logo=github&logoColor=white)](https://github.com/Davinci198/mobile-harness-0/releases/tag/debug-final-29057ec)
   [![Android 9+](https://img.shields.io/badge/Android-9%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#system-requirements)
   [![ARM64](https://img.shields.io/badge/CPU-ARM64-5B8DEF?style=flat-square)](#system-requirements)
   [![MIT License](https://img.shields.io/badge/License-MIT-8B7CF6?style=flat-square&logo=opensourceinitiative&logoColor=white)](LICENSE)
@@ -18,8 +18,8 @@
 
   <br />
 
-  [**Download Online APK**](https://github.com/techjarves/Mobile-Harness/releases/download/v1.0.4/mobile-harness-online-v1.0.4.apk) &nbsp;•&nbsp;
-  [**Download Offline APK**](https://github.com/techjarves/Mobile-Harness/releases/download/v1.0.4/mobile-harness-offline-v1.0.4.apk) &nbsp;•&nbsp;
+  [**Download Online APK**](https://github.com/Davinci198/mobile-harness-0/releases/download/debug-final-29057ec/app-online-debug.apk) &nbsp;•&nbsp;
+  [**Download Offline APK**](https://github.com/Davinci198/mobile-harness-0/releases/download/debug-final-29057ec/app-offline-debug.apk) &nbsp;•&nbsp;
   [**Watch Walkthrough (3 min)**](https://youtu.be/QzAau52Z7yQ) &nbsp;•&nbsp;
   [**Quickstart Guide**](#quickstart) &nbsp;•&nbsp;
   [**Architecture**](#architecture) &nbsp;•&nbsp;
@@ -60,17 +60,17 @@
   <tr>
     <td width="50%" valign="top" align="center">
       <h3>Online Edition</h3>
-      <p><strong>87.4 MB · Recommended</strong></p>
+      <p><strong>Recommended</strong></p>
       <p>Start with the smaller APK. Core, Python, and Android runtime bundles are downloaded only when needed.</p>
-      <a href="https://github.com/techjarves/Mobile-Harness/releases/download/v1.0.4/mobile-harness-online-v1.0.4.apk">
+      <a href="https://github.com/Davinci198/mobile-harness-0/releases/download/debug-final-29057ec/app-online-debug.apk">
         <img src="https://img.shields.io/badge/Download-Online_APK-F28C52?style=for-the-badge&logo=android&logoColor=white" alt="Download Online APK" />
       </a>
     </td>
     <td width="50%" valign="top" align="center">
       <h3>Offline Edition</h3>
-      <p><strong>887.7 MB · Everything included</strong></p>
+      <p><strong>Everything included</strong></p>
       <p>Includes the Core, Python, and Android runtime bundles for setup with limited or unavailable internet.</p>
-      <a href="https://github.com/techjarves/Mobile-Harness/releases/download/v1.0.4/mobile-harness-offline-v1.0.4.apk">
+      <a href="https://github.com/Davinci198/mobile-harness-0/releases/download/debug-final-29057ec/app-offline-debug.apk">
         <img src="https://img.shields.io/badge/Download-Offline_APK-5B8DEF?style=for-the-badge&logo=android&logoColor=white" alt="Download Offline APK" />
       </a>
     </td>
@@ -92,7 +92,7 @@ Mobile Harness unites modern **Jetpack Compose UI** with a self-contained **Ubun
   <tr>
     <td width="50%" valign="top">
       <h3>Autonomous Agent Coding</h3>
-      <p>Native integrations with Claude Code, DeepSeek Harness, and Antigravity CLI. Each agent has an isolated driver, settings, and resumable project conversations.</p>
+      <p>Native integrations with Claude Code, DeepSeek Harness, Antigravity CLI, OpenCode, and Hermes — five working coding agents, each with an isolated driver, settings, and resumable project conversations.</p>
     </td>
     <td width="50%" valign="top">
       <h3>Isolated Linux Subsystem</h3>
@@ -166,11 +166,11 @@ Mobile Harness unites modern **Jetpack Compose UI** with a self-contained **Ubun
 Get up and running in 3 guided steps:
 
 ### 1. Download & Install
-Download the latest signed release APK from [GitHub Releases](https://github.com/techjarves/Mobile-Harness/releases/latest).
+Download the latest signed release APK from [GitHub Releases](https://github.com/Davinci198/mobile-harness-0/releases/tag/debug-final-29057ec).
 
 ```text
 Target Architecture : ARM64 (arm64-v8a)
-Package Version     : v1.0.4
+Package Version     : v1.0.4 (debug-final-29057ec)
 Minimum OS Level    : Android 9.0 (API 28)
 ```
 
@@ -210,7 +210,7 @@ Launch the application and follow the interactive setup wizard:
 
 ## Model Providers
 
-Mobile Harness uses Claude Code's Anthropic-compatible API protocol. You can connect official endpoints or route requests through compatible translation proxies:
+Mobile Harness uses Claude Code's Anthropic-compatible API protocol (via a local format gateway for OpenAI-compatible providers). You can connect official endpoints or route requests through compatible translation proxies:
 
 | Provider | Integration Type | Streaming | Tool Calling | Status | Notes |
 | :--- | :---: | :---: | :---: | :---: | :--- |
@@ -219,17 +219,22 @@ Mobile Harness uses Claude Code's Anthropic-compatible API protocol. You can con
 | **DeepSeek** | Direct Key | Supported | Supported | `Supported` | Anthropic-compatible endpoint |
 | **Kimi** | Direct Key | Supported | Supported | `Supported` | Anthropic-compatible Moonshot endpoint |
 | **Custom API** | Endpoint Override | Compatible | Compatible | `Experimental` | User-configured gateway |
+| **NVIDIA NIM** | OpenAI-compatible gateway | Supported | Supported | `Supported` | Used by Claude Code (via local format gateway), OpenCode, and Hermes (via local OpenAI proxy) |
 
 > [!NOTE]
 > API keys are stored with hardware-backed Android Keystore AES-256-GCM encryption. Antigravity Google OAuth credentials are created and retained only by the official `agy` CLI in its persistent Linux home; Mobile Harness never reads or copies its tokens.
 
 ### Coding agents
 
+Five agents are installed and verified working end-to-end:
+
 | Agent | Authentication | Installation | Isolation |
 | :--- | :--- | :--- | :--- |
 | **Claude Code** | Claude account or API-key providers | Included in Core | Existing Claude bridge and settings |
 | **DeepSeek Harness** | API-key providers | On demand | Existing DSH bridge and settings |
 | **Antigravity CLI** | Official Google OAuth flow | Version-pinned online download | Dedicated `agy` bridge, model, effort, and conversation IDs |
+| **OpenCode** | API-key providers (NVIDIA NIM, OpenAI-compatible) | On demand | Headless CLI bridge with local OpenAI proxy |
+| **Hermes** | API-key providers (NVIDIA NIM, OpenAI-compatible) | On demand | Headless CLI bridge with local OpenAI proxy |
 
 For Antigravity, select **Antigravity CLI**, install it, and tap **Sign in with Google**. Mobile Harness starts the official CLI login, opens the freshly generated Google URL in the system browser, and sends the returned one-time code back to that waiting process. The app does not embed Google login in a WebView and does not construct its own OAuth request.
 
@@ -255,13 +260,14 @@ flowchart TB
 
     subgraph Subsystem[" Private Linux Subsystem (PRoot ARM64) "]
         Ubuntu["Ubuntu 20.04 LTS Subsystem<br/>Rootless Userspace Environment"]
-        Agent["Agent Registry<br/>Claude • DeepSeek • Antigravity"]
+        Agent["Agent Registry<br/>Claude • DeepSeek • Antigravity • OpenCode • Hermes"]
         Tools["Development Toolchains<br/>Node.js • Git • Python • C++"]
         Workspace["Local Project Workspace<br/>Files • Git History • Checkpoints"]
     end
 
     subgraph Cloud[" Model Providers "]
         Anthropic["Anthropic / API Gateways"]
+        NVIDIA["NVIDIA NIM / OpenAI Gateways"]
         Gateways["Google Antigravity Service"]
     end
 
@@ -280,12 +286,12 @@ flowchart TB
 
     class UI,Service,Keystore,Bridge hostStyle;
     class Ubuntu,Agent,Tools,Workspace subStyle;
-    class Anthropic,Gateways cloudStyle;
+    class Anthropic,NVIDIA,Gateways cloudStyle;
 ```
 
 ### Core Runtime Components
 * **Base Environment**: Ubuntu 20.04 ARM64 verified rootfs
-* **Agent Engine**: Registry-selected, isolated drivers for Claude Code, DeepSeek Harness, and the official Antigravity CLI
+* **Agent Engine**: Registry-selected, isolated drivers for five coding agents — Claude Code, DeepSeek Harness, the official Antigravity CLI, OpenCode, and Hermes
 * **Native Tooling**: Node.js LTS, npm, Git, OpenSSL, curl, and GNU coreutils
 * **Process Virtualization**: PRoot user-space architecture emulation with zero kernel modifications
 
