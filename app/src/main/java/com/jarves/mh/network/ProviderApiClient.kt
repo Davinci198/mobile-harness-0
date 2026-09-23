@@ -177,11 +177,13 @@ class ProviderApiClient {
         var last: ModelHealth = ModelHealth(modelId, ModelHealthStatus.ERROR, 0L, 0, "No endpoint")
         for (endpoint in endpoints) {
             var attempt = 0
+            var lastCode = 0
             while (true) {
                 attempt++
                 val started = System.currentTimeMillis()
                 val response = request(endpoint, "POST", apiKey, body, protocol, connectTimeoutMs = 12_000, readTimeoutMs = 30_000)
                 val elapsed = System.currentTimeMillis() - started
+                lastCode = response.code
                 last = healthFromResponse(modelId, response.code, response.body, response.error, elapsed)
                 // Retry 429 with exponential backoff (max 3 attempts)
                 if (response.code == 429 && attempt < 3) {
@@ -191,7 +193,7 @@ class ProviderApiClient {
                 }
                 break
             }
-            if (response.code != 404 && response.code != 0) return last
+            if (lastCode != 404 && lastCode != 0) return last
         }
         return last
     }
