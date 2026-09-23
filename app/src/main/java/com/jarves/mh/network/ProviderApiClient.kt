@@ -31,19 +31,21 @@ class ProviderApiClient {
         apiKey: String,
         protocol: ProviderProtocol,
     ): ModelDiscoveryResult = withContext(Dispatchers.IO) {
-        if (baseUrl.isBlank()) {
+        val cleanBaseUrl = normalizeBaseUrl(baseUrl)
+        val cleanKey = sanitizeApiKey(apiKey)
+        if (cleanBaseUrl.isBlank()) {
             return@withContext ModelDiscoveryResult.Failure("Enter a base URL first.")
         }
 
         var authError = false
         var lastMessage = "This provider did not expose a model list. You can enter a custom model name."
         var lastProviderMessage: String? = null
-        for (endpoint in modelEndpoints(baseUrl, protocol)) {
+        for (endpoint in modelEndpoints(cleanBaseUrl, protocol)) {
             // OpenRouter's complete catalog is public. Fetch it anonymously even when
             // OpenRouter is configured through Custom API so an account-scoped key does
             // not reduce discovery to the models allowed by that key's preferences.
             // The saved key is still used for validation and all inference requests.
-            val discoveryKey = if (isOpenRouterCatalogEndpoint(endpoint)) "" else apiKey
+            val discoveryKey = if (isOpenRouterCatalogEndpoint(endpoint)) "" else cleanKey
             val response = request(endpoint, "GET", discoveryKey, protocol = protocol)
             when {
                 response.code == 401 || response.code == 403 -> {
@@ -75,60 +77,85 @@ class ProviderApiClient {
         protocol: ProviderProtocol,
         discoveredModels: List<DiscoveredModel>,
     ): ConnectionValidation = withContext(Dispatchers.IO) {
-        if (baseUrl.isBlank() || model.isBlank() || apiKey.isBlank()) {
+        val cleanBaseUrl = normalizeBaseUrl(baseUrl)
+        val cleanModel = model.trim()
+        val cleanKey = sanitizeApiKey(apiKey)
+        if (cleanBaseUrl.isBlank() || cleanModel.isBlank() || cleanKey.isBlank()) {
             return@withContext ConnectionValidation.Failure("Base URL, model, and API key are required.")
         }
-        val endpoint = messagesEndpoint(baseUrl, protocol)
-        val body = validationBody(model, protocol)
+        val body = validationBody(cleanModel, protocol)
+        // Probe candidate paths so a base URL that already ends in /v1 or
+        // /chat/completions never becomes /v1/v1/messages or /chat/chat/…
         // Gateways may need to cold-start a model before returning the first token.
-        // A ten-second validation timeout produced false "network" failures even
-        // though discovery and the endpoint itself were healthy.
-        val response = request(endpoint, "POST", apiKey, body, protocol, connectTimeoutMs = 12_000, readTimeoutMs = 45_000)
+        var authRejected = false
+        var modelRejected = false
+        var lastCode = 0
+        var lastBody = ""
+        var lastError: String? = null
+        for (endpoint in messagesEndpointCandidates(cleanBaseUrl, protocol)) {
+            val response = request(endpoint, "POST", cleanKey, body, protocol, connectTimeoutMs = 12_000, readTimeoutMs = 45_000)
+            when {
+                response.code in 200..299 -> return@withContext ConnectionValidation.Success(
+                    if (protocol == ProviderProtocol.ANTHROPIC || protocol == ProviderProtocol.ANTHROPIC_GATEWAY || protocol == ProviderProtocol.OPENROUTER) {
+                        "Anthropic Messages endpoint verified. Claude Code settings are ready."
+                    } else {
+                        "Connection successful. Claude Code settings are ready."
+                    },
+                )
+                response.code == 401 || response.code == 403 -> {
+                    authRejected = true
+                    lastCode = response.code
+                    lastBody = response.body
+                }
+                response.code == 400 && response.body.contains("model", ignoreCase = true) -> {
+                    modelRejected = true
+                    lastCode = response.code
+                    lastBody = response.body
+                }
+                response.code > 0 -> {
+                    lastCode = response.code
+                    lastBody = response.body
+                }
+                response.error != null -> lastError = response.error
+            }
+        }
         when {
-            response.code in 200..299 -> ConnectionValidation.Success(
-                if (protocol == ProviderProtocol.ANTHROPIC || protocol == ProviderProtocol.ANTHROPIC_GATEWAY || protocol == ProviderProtocol.OPENROUTER) {
-                    "Anthropic Messages endpoint verified. Claude Code settings are ready."
-                } else {
-                    "Connection successful. Claude Code settings are ready."
-                },
-            )
-            response.code == 401 || response.code == 403 -> ConnectionValidation.Failure(
+            authRejected -> ConnectionValidation.Failure(
                 "Check this API key or select another saved key.",
-                providerErrorMessage(response.body),
+                providerErrorMessage(lastBody),
                 "Rejected",
             )
-            response.code == 404 -> ConnectionValidation.Failure(
+            modelRejected -> ConnectionValidation.Failure(
+                "Refresh the model list or select a different model.",
+                providerErrorMessage(lastBody),
+                "Model error",
+            )
+            lastCode == 404 -> ConnectionValidation.Failure(
                 "Check the Base URL and selected gateway protocol.",
-                providerErrorMessage(response.body),
+                providerErrorMessage(lastBody),
                 "Endpoint error",
             )
-            response.code == 400 && response.body.contains("model", ignoreCase = true) ->
-                ConnectionValidation.Failure(
-                    "Refresh the model list or select a different model.",
-                    providerErrorMessage(response.body),
-                    "Model error",
-                )
-            response.code == 429 -> ConnectionValidation.Failure(
+            lastCode == 429 -> ConnectionValidation.Failure(
                 "Wait a moment, then retry or use another API key.",
-                providerErrorMessage(response.body),
+                providerErrorMessage(lastBody),
                 "Rate limited",
             )
-            response.code in 500..599 -> ConnectionValidation.Failure(
+            lastCode in 500..599 -> ConnectionValidation.Failure(
                 "The provider is temporarily unavailable. Try again shortly.",
-                providerErrorMessage(response.body),
+                providerErrorMessage(lastBody),
                 "Provider error",
             )
-            response.code > 0 -> ConnectionValidation.Failure(
+            lastCode > 0 -> ConnectionValidation.Failure(
                 "Review the model, protocol, and endpoint settings.",
-                providerErrorMessage(response.body),
+                providerErrorMessage(lastBody),
                 "Request failed",
             )
-            response.error?.contains("timeout", ignoreCase = true) == true ||
-                response.error?.contains("timed out", ignoreCase = true) == true ->
-                ConnectionValidation.Failure("Check your connection and try again.", response.error, "Timed out")
+            lastError?.contains("timeout", ignoreCase = true) == true ||
+                lastError?.contains("timed out", ignoreCase = true) == true ->
+                ConnectionValidation.Failure("Check your connection and try again.", lastError, "Timed out")
             else -> ConnectionValidation.Failure(
                 "Check your internet connection and provider settings.",
-                response.error,
+                lastError,
                 "Network error",
             )
         }
@@ -150,13 +177,15 @@ class ProviderApiClient {
                 readTimeout = readTimeoutMs
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Content-Type", "application/json")
-                if (apiKey.isNotBlank()) {
-                    setRequestProperty("Authorization", "Bearer $apiKey")
-                }
                 if (endpoint.startsWith("https://opencode.ai/zen/")) {
                     // OpenCode Zen expects requests to identify the OpenCode client and session.
                     setRequestProperty("User-Agent", "opencode/1.18.20")
                     setRequestProperty("x-session-id", "session-${UUID.randomUUID()}")
+                } else {
+                    setRequestProperty("User-Agent", "MobileHarness/1.0 (Android)")
+                }
+                if (apiKey.isNotBlank()) {
+                    setRequestProperty("Authorization", "Bearer $apiKey")
                 }
                 if (apiKey.isNotBlank() && protocol != ProviderProtocol.OPENROUTER && protocol != ProviderProtocol.OPENAI_CHAT && protocol != ProviderProtocol.OPENAI_RESPONSES) {
                     setRequestProperty("x-api-key", apiKey)
@@ -173,24 +202,95 @@ class ProviderApiClient {
         }.getOrElse { HttpResult(0, "", it.message ?: "Network connection failed",) }
     }
 
-    private fun modelEndpoints(baseUrl: String, protocol: ProviderProtocol): List<String> {
-        val base = baseUrl.trim().trimEnd('/')
+    /**
+     * Strip path suffixes users paste into the Base URL field so we never probe
+     * doubled endpoints like /v1/v1/messages or /chat/chat/completions.
+     */
+    internal fun normalizeBaseUrl(raw: String): String {
+        var base = raw.trim().trimEnd('/')
+        val suffixes = listOf(
+            "/chat/completions",
+            "/chat",
+            "/completions",
+            "/messages",
+            "/responses",
+        )
+        for (suffix in suffixes) {
+            if (base.endsWith(suffix, ignoreCase = true)) {
+                base = base.substring(0, base.length - suffix.length).trimEnd('/')
+                break
+            }
+        }
+        return base
+    }
+
+    private fun sanitizeApiKey(raw: String): String =
+        raw.trim().removePrefix("Bearer ").removePrefix("bearer ").trim()
+
+    internal fun modelEndpoints(baseUrl: String, protocol: ProviderProtocol): List<String> {
+        val base = normalizeBaseUrl(baseUrl)
         val withoutAnthropic = base.removeSuffix("/anthropic")
         val candidates = when (protocol) {
             ProviderProtocol.OPENROUTER -> listOf("$base/v1/models")
-            ProviderProtocol.OPENAI_CHAT, ProviderProtocol.OPENAI_RESPONSES -> listOf("$base/models")
+            ProviderProtocol.OPENAI_CHAT, ProviderProtocol.OPENAI_RESPONSES -> buildList {
+                add("$base/models")
+                if (!base.endsWith("/v1")) add("$base/v1/models")
+            }
             else -> listOf("$base/v1/models", "$base/models", "$withoutAnthropic/models", "$withoutAnthropic/v1/models")
         }
         return candidates.distinct()
     }
 
-    private fun messagesEndpoint(baseUrl: String, protocol: ProviderProtocol): String {
-        val base = baseUrl.trim().trimEnd('/')
+    /**
+     * Candidate chat endpoints ordered most→least likely. A base URL that
+     * already ends in /v1 gets the path appended directly (never /v1/v1/…).
+     */
+    internal fun messagesEndpointCandidates(baseUrl: String, protocol: ProviderProtocol): List<String> {
+        val base = normalizeBaseUrl(baseUrl)
         return when (protocol) {
-            ProviderProtocol.OPENROUTER -> "$base/v1/messages"
-            ProviderProtocol.OPENAI_CHAT -> "$base/chat/completions"
-            ProviderProtocol.OPENAI_RESPONSES -> "$base/responses"
-            else -> if (base.endsWith("/v1")) "$base/messages" else "$base/v1/messages"
+            ProviderProtocol.OPENROUTER -> buildList {
+                if (base.endsWith("/v1")) {
+                    add("$base/messages")
+                } else {
+                    add("$base/v1/messages")
+                    add("$base/messages")
+                }
+            }.distinct()
+            ProviderProtocol.OPENAI_CHAT -> buildList {
+                if (base.endsWith("/v1")) {
+                    add("$base/chat/completions")
+                } else {
+                    add("$base/v1/chat/completions")
+                    add("$base/chat/completions")
+                }
+            }.distinct()
+            ProviderProtocol.OPENAI_RESPONSES -> buildList {
+                if (base.endsWith("/v1")) {
+                    add("$base/responses")
+                } else {
+                    add("$base/v1/responses")
+                    add("$base/responses")
+                }
+            }.distinct()
+            else -> {
+                val withoutAnthropic = base.removeSuffix("/anthropic")
+                buildList {
+                    if (base.endsWith("/v1")) {
+                        add("$base/messages")
+                    } else {
+                        add("$base/v1/messages")
+                        add("$base/messages")
+                    }
+                    if (withoutAnthropic != base) {
+                        if (withoutAnthropic.endsWith("/v1")) {
+                            add("$withoutAnthropic/messages")
+                        } else {
+                            add("$withoutAnthropic/v1/messages")
+                            add("$withoutAnthropic/messages")
+                        }
+                    }
+                }.distinct()
+            }
         }
     }
 
@@ -221,12 +321,13 @@ class ProviderApiClient {
             .toString()
         ProviderProtocol.OPENAI_CHAT -> JSONObject()
             .put("model", model)
-            .put("max_tokens", 1)
+            // Some gateways reject max_tokens <= 2; 16 is enough for a ping.
+            .put("max_tokens", 16)
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "Reply OK")))
             .toString()
         else -> JSONObject()
             .put("model", model)
-            .put("max_tokens", 1)
+            .put("max_tokens", 16)
             .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "Reply OK")))
             .toString()
     }

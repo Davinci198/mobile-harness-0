@@ -27,6 +27,18 @@ interface RuntimeBridge {
 }
 
 object RuntimeLaunchConfigBuilder {
+    /**
+     * Claude Code appends /v1/messages to ANTHROPIC_BASE_URL itself. Custom
+     * gateways are often entered with a base URL that already ends in /v1,
+     * which would double the segment (…/v1/v1/messages → 404 shown as a key
+     * error). Strip a trailing /v1 only; keep real suffixes like /anthropic
+     * (DeepSeek/Kimi).
+     */
+    private fun normalizeAnthropicBaseUrl(raw: String): String {
+        val base = raw.trim().trimEnd('/')
+        return if (base.endsWith("/v1")) base.removeSuffix("/v1").trimEnd('/') else base
+    }
+
     fun build(profile: ProviderProfile, authToken: String? = null, localGatewayUrl: String? = null): RuntimeLaunchConfig {
         val environment = linkedMapOf("DISABLE_AUTOUPDATER" to "1")
         when (profile.kind.protocol) {
@@ -38,16 +50,11 @@ object RuntimeLaunchConfigBuilder {
                 environment["ANTHROPIC_API_KEY"] = ""
                 environment["ANTHROPIC_AUTH_TOKEN"] = ""
             }
-            com.jarves.mh.model.ProviderProtocol.ANTHROPIC -> {
-                environment["ANTHROPIC_BASE_URL"] = profile.baseUrl.trimEnd('/')
-                environment["ANTHROPIC_MODEL"] = profile.model
-            }
-            com.jarves.mh.model.ProviderProtocol.ANTHROPIC_GATEWAY -> {
-                environment["ANTHROPIC_BASE_URL"] = profile.baseUrl.trimEnd('/')
-                environment["ANTHROPIC_MODEL"] = profile.model
-            }
-            com.jarves.mh.model.ProviderProtocol.OPENROUTER -> {
-                environment["ANTHROPIC_BASE_URL"] = profile.baseUrl.trimEnd('/')
+            com.jarves.mh.model.ProviderProtocol.ANTHROPIC,
+            com.jarves.mh.model.ProviderProtocol.ANTHROPIC_GATEWAY,
+            com.jarves.mh.model.ProviderProtocol.OPENROUTER,
+            -> {
+                environment["ANTHROPIC_BASE_URL"] = normalizeAnthropicBaseUrl(profile.baseUrl)
                 environment["ANTHROPIC_MODEL"] = profile.model
             }
             com.jarves.mh.model.ProviderProtocol.OPENAI_RESPONSES,

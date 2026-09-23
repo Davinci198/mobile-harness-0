@@ -4686,7 +4686,7 @@ private fun ChatTab(
                                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                                         shape = CircleShape,
                                     )
-                                    .clickable(enabled = false),
+                                    .clickable(enabled = false, onClick = {}),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 CircularProgressIndicator(

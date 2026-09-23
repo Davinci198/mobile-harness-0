@@ -35,10 +35,14 @@ internal class HermesRuntimeBridge(
             add("--provider")
             add(providerName)
         }
-        val model = provider.model.ifBlank { provider.kind.defaultModel }
-        if (model.isNotBlank()) {
-            add("--model")
-            add(model)
+        // FREE uses the guest's configured Nous OAuth free tier; forcing a
+        // stale model id (e.g. auto/coding:free) 404s on the portal.
+        if (provider.kind != ProviderKind.FREE) {
+            val model = provider.model.ifBlank { provider.kind.defaultModel }
+            if (model.isNotBlank()) {
+                add("--model")
+                add(model)
+            }
         }
         add("-q")
         add(prompt)
