@@ -1703,6 +1703,29 @@ class RuntimeInstaller(private val context: Context) {
         )
     }
 
+    fun processForProject(
+        projectSlug: String,
+        guestCommand: List<String>,
+        pseudoTerminal: Boolean = false,
+        ptyRows: Int = 40,
+        ptyColumns: Int = 120,
+    ): Process {
+        val installed = installedRuntime()
+        val guestWorkspacePath = "/workspace/$projectSlug"
+        val workspace = File(context.filesDir, "workspace/$projectSlug")
+        return process(
+            proot = installed.proot,
+            rootfs = installed.rootfs,
+            workspace = workspace,
+            environment = emptyMap(),
+            guestCommand = guestCommand,
+            guestWorkspacePath = guestWorkspacePath,
+            pseudoTerminal = pseudoTerminal,
+            ptyRows = ptyRows,
+            ptyColumns = ptyColumns,
+        )
+    }
+
     fun ensureSettingsAndHooks() {
         val hook = File(rootfs, "opt/pocket/permission-hook.sh")
         hook.parentFile?.mkdirs()
