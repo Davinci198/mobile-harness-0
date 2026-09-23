@@ -100,7 +100,7 @@ class SkillLoaderTest {
         skill("a", "name: Same")
         skill("c", "name: Other")
         val catalog = loader.scan()
-        assertEquals(listOf("Other"), catalog.skills.map { it.name })
+        assertEquals(listOf("Same", "Other"), catalog.skills.map { it.name })
         assertTrue(catalog.issues.any { it.message.contains("Duplicate skill name") })
     }
 
