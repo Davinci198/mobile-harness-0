@@ -21,7 +21,7 @@ private class FakeMcpTransport : McpProcessTransport {
     @Volatile var alive = true
     @Volatile var stderrText = ""
 
-    override val input: java.io.InputStream = clientInput
+    override val input: java.io.InputStream = serverInput
     override val output: java.io.OutputStream = clientOutput
     override fun stderr(): String = stderrText
     override fun isAlive(): Boolean = alive
@@ -40,7 +40,7 @@ private class FakeMcpTransport : McpProcessTransport {
         handler: suspend (JSONObject) -> JSONObject? = { defaultResponse(it) },
     ): Thread = thread(isDaemon = true) {
         runBlocking {
-            val reader = BufferedReader(InputStreamReader(serverInput))
+            val reader = BufferedReader(InputStreamReader(clientInput))
             while (alive) {
                 val line = reader.readLine() ?: break
                 val envelope = JSONObject(line)
