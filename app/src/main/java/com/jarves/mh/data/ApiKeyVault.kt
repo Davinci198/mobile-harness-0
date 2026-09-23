@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import com.jarves.mh.data.db.MhDatabase
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyStore
@@ -13,13 +14,23 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/**
+ * Encrypted API-key vault. Ciphertext lives in a local Room DB; the wrapping
+ * key stays in AndroidKeyStore. Pool metadata (names/active pointer) stays in
+ * SharedPreferences and never contains secret material.
+ *
+ * Secrets previously stored under pocket_secrets are migrated lazily on first use.
+ */
 class ApiKeyVault(context: Context) {
-    private val preferences = context.getSharedPreferences("pocket_secrets", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val preferences = appContext.getSharedPreferences("pocket_secrets", Context.MODE_PRIVATE)
     private val alias = "pocket-provider-key"
+    private val store: SecretStore = RoomSecretStore(MhDatabase.get(appContext))
 
     @Synchronized
     fun put(providerId: String, secret: String) {
         if (secret.isBlank()) return
+        migrateLegacySecrets()
         val entries = ensurePool(providerId)
         val active = entries.firstOrNull { it.id == activeId(providerId) } ?: entries.firstOrNull()
         if (active == null) {
@@ -32,6 +43,7 @@ class ApiKeyVault(context: Context) {
     @Synchronized
     fun add(providerId: String, name: String, secret: String): ApiKeyInfo {
         require(secret.isNotBlank()) { "API key cannot be empty" }
+        migrateLegacySecrets()
         val entries = ensurePool(providerId).toMutableList()
         val entry = ApiKeyInfo(
             id = UUID.randomUUID().toString(),
@@ -47,6 +59,7 @@ class ApiKeyVault(context: Context) {
 
     @Synchronized
     fun list(providerId: String): List<ApiKeyInfo> {
+        migrateLegacySecrets()
         val entries = ensurePool(providerId)
         val active = activeId(providerId) ?: entries.firstOrNull()?.id
         return entries.map { it.copy(isActive = it.id == active) }
@@ -61,6 +74,7 @@ class ApiKeyVault(context: Context) {
 
     @Synchronized
     fun activate(providerId: String, keyId: String): Boolean {
+        migrateLegacySecrets()
         if (ensurePool(providerId).none { it.id == keyId }) return false
         setActiveId(providerId, keyId)
         return true
@@ -68,6 +82,7 @@ class ApiKeyVault(context: Context) {
 
     @Synchronized
     fun remove(providerId: String, keyId: String) {
+        migrateLegacySecrets()
         val remaining = ensurePool(providerId).filterNot { it.id == keyId }
         removeEncrypted(secretKey(providerId, keyId))
         savePool(providerId, remaining)
@@ -81,20 +96,21 @@ class ApiKeyVault(context: Context) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         val encrypted = cipher.doFinal(secret.toByteArray(Charsets.UTF_8))
-        preferences.edit()
-            .putString("$storageId.iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
-            .putString("$storageId.value", Base64.encodeToString(encrypted, Base64.NO_WRAP))
-            .apply()
+        store.put(
+            storageId,
+            Base64.encodeToString(cipher.iv, Base64.NO_WRAP),
+            Base64.encodeToString(encrypted, Base64.NO_WRAP),
+        )
     }
 
     fun contains(providerId: String): Boolean = get(providerId) != null
 
     @Synchronized
     fun remove(providerId: String) {
+        migrateLegacySecrets()
         ensurePool(providerId).forEach { removeEncrypted(secretKey(providerId, it.id)) }
+        removeEncrypted(providerId)
         preferences.edit()
-            .remove("$providerId.iv")
-            .remove("$providerId.value")
             .remove(poolKey(providerId))
             .remove(activeKey(providerId))
             .apply()
@@ -102,25 +118,55 @@ class ApiKeyVault(context: Context) {
 
     @Synchronized
     fun get(providerId: String): String? {
+        migrateLegacySecrets()
         val active = list(providerId).firstOrNull { it.isActive } ?: return null
         return getEncrypted(secretKey(providerId, active.id))
     }
 
     private fun getEncrypted(storageId: String): String? = runCatching {
-        val iv = Base64.decode(preferences.getString("$storageId.iv", null), Base64.NO_WRAP)
-        val encrypted = Base64.decode(preferences.getString("$storageId.value", null), Base64.NO_WRAP)
+        val pair = store.get(storageId) ?: return null
+        val iv = Base64.decode(pair.first, Base64.NO_WRAP)
+        val encrypted = Base64.decode(pair.second, Base64.NO_WRAP)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
         cipher.doFinal(encrypted).toString(Charsets.UTF_8)
     }.getOrNull()
 
     private fun removeEncrypted(storageId: String) {
+        store.remove(storageId)
         preferences.edit().remove("$storageId.iv").remove("$storageId.value").apply()
+    }
+
+    /**
+     * One-time copy of ciphertext written by older builds (SharedPreferences)
+     * into Room. Pool/active metadata stays where it is.
+     */
+    @Synchronized
+    private fun migrateLegacySecrets() {
+        val all = preferences.all
+        if (all.isEmpty()) return
+        val ivKeys = all.keys.filter { it.endsWith(".iv") }
+        var migrated = false
+        for (ivKey in ivKeys) {
+            val storageId = ivKey.removeSuffix(".iv")
+            val iv = all[ivKey] as? String ?: continue
+            val value = all["$storageId.value"] as? String ?: continue
+            if (store.get(storageId) == null) {
+                store.put(storageId, iv, value)
+            }
+            preferences.edit().remove(ivKey).remove("$storageId.value").apply()
+            migrated = true
+        }
+        if (migrated) {
+            preferences.edit().remove("$storageIdLegacyMarker").apply()
+        }
     }
 
     private fun ensurePool(providerId: String): List<ApiKeyInfo> {
         readPool(providerId).takeIf(List<ApiKeyInfo>::isNotEmpty)?.let { return it }
-        if (!preferences.contains("$providerId.value")) return emptyList()
+        if (getEncrypted(providerId) == null && store.get(providerId) == null && !preferences.contains("$providerId.value")) {
+            return emptyList()
+        }
         val legacySecret = getEncrypted(providerId) ?: return emptyList()
         val legacy = ApiKeyInfo("legacy", "Primary", true)
         putEncrypted(secretKey(providerId, legacy.id), legacySecret)
@@ -150,6 +196,7 @@ class ApiKeyVault(context: Context) {
     private fun poolKey(providerId: String) = "$providerId.pool"
     private fun activeKey(providerId: String) = "$providerId.active"
     private fun secretKey(providerId: String, id: String) = "$providerId.pool.$id"
+    private val storageIdLegacyMarker = "legacy_secrets_migrated"
 
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

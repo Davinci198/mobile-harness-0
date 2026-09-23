@@ -2,8 +2,14 @@
 <data-extraction-rules>
     <cloud-backup disableIfNoEncryptionCapabilities="true">
         <exclude domain="sharedpref" path="pocket_secrets.xml" />
+        <exclude domain="database" path="mh_secrets.db" />
+        <exclude domain="database" path="mh_secrets.db-shm" />
+        <exclude domain="database" path="mh_secrets.db-wal" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="pocket_secrets.xml" />
+        <exclude domain="database" path="mh_secrets.db" />
+        <exclude domain="database" path="mh_secrets.db-shm" />
+        <exclude domain="database" path="mh_secrets.db-wal" />
     </device-transfer>
 </data-extraction-rules>

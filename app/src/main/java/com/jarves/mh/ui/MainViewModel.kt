@@ -33,7 +33,10 @@ import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.generateQuickChatIdentity
 import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.network.ConnectionValidation
+import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.ModelDiscoveryResult
+import com.jarves.mh.network.ModelHealth
+import com.jarves.mh.network.ModelHealthStatus
 import com.jarves.mh.network.ProviderApiClient
 import com.jarves.mh.network.GitHubRepository
 import com.jarves.mh.runtime.ClaudeRuntimeBridge
@@ -238,6 +241,12 @@ data class AppUiState(
     val antigravityEffort: String = "high",
     val antigravityModels: List<String> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
+    val modelScanLines: List<String> = emptyList(),
+    val isModelScanning: Boolean = false,
+    val brokenModelIds: Set<String> = emptySet(),
+    val hideBrokenModels: Boolean = false,
+    val autoScanEnabled: Boolean = true,
+    val autoScanDone: Boolean = false,
     val androidBuildRunning: Boolean = false,
     val androidBuildMessage: String? = null,
     val appUpdate: AppUpdateInfo? = null,
@@ -329,6 +338,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // GitHub's official CLI owns its OAuth credential. Remove credentials from
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
+        reloadModelScanPrefs()
         viewModelScope.launch { refreshGitHubConnection() }
         RuntimeSetupController.restore(application)
         viewModelScope.launch(Dispatchers.IO) {
@@ -1285,6 +1295,147 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(onboardingComplete = true, provider = saved, startupStage = StartupStage.READY) }
         refreshActiveApiKey(profile.kind)
         pingApi()
+        maybeAutoScanFirstIntegration(saved, secret)
+    }
+
+    /** First successful key save for an agent → discover + health-scan models once. */
+    private fun maybeAutoScanFirstIntegration(profile: ProviderProfile, secret: String) {
+        val agent = _state.value.agentKind
+        if (agent == AgentKind.ANTIGRAVITY) return
+        if (!preferences.autoScanEnabled(agent) || preferences.autoScanDone(agent)) return
+        val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
+        if (key.isBlank()) return
+        viewModelScope.launch {
+            runModelScan(profile, key, models = emptyList())
+        }
+    }
+
+    fun setHideBrokenModels(value: Boolean) {
+        val agent = _state.value.agentKind
+        preferences.setHideBrokenModels(agent, value)
+        _state.update { it.copy(hideBrokenModels = value) }
+    }
+
+    fun setAutoScanEnabled(value: Boolean) {
+        val agent = _state.value.agentKind
+        preferences.setAutoScanEnabled(agent, value)
+        _state.update { it.copy(autoScanEnabled = value) }
+    }
+
+    fun reloadModelScanPrefs() {
+        val agent = _state.value.agentKind
+        _state.update {
+            it.copy(
+                brokenModelIds = preferences.brokenModels(agent),
+                hideBrokenModels = preferences.hideBrokenModels(agent),
+                autoScanEnabled = preferences.autoScanEnabled(agent),
+                autoScanDone = preferences.autoScanDone(agent),
+            )
+        }
+    }
+
+    /**
+     * Batch-test models and stream terminal-style progress lines into state.
+     * If [models] is empty, discovers the catalog first.
+     */
+    fun scanModels(profile: ProviderProfile, secret: String, models: List<DiscoveredModel>) {
+        if (_state.value.isModelScanning) return
+        val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
+        if (key.isBlank()) {
+            _state.update {
+                it.copy(
+                    modelScanLines = it.modelScanLines + "! API key required for model scan",
+                    isModelScanning = false,
+                )
+            }
+            return
+        }
+        viewModelScope.launch { runModelScan(profile, key, models) }
+    }
+
+    private suspend fun runModelScan(profile: ProviderProfile, key: String, models: List<DiscoveredModel>) {
+        val agent = _state.value.agentKind
+        if (_state.value.isModelScanning) return
+        val startedHeader = mutableListOf(
+            "$ scan ${profile.kind.title} — discovering catalog…",
+        )
+        _state.update {
+            it.copy(isModelScanning = true, modelScanLines = startedHeader)
+        }
+        try {
+            var catalog = models
+            if (catalog.isEmpty()) {
+                when (val discovery = providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, agent))) {
+                    is ModelDiscoveryResult.Success -> {
+                        catalog = discovery.models
+                        _state.update {
+                            it.copy(modelScanLines = it.modelScanLines + "✓ ${catalog.size} models in catalog")
+                        }
+                    }
+                    is ModelDiscoveryResult.Failure -> {
+                        _state.update {
+                            it.copy(
+                                modelScanLines = it.modelScanLines + "! discovery failed: ${discovery.message}",
+                                isModelScanning = false,
+                            )
+                        }
+                        return
+                    }
+                }
+            } else {
+                _state.update {
+                    it.copy(modelScanLines = it.modelScanLines + "✓ testing ${catalog.size} models")
+                }
+            }
+            _state.update {
+                it.copy(modelScanLines = it.modelScanLines + "$ concurrency 5, timeout 30s")
+            }
+            val protocol = providerProtocolForAgent(profile, agent)
+            val results = providerApi.validateModels(
+                baseUrl = profile.baseUrl,
+                apiKey = key,
+                protocol = protocol,
+                models = catalog,
+                concurrency = 5,
+                onProgress = { health ->
+                    _state.update { state ->
+                        state.copy(modelScanLines = state.modelScanLines + formatModelHealthLine(health))
+                    }
+                },
+            )
+            val broken = results.filter(ModelHealth::isBroken).map(ModelHealth::modelId).toSet()
+            val okCount = results.size - broken.size
+            preferences.setBrokenModels(agent, broken)
+            preferences.setAutoScanDone(agent, true)
+            _state.update {
+                it.copy(
+                    isModelScanning = false,
+                    brokenModelIds = broken,
+                    autoScanDone = true,
+                    modelScanLines = it.modelScanLines +
+                        "Done: $okCount/${results.size} work · ${broken.size} broken",
+                )
+            }
+        } catch (t: Throwable) {
+            _state.update {
+                it.copy(
+                    isModelScanning = false,
+                    modelScanLines = it.modelScanLines + "! scan failed: ${t.message}",
+                )
+            }
+        }
+    }
+
+    private fun formatModelHealthLine(health: ModelHealth): String {
+        val latency = "%.1fs".format(health.latencyMs / 1000.0)
+        return when (health.status) {
+            ModelHealthStatus.OK -> "✓ ${health.modelId.padEnd(48)} $latency OK"
+            ModelHealthStatus.TIMEOUT -> "T ${health.modelId.padEnd(48)} $latency TIMEOUT"
+            ModelHealthStatus.FAIL ->
+                "✗ ${health.modelId.padEnd(48)} $latency FAIL ${health.httpCode} ${health.detail.orEmpty().take(60)}"
+            ModelHealthStatus.ERROR ->
+                "! ${health.modelId.padEnd(48)} $latency ERROR ${health.detail.orEmpty().take(60)}"
+        }
     }
 
     fun finishAntigravityOnboarding() {
@@ -1341,6 +1492,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 apiPingMessage = null,
             )
         }
+        reloadModelScanPrefs()
     }
 
     /** Installs the other agent on demand (Settings) with live progress, then switches to it. */

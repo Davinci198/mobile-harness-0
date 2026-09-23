@@ -5,11 +5,29 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 data class DiscoveredModel(val id: String, val displayName: String = id, val isFree: Boolean = false)
+
+enum class ModelHealthStatus { OK, FAIL, TIMEOUT, ERROR }
+
+data class ModelHealth(
+    val modelId: String,
+    val status: ModelHealthStatus,
+    val latencyMs: Long,
+    val httpCode: Int = 0,
+    val detail: String? = null,
+) {
+    val isBroken: Boolean get() = status != ModelHealthStatus.OK
+}
 
 sealed interface ModelDiscoveryResult {
     data class Success(val models: List<DiscoveredModel>, val endpoint: String) : ModelDiscoveryResult
@@ -68,6 +86,74 @@ class ProviderApiClient {
             if (authError) "Check the saved API key, then try refreshing again." else lastMessage,
             lastProviderMessage,
         )
+    }
+
+    /**
+     * Probe each model with a tiny completion (same idea as the external
+     * functionez scanner). Streams per-model health so the UI can print a
+     * terminal-style log while the batch runs.
+     */
+    suspend fun validateModels(
+        baseUrl: String,
+        apiKey: String,
+        protocol: ProviderProtocol,
+        models: List<DiscoveredModel>,
+        concurrency: Int = 5,
+        onProgress: suspend (ModelHealth) -> Unit = {},
+    ): List<ModelHealth> = withContext(Dispatchers.IO) {
+        val cleanBaseUrl = normalizeBaseUrl(baseUrl)
+        val cleanKey = sanitizeApiKey(apiKey)
+        if (cleanBaseUrl.isBlank() || models.isEmpty()) return@withContext emptyList()
+        val endpoints = messagesEndpointCandidates(cleanBaseUrl, protocol)
+        val results = Collections.synchronizedList(mutableListOf<ModelHealth>())
+        val semaphore = Semaphore(concurrency.coerceIn(1, 10))
+        coroutineScope {
+            models.map { model ->
+                async {
+                    semaphore.withPermit {
+                        val health = probeModel(endpoints, model.id, cleanKey, protocol)
+                        results.add(health)
+                        onProgress(health)
+                    }
+                }
+            }.awaitAll()
+        }
+        results.toList()
+    }
+
+    private fun probeModel(
+        endpoints: List<String>,
+        modelId: String,
+        apiKey: String,
+        protocol: ProviderProtocol,
+    ): ModelHealth {
+        val body = validationBody(modelId, protocol)
+        var last: ModelHealth = ModelHealth(modelId, ModelHealthStatus.ERROR, 0L, 0, "No endpoint")
+        for (endpoint in endpoints) {
+            val started = System.currentTimeMillis()
+            val response = request(endpoint, "POST", apiKey, body, protocol, connectTimeoutMs = 12_000, readTimeoutMs = 30_000)
+            val elapsed = System.currentTimeMillis() - started
+            last = healthFromResponse(modelId, response.code, response.body, response.error, elapsed)
+            if (response.code != 404 && response.code != 0) return last
+        }
+        return last
+    }
+
+    internal fun healthFromResponse(
+        modelId: String,
+        code: Int,
+        body: String,
+        error: String?,
+        elapsedMs: Long,
+    ): ModelHealth = when {
+        code in 200..299 -> ModelHealth(modelId, ModelHealthStatus.OK, elapsedMs, code)
+        error != null && error.contains("timeout", ignoreCase = true) ->
+            ModelHealth(modelId, ModelHealthStatus.TIMEOUT, elapsedMs, 0, error.take(160))
+        code in 400..599 ->
+            ModelHealth(modelId, ModelHealthStatus.FAIL, elapsedMs, code, providerErrorMessage(body) ?: error ?: "HTTP $code")
+        error != null ->
+            ModelHealth(modelId, ModelHealthStatus.ERROR, elapsedMs, 0, error.take(160))
+        else -> ModelHealth(modelId, ModelHealthStatus.ERROR, elapsedMs, code, "HTTP $code")
     }
 
     suspend fun validate(

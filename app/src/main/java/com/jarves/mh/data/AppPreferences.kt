@@ -218,6 +218,41 @@ class AppPreferences(private val context: Context) {
 
     private fun providerPrefix(agent: AgentKind): String = "provider_${agent.stableId.replace('-', '_')}_"
 
+    fun brokenModels(agent: AgentKind): Set<String> {
+        val raw = preferences.getString("${providerPrefix(agent)}broken_models", null) ?: return emptySet()
+        return runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotBlank) }.toSet()
+        }.getOrDefault(emptySet())
+    }
+
+    fun setBrokenModels(agent: AgentKind, ids: Set<String>) {
+        val arr = JSONArray()
+        ids.sorted().forEach(arr::put)
+        preferences.edit().putString("${providerPrefix(agent)}broken_models", arr.toString()).apply()
+    }
+
+    fun hideBrokenModels(agent: AgentKind): Boolean =
+        preferences.getBoolean("${providerPrefix(agent)}hide_broken", false)
+
+    fun setHideBrokenModels(agent: AgentKind, value: Boolean) {
+        preferences.edit().putBoolean("${providerPrefix(agent)}hide_broken", value).apply()
+    }
+
+    fun autoScanEnabled(agent: AgentKind): Boolean =
+        preferences.getBoolean("${providerPrefix(agent)}auto_scan_enabled", true)
+
+    fun setAutoScanEnabled(agent: AgentKind, value: Boolean) {
+        preferences.edit().putBoolean("${providerPrefix(agent)}auto_scan_enabled", value).apply()
+    }
+
+    fun autoScanDone(agent: AgentKind): Boolean =
+        preferences.getBoolean("${providerPrefix(agent)}auto_scan_done", false)
+
+    fun setAutoScanDone(agent: AgentKind, value: Boolean) {
+        preferences.edit().putBoolean("${providerPrefix(agent)}auto_scan_done", value).apply()
+    }
+
     fun saveProjects(projects: List<Project>) {
         val arr = JSONArray()
         projects.forEach { p ->
