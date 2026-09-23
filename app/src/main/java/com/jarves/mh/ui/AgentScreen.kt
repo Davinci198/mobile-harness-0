@@ -23,12 +23,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -42,6 +44,7 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
@@ -49,6 +52,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -64,11 +68,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -173,6 +179,9 @@ fun AgentScreen(
     onRefreshAntigravityModels: () -> Unit = {},
     onSetAntigravityModel: (String) -> Unit = {},
     onSetAntigravityEffort: (String) -> Unit = {},
+    onScanModels: (ProviderProfile, String, List<DiscoveredModel>) -> Unit = { _, _, _ -> },
+    onHideBrokenChange: (Boolean) -> Unit = {},
+    onAutoScanChange: (Boolean) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var selectedKind by rememberSaveable(state.provider.kind) { mutableStateOf(state.provider.kind) }
@@ -212,9 +221,13 @@ fun AgentScreen(
     val providerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val antigravitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val filteredModels = remember(models, modelSearch) {
+    val filteredModels = remember(models, modelSearch, state.hideBrokenModels, state.brokenModelIds) {
+        var list = models
+        if (state.hideBrokenModels && state.brokenModelIds.isNotEmpty()) {
+            list = list.filterNot { it.id in state.brokenModelIds }
+        }
         val q = modelSearch.trim()
-        if (q.isBlank()) models else models.filter {
+        if (q.isBlank()) list else list.filter {
             it.id.contains(q, true) || it.displayName.contains(q, true)
         }
     }
@@ -241,6 +254,11 @@ fun AgentScreen(
         else antigravityModelList.filter {
             it.contains(q, true) || formatAntigravityModelName(it).contains(q, true)
         }
+    }
+
+    // Auto-scan (first integration or manual) should surface the terminal log.
+    LaunchedEffect(state.isModelScanning) {
+        if (state.isModelScanning) showModels = true
     }
 
     fun discoverModels() {
@@ -462,7 +480,66 @@ fun AgentScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                 )
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Switch(
+                            checked = state.hideBrokenModels,
+                            onCheckedChange = onHideBrokenChange,
+                            modifier = Modifier.scale(0.75f),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Hide broken", fontSize = 12.sp, maxLines = 2)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Switch(
+                            checked = state.autoScanEnabled,
+                            onCheckedChange = onAutoScanChange,
+                            modifier = Modifier.scale(0.75f),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Auto-scan first connect", fontSize = 12.sp, maxLines = 2)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+
+                Button(
+                    onClick = {
+                        val kind = selectedKind
+                        val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl.trim()
+                        val profile = ProviderProfile(kind, url, model.trim(), dshApi = dshApi)
+                        val key = apiKey.trim().ifBlank { newApiKey.trim() }
+                        onScanModels(profile, key, models)
+                    },
+                    enabled = !state.isModelScanning && !isDiscovering,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    if (state.isModelScanning) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Scanning models…")
+                    } else {
+                        Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (models.isEmpty()) "Discover & test all models" else "Test all models")
+                    }
+                }
+
+                if (state.modelScanLines.isNotEmpty() || state.isModelScanning) {
+                    Spacer(Modifier.height(10.dp))
+                    ModelScanTerminal(
+                        lines = state.modelScanLines,
+                        scanning = state.isModelScanning,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                }
 
                 if (status != null) {
                     Surface(
@@ -695,6 +772,10 @@ fun AgentScreen(
                                             if (option.isFree) {
                                                 Spacer(Modifier.width(6.dp))
                                                 Text("FREE", color = Color(0xFF58C99C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            if (option.id in state.brokenModelIds) {
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("BROKEN", color = MaterialTheme.colorScheme.error, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                         if (option.displayName != option.id) {
@@ -2004,4 +2085,60 @@ private fun defaultModelsForProvider(kind: ProviderKind): List<DiscoveredModel> 
     else -> if (kind.defaultModel.isNotBlank()) listOf(
         DiscoveredModel(kind.defaultModel, "${kind.title} Default (${kind.defaultModel})")
     ) else emptyList()
+}
+
+/** Terminal-style live log for the model health scan (mirrors the functionez scanner output). */
+@Composable
+internal fun ModelScanTerminal(
+    lines: List<String>,
+    scanning: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(lines.size) {
+        if (lines.isNotEmpty()) listState.animateScrollToItem(lines.lastIndex)
+    }
+    Surface(
+        modifier = modifier.heightIn(max = 200.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = Color(0xFF0D1117),
+        border = BorderStroke(1.dp, Color(0xFF30363D)),
+    ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
+            items(lines) { line ->
+                val color = when {
+                    line.startsWith("✓") -> Color(0xFF3FB950)
+                    line.startsWith("✗") || line.startsWith("!") -> Color(0xFFF85149)
+                    line.startsWith("T") -> Color(0xFFD29922)
+                    line.startsWith("$") || line.startsWith("Done") -> Color(0xFF58A6FF)
+                    else -> Color(0xFF8B949E)
+                }
+                Text(
+                    line,
+                    color = color,
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(vertical = 1.dp),
+                )
+            }
+            if (scanning) {
+                item {
+                    Text(
+                        "…",
+                        color = PocketOrange,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+        }
+    }
 }

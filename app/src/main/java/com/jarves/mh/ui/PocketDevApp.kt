@@ -2123,6 +2123,9 @@ private fun RootScreenHost(
                     onRefreshAntigravityModels = viewModel::refreshAntigravityModels,
                     onSetAntigravityModel = viewModel::setAntigravityModel,
                     onSetAntigravityEffort = viewModel::setAntigravityEffort,
+                    onScanModels = viewModel::scanModels,
+                    onHideBrokenChange = viewModel::setHideBrokenModels,
+                    onAutoScanChange = viewModel::setAutoScanEnabled,
                 )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,

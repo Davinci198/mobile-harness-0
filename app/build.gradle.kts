@@ -5,6 +5,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
 }
 
 val testSecrets = Properties().apply {
@@ -217,6 +218,9 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("com.github.luben:zstd-jni:1.5.6-9@aar")
     implementation(project(":third_party:termux-terminal-view"))
+    implementation("androidx.room:room-runtime:2.7.0")
+    implementation("androidx.room:room-ktx:2.7.0")
+    ksp("androidx.room:room-compiler:2.7.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250107")
