@@ -63,6 +63,12 @@ class ToolPermissionGateTest {
     }
 
     @Test
+    fun knownToolsIncludeCalculateAndSleep() {
+        assertTrue(ToolPermissionStore.knownTools.contains("Calculate"))
+        assertTrue(ToolPermissionStore.knownTools.contains("Sleep"))
+    }
+
+    @Test
     fun evaluateAllowRunsHooksAndAllows() {
         val store = store()
         store.globalDefault = ToolPermissionLevel.ALLOW

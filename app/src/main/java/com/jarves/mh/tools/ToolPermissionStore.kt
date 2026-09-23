@@ -68,7 +68,7 @@ class ToolPermissionStore(private val storage: ToolPermissionStorage) {
         private const val KEY_GLOBAL = "tool_permission_global"
         private const val KEY_OVERRIDE_PREFIX = "tool_permission_override_"
 
-        /** Tools MH surfaces in Settings for per-tool overrides (Claude Code set). */
+        /** Tools MH surfaces in Settings for per-tool overrides (Claude Code set + MH calc). */
         val knownTools: List<String> = listOf(
             "Bash",
             "Edit",
@@ -77,6 +77,8 @@ class ToolPermissionStore(private val storage: ToolPermissionStorage) {
             "Read",
             "Glob",
             "Grep",
+            "Calculate",
+            "Sleep",
         )
 
         fun overrideKey(toolName: String) = "$KEY_OVERRIDE_PREFIX$toolName"
