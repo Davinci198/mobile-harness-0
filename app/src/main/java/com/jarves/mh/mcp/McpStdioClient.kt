@@ -116,7 +116,8 @@ class McpStdioClient(
         val tools = linkedMapOf<String, McpTool>()
         val seenCursors = mutableSetOf<String>()
         var cursor: String? = null
-        repeat(McpLimits.MAX_LIST_PAGES) {
+        var page = 0
+        while (page++ < McpLimits.MAX_LIST_PAGES) {
             val params = JSONObject().apply { if (cursor != null) put("cursor", cursor) }
             val result = request("tools/list", params, config.requestTimeoutMillis)
             val array = result.optJSONArray("tools") ?: throw McpException.Protocol("MCP tools/list has no tools array")
@@ -134,16 +135,13 @@ class McpStdioClient(
                     inputSchema = schema,
                 )
             }
-            if (result.has("nextCursor")) {
-                if (result.opt("nextCursor") !is String) throw McpException.Protocol("MCP nextCursor is invalid")
-                val next = result.getString("nextCursor")
-                if (next.isBlank() || !seenCursors.add(next)) {
-                    throw McpException.Protocol("MCP tools/list returned a repeated cursor")
-                }
-                cursor = next
-                continue
+            if (!result.has("nextCursor")) return tools.values.toList()
+            if (result.opt("nextCursor") !is String) throw McpException.Protocol("MCP nextCursor is invalid")
+            val next = result.getString("nextCursor")
+            if (next.isBlank() || !seenCursors.add(next)) {
+                throw McpException.Protocol("MCP tools/list returned a repeated cursor")
             }
-            return tools.values.toList()
+            cursor = next
         }
         throw McpException.Protocol("MCP tools/list exceeded page limit")
     }
@@ -204,7 +202,7 @@ class McpStdioClient(
     private suspend fun request(method: String, params: JSONObject?, timeoutMillis: Long): JSONObject {
         val id = nextRequestId.getAndIncrement()
         val deferred = CompletableDeferred<JSONObject>()
-        try {
+        return try {
             operationMutex.withLock {
                 val currentState = state.get()
                 if (currentState != State.CONNECTING && currentState != State.READY) {
