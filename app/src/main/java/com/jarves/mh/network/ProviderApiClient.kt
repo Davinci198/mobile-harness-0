@@ -147,7 +147,7 @@ class ProviderApiClient {
         elapsedMs: Long,
     ): ModelHealth = when {
         code in 200..299 -> ModelHealth(modelId, ModelHealthStatus.OK, elapsedMs, code)
-        error != null && error.contains("timeout", ignoreCase = true) ->
+        error != null && (error.contains("timeout", ignoreCase = true) || error.contains("timed out", ignoreCase = true)) ->
             ModelHealth(modelId, ModelHealthStatus.TIMEOUT, elapsedMs, 0, error.take(160))
         code in 400..599 ->
             ModelHealth(modelId, ModelHealthStatus.FAIL, elapsedMs, code, providerErrorMessage(body) ?: error ?: "HTTP $code")
