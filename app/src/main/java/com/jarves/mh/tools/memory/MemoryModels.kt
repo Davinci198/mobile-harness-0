@@ -70,6 +70,6 @@ interface MemoryStore {
     fun save(data: MemoryData)
 }
 
-class MemoryStoreException(message: String) : IllegalStateException(message)
+sealed class MemoryStoreException(message: String) : IllegalStateException(message)
 class MemoryCorruptStoreException(message: String) : MemoryStoreException(message)
 class MemoryStorageException(message: String) : MemoryStoreException(message)
