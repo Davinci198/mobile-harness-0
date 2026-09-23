@@ -48,7 +48,16 @@ internal class OpenCodeRuntimeBridge(
         val model = provider.model.ifBlank { provider.kind.defaultModel }
         if (model.isNotBlank()) {
             add("--model")
-            add(if (prefix != null && !model.startsWith("$prefix/")) "$prefix/$model" else model)
+            if (provider.kind == ProviderKind.NVIDIA_NIM) {
+                // `--model` is `provider/modelKey` where modelKey must match the
+                // OPENCODE_CONFIG_CONTENT models map. NVIDIA's chat API rejects
+                // bare ids (HTTP 404) and requires the full `nvidia/…` body id,
+                // so the models map key keeps that prefix and the CLI gets
+                // `nvidia/<key>` (e.g. nvidia/nvidia/nemotron-…).
+                add("nvidia/${nvidiaApiModelId(model)}")
+            } else {
+                add(if (prefix != null && !model.startsWith("$prefix/")) "$prefix/$model" else model)
+            }
         }
         add(prompt)
     }
@@ -78,8 +87,9 @@ internal class OpenCodeRuntimeBridge(
                     // baseURL, env-resolved key, the one model for this turn, and
                     // disable workspace snapshots. Catalog fetch is already off above,
                     // so the explicit `models` map is what `--model nvidia/…` resolves.
-                    val modelId = provider.model.ifBlank { provider.kind.defaultModel }
-                        .removePrefix("nvidia/")
+                    // The key must be the full NVIDIA body id (`nvidia/…`); stripping
+                    // the prefix makes chat/completions answer HTTP 404.
+                    val modelId = nvidiaApiModelId(provider.model.ifBlank { provider.kind.defaultModel })
                     environment["OPENCODE_CONFIG_CONTENT"] = buildString {
                         append("""{"${'$'}schema":"https://opencode.ai/config.json","snapshot":false,""")
                         append(""""provider":{"nvidia":{""")
@@ -114,8 +124,8 @@ internal class OpenCodeRuntimeBridge(
                 environment["NVIDIA_API_KEY"] = secret
                 // Direct (no proxy): still pin the model + baseURL offline so a
                 // disabled catalog fetch cannot leave `--model nvidia/…` unresolved.
-                val modelId = provider.model.ifBlank { provider.kind.defaultModel }
-                    .removePrefix("nvidia/")
+                // Keep the full `nvidia/…` body id — bare ids 404 on NVIDIA's API.
+                val modelId = nvidiaApiModelId(provider.model.ifBlank { provider.kind.defaultModel })
                 val base = provider.resolvedBaseUrl.ifBlank { "https://integrate.api.nvidia.com/v1" }
                 environment["OPENCODE_CONFIG_CONTENT"] = buildString {
                     append("""{"${'$'}schema":"https://opencode.ai/config.json","snapshot":false,""")
@@ -155,3 +165,7 @@ internal class OpenCodeRuntimeBridge(
         ProviderKind.CLAUDE -> null
     }
 }
+
+/** Full id NVIDIA's `/v1/chat/completions` accepts (prefix required). */
+internal fun nvidiaApiModelId(model: String): String =
+    if (model.startsWith("nvidia/")) model else "nvidia/$model"
