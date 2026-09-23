@@ -228,6 +228,7 @@ internal abstract class HeadlessCliBridge(
         var lastBlockId = 0L
         var failed: String? = null
         var sawAnyOutput = false
+        var sawAssistantText = false
         while (process.isAlive || nativeProcess.outputFile.length() > outputOffset) {
             val available = nativeProcess.outputFile.length() - outputOffset
             if (available <= 0) {
@@ -262,8 +263,17 @@ internal abstract class HeadlessCliBridge(
                                         startsNewBlock = event.startsNewBlock,
                                         isFinal = false,
                                     )
+                                    is RuntimeEvent.AssistantDelta -> {
+                                        if (event.text.isNotBlank()) sawAssistantText = true
+                                        eventBus.emit(event)
+                                    }
                                     else -> eventBus.emit(event)
                                 }
+                            }
+                            val finalText = parsed.finalText
+                            if (!sawAssistantText && !finalText.isNullOrBlank()) {
+                                sawAssistantText = true
+                                eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, finalText))
                             }
                         }
                         CliParsed.IGNORED -> Unit
@@ -432,7 +442,10 @@ internal abstract class HeadlessCliBridge(
                 (msg.fromUser || !msg.text.startsWith("Hi! Tell me")) &&
                     !msg.text.startsWith("Failed to") &&
                     !msg.text.startsWith("Error:") &&
-                    !msg.text.contains("API Error")
+                    !msg.text.contains("API Error") &&
+                    // Drop empty assistant bubbles left by failed parsers so the
+                    // model never sees a wall of blank "Assistant:" turns.
+                    (msg.fromUser || msg.text.isNotBlank() || msg.workItems.isNotEmpty())
             }
             .dropLast(1)
 
@@ -468,7 +481,14 @@ internal abstract class HeadlessCliBridge(
         sb.appendLine()
         for (msg in priorMessages) {
             val role = if (msg.fromUser) "User" else "Assistant"
-            sb.appendLine("$role: ${msg.text}")
+            val body = when {
+                msg.text.isNotBlank() -> msg.text
+                msg.workItems.isNotEmpty() -> msg.workItems.joinToString("\n") { item ->
+                    "- ${item.title}" + if (item.detail.isNotBlank()) ": ${item.detail}" else ""
+                }
+                else -> "(task completed)"
+            }
+            sb.appendLine("$role: $body")
             if (msg.attachments.isNotEmpty()) {
                 sb.appendLine("Attached files:")
                 msg.attachments.forEach { attachment ->
@@ -593,18 +613,46 @@ internal sealed interface CliParsed {
         val failed: String? = null,
         /** The CLI emitted its final envelope; the process can be torn down. */
         val terminal: Boolean = false,
+        /**
+         * Full assistant reply from a terminal/summary envelope. Emitted as a
+         * delta only when the run produced no streamed assistant text (the
+         * CLI sometimes reports solely on the final result line).
+         */
+        val finalText: String? = null,
     ) : CliParsed
 }
 
 /**
- * OpenCode headless contract (opencode v2): `opencode run --format json`
- * prints newline-delimited JSON. Text/reasoning/tool parts carry
- * `part.type` + `part.text`, an `error` object ends the run, and completion is
- * signalled by the `message.complete` / `session.idle` event types.
+ * OpenCode headless contract (opencode v2.0.14+): `opencode run --format json`
+ * prints newline-delimited JSON. Current builds wrap every event in a
+ * JSON-RPC `session.event` envelope whose `params.event` carries
+ * `assistant/chunk` deltas (`data.chunk.type` = `text-delta` /
+ * `reasoning-delta`), `assistant/message` summaries, `tool/call` /
+ * `tool/result`, and `turn/end` / `session.status=idle` for completion.
+ * Older flat `part.type` lines are still accepted.
  */
 internal object OpenCodeJsonlParser {
+    private val reasoningStarted = ConcurrentHashMap.newKeySet<String>()
+
     fun parseLine(line: String, sessionId: String): CliParsed {
-        val event = runCatching { JSONObject(line) }.getOrNull() ?: return CliParsed.IGNORED
+        var event = runCatching { JSONObject(line) }.getOrNull() ?: return CliParsed.IGNORED
+        if (event.has("jsonrpc")) {
+            when {
+                // RPC replies: handshake uses id=1; the run's final reply uses
+                // a higher id after session.status=idle. Only idle/turn/end
+                // are treated as terminal so an early handshake cannot kill us.
+                !event.has("method") -> return CliParsed.IGNORED
+                event.optString("method") == "session.status" -> {
+                    val status = event.optJSONObject("params")?.optString("status").orEmpty()
+                    return if (status == "idle") CliParsed.Events(terminal = true)
+                    else CliParsed.Events(emptyList())
+                }
+                event.optString("method") == "session.event" -> {
+                    event = event.optJSONObject("params")?.optJSONObject("event") ?: return CliParsed.IGNORED
+                }
+                else -> return CliParsed.IGNORED
+            }
+        }
         val type = event.optString("type")
         when (type) {
             // Final envelopes of a one-shot run. The process can outlive them
@@ -612,6 +660,18 @@ internal object OpenCodeJsonlParser {
             "message.complete", "session.end" -> return CliParsed.Events(terminal = true)
             // Can fire between turns; not treated as the end of the run.
             "session.idle" -> return CliParsed.Events(emptyList())
+            "turn/end" -> {
+                val reason = event.optJSONObject("data")?.optJSONObject("reason")
+                val kind = reason?.optString("kind").orEmpty()
+                if (kind == "error" || kind == "blocked") {
+                    val message = reason?.optJSONObject("error")?.optString("message").orEmpty()
+                        .ifBlank { "OpenCode turn failed ($kind)" }
+                    return CliParsed.Events(failed = message, terminal = true)
+                }
+                // Successful turns are not terminal: tool use can start another
+                // turn before session.status flips to idle.
+                return CliParsed.Events(emptyList())
+            }
         }
         if (type == "error") {
             val error = event.optJSONObject("error")
@@ -623,6 +683,33 @@ internal object OpenCodeJsonlParser {
                     event.optString("type"),
                 ).firstOrNull { !it.isNullOrBlank() } ?: "OpenCode reported an error",
             )
+        }
+        when (type) {
+            "assistant/chunk" -> return parseAssistantChunk(event, sessionId)
+            "assistant/message" -> return parseAssistantMessage(event, sessionId)
+            "tool/call" -> {
+                val data = event.optJSONObject("data") ?: return CliParsed.IGNORED
+                val name = data.optString("name").ifBlank { "Tool" }
+                val arguments = data.optString("arguments")
+                return CliParsed.Events(
+                    listOf(RuntimeEvent.ToolStarted(sessionId, name, toolDetailFromArguments(arguments, name))),
+                )
+            }
+            "tool/result" -> {
+                val data = event.optJSONObject("data") ?: return CliParsed.IGNORED
+                val message = data.optJSONObject("message")
+                val block = message?.optJSONArray("content")?.optJSONObject(0)
+                val name = block?.optString("name").orEmpty().ifBlank { "Tool" }
+                val error = data.optJSONObject("error")
+                val text = contentText(block?.optJSONArray("content"))
+                val summary = error?.optString("message").orEmpty()
+                    .ifBlank { text }
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+                    .take(180)
+                    .ifBlank { "$name completed" }
+                return CliParsed.Events(listOf(RuntimeEvent.ToolCompleted(sessionId, name, summary)))
+            }
         }
         val part = event.optJSONObject("part") ?: return CliParsed.IGNORED
         val partType = part.optString("type")
@@ -663,13 +750,94 @@ internal object OpenCodeJsonlParser {
             else -> CliParsed.IGNORED
         }
     }
+
+    private fun parseAssistantChunk(event: JSONObject, sessionId: String): CliParsed {
+        val data = event.optJSONObject("data") ?: return CliParsed.IGNORED
+        val chunk = data.optJSONObject("chunk") ?: return CliParsed.IGNORED
+        val index = chunk.optInt("index", 0)
+        val blockId = data.optInt("turn", 0) * 1_000_000L + data.optInt("step", 0) * 1_000L + index
+        return when (chunk.optString("type")) {
+            "text-delta" -> {
+                val delta = chunk.optString("text")
+                if (delta.isEmpty()) CliParsed.IGNORED
+                else CliParsed.Events(listOf(RuntimeEvent.AssistantDelta(sessionId, delta)))
+            }
+            "reasoning-delta" -> {
+                val text = chunk.optString("text")
+                if (text.isEmpty()) CliParsed.IGNORED
+                else {
+                    val starts = reasoningStarted.add("$sessionId:$blockId")
+                    CliParsed.Events(
+                        listOf(
+                            RuntimeEvent.ReasoningSummary(
+                                sessionId = sessionId,
+                                summary = text,
+                                blockId = blockId,
+                                startsNewBlock = starts,
+                            ),
+                        ),
+                    )
+                }
+            }
+            "block-end" -> {
+                val block = chunk.optJSONObject("block") ?: return CliParsed.IGNORED
+                if (block.optString("type") != "reasoning") return CliParsed.IGNORED
+                reasoningStarted.remove("$sessionId:$blockId")
+                val text = block.optString("text")
+                if (text.isBlank()) CliParsed.IGNORED
+                else CliParsed.Events(
+                    listOf(
+                        RuntimeEvent.ReasoningSummary(
+                            sessionId = sessionId,
+                            summary = text,
+                            blockId = blockId,
+                            startsNewBlock = false,
+                            isFinal = true,
+                        ),
+                    ),
+                )
+            }
+            else -> CliParsed.IGNORED
+        }
+    }
+
+    private fun parseAssistantMessage(event: JSONObject, sessionId: String): CliParsed {
+        val content = event.optJSONObject("data")
+            ?.optJSONObject("message")
+            ?.optJSONArray("content")
+        val text = contentText(content)
+        if (text.isBlank()) CliParsed.IGNORED else CliParsed.Events(finalText = text)
+    }
+
+    private fun toolDetailFromArguments(arguments: String, name: String): String {
+        val command = runCatching { JSONObject(arguments).optString("command") }.getOrDefault("")
+        return command.ifBlank { name }
+    }
+
+    private fun contentText(content: org.json.JSONArray?): String {
+        if (content == null) return ""
+        val sb = StringBuilder()
+        for (i in 0 until content.length()) {
+            val block = content.optJSONObject(i) ?: continue
+            if (block.optString("type") == "text") {
+                val piece = block.optString("text")
+                if (piece.isNotBlank()) {
+                    if (sb.isNotEmpty()) sb.append('\n')
+                    sb.append(piece)
+                }
+            }
+        }
+        return sb.toString()
+    }
 }
 
 /**
  * Hermes headless contract: `hermes chat --format stream-json -q "<prompt>"`
- * prints newline-delimited events shaped like `{type, part, error, done}` with
- * `part.text` deltas, optional reasoning text, `type:tool_call` markers and a
- * final done/completed marker.
+ * prints newline-delimited events. Current CLI (0.21.x) emits top-level
+ * `{type: text|tool_use|tool_result|result|system}` objects; older builds
+ * nested the same under `part`. A non-zero `result.exit_code` is a failure
+ * and a zero exit is terminal (the process often hangs in cleanup after the
+ * result line).
  */
 internal object HermesJsonlParser {
     fun parseLine(line: String, sessionId: String): CliParsed {
@@ -698,8 +866,51 @@ internal object HermesJsonlParser {
                 }
                 return CliParsed.Events(failed = reason, terminal = true)
             }
-            return CliParsed.Events(terminal = true)
+            val finalText = event.optString("text").takeIf { it.isNotBlank() }
+            return CliParsed.Events(terminal = true, finalText = finalText)
         }
+        // Top-level streaming events (hermes 0.21.x `--format stream-json`).
+        when (type) {
+            "text" -> {
+                val delta = event.optString("text")
+                if (delta.isBlank()) return CliParsed.IGNORED
+                return CliParsed.Events(listOf(RuntimeEvent.AssistantDelta(sessionId, delta)))
+            }
+            "reasoning", "thinking" -> {
+                val summary = event.optString("text").ifBlank { event.optString("thinking") }
+                if (summary.isBlank()) return CliParsed.IGNORED
+                return CliParsed.Events(
+                    listOf(
+                        RuntimeEvent.ReasoningSummary(
+                            sessionId = sessionId,
+                            summary = summary,
+                            blockId = 0L,
+                            startsNewBlock = true,
+                        ),
+                    ),
+                )
+            }
+            "tool_use" -> {
+                val name = event.optString("name").ifBlank { event.optString("tool_name") }
+                if (name.isBlank()) return CliParsed.IGNORED
+                val input = event.optJSONObject("input")
+                val detail = input?.optString("command")?.takeIf { it.isNotBlank() }
+                    ?: input?.toString()?.take(160).orEmpty()
+                return CliParsed.Events(listOf(RuntimeEvent.ToolStarted(sessionId, name, detail)))
+            }
+            "tool_result", "tool_call" -> {
+                val name = event.optString("name").ifBlank { event.optString("tool_name") }.ifBlank { "Tool" }
+                val raw = event.optString("output").ifBlank { event.optString("text") }
+                val summary = raw.replace(Regex("\\s+"), " ").trim().take(180)
+                    .ifBlank { "$name completed" }
+                if (type == "tool_call") {
+                    return CliParsed.Events(listOf(RuntimeEvent.ToolStarted(sessionId, name, summary)))
+                }
+                return CliParsed.Events(listOf(RuntimeEvent.ToolCompleted(sessionId, name, summary)))
+            }
+            "system" -> return CliParsed.IGNORED
+        }
+        // Legacy nested-part shape still accepted for older CLIs.
         val part = event.optJSONObject("part")
         val partType = part?.optString("type").orEmpty()
         val text = when {
