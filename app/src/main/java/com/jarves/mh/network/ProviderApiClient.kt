@@ -272,25 +272,14 @@ class ProviderApiClient {
                     add("$base/responses")
                 }
             }.distinct()
-            else -> {
-                val withoutAnthropic = base.removeSuffix("/anthropic")
-                buildList {
-                    if (base.endsWith("/v1")) {
-                        add("$base/messages")
-                    } else {
-                        add("$base/v1/messages")
-                        add("$base/messages")
-                    }
-                    if (withoutAnthropic != base) {
-                        if (withoutAnthropic.endsWith("/v1")) {
-                            add("$withoutAnthropic/messages")
-                        } else {
-                            add("$withoutAnthropic/v1/messages")
-                            add("$withoutAnthropic/messages")
-                        }
-                    }
-                }.distinct()
-            }
+            else -> buildList {
+                if (base.endsWith("/v1")) {
+                    add("$base/messages")
+                } else {
+                    add("$base/v1/messages")
+                    add("$base/messages")
+                }
+            }.distinct()
         }
     }
 
