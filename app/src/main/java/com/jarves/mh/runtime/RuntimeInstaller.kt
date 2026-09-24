@@ -2313,10 +2313,10 @@ fi
         private val STUDIO_BUNDLE = RuntimeBundle(
             label = "Ekko Studio",
             fileName = "pocketdev-studio-arm64-$STUDIO_VERSION.tar.zst",
-            // Filled once the runtime-studio-0.7.21 release is published; the
-            // placeholder forces an explicit update instead of a silent mismatch.
-            sha256 = "",
-            compressedBytes = 0L,
+            // sha256 of the artifact published by the studio-bundle workflow on
+            // the runtime-studio-0.7.21 release (studio-bundle.sha256).
+            sha256 = "e8ec002f99a0ab5dc346737c4caac6be125677fe7a0130fc7f58004c7f6ca7ec",
+            compressedBytes = 52_162_158L,
         )
         private const val MAX_TERMINAL_LINE = 500
         private const val MAX_COLLECTED_OUTPUT = 24_000
