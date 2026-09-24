@@ -746,11 +746,19 @@ class RuntimeInstaller(private val context: Context) {
     /** Host-side path into the guest rootfs (plain storage, no PRoot needed). */
     fun guestFile(relativePath: String): File = File(rootfs, relativePath.removePrefix("/"))
 
+    /**
+     * True when the extracted bundle is on disk. The version marker is
+     * deliberately not required here: [ensureStudioInstalled] writes it only
+     * after this verification passes, so including it would make the check
+     * impossible to satisfy on a first install.
+     */
+    private fun studioBundleExtracted(): Boolean =
+        File(rootfs, "usr/local/lib/studio/dist/server/index.js").isFile &&
+            File(rootfs, STUDIO_GUEST_ENTRY.removePrefix("/")).isFile
+
     /** True when the Ekko Studio server bundle has been extracted into the guest. */
     fun isStudioInstalled(): Boolean =
-        studioMarker.readTextOrNull() == STUDIO_VERSION &&
-            File(rootfs, "usr/local/lib/studio/dist/server/index.js").isFile &&
-            File(rootfs, STUDIO_GUEST_ENTRY.removePrefix("/")).isFile
+        studioMarker.readTextOrNull() == STUDIO_VERSION && studioBundleExtracted()
 
     /**
      * Installs the Ekko Studio web UI server bundle (hermes-web-ui) into the
@@ -779,7 +787,7 @@ class RuntimeInstaller(private val context: Context) {
         )
         // Static verification only: launching the server entry from here would
         // start listening on the Studio port and hang verifyGuest.
-        check(isStudioInstalled()) { "The Ekko Studio runtime bundle is incomplete" }
+        check(studioBundleExtracted()) { "The Ekko Studio runtime bundle is incomplete" }
         check(File(rootfs, "usr/local/bin/node").isFile) { "Guest Node.js is missing; repair the core runtime first" }
         studioMarker.writeText(STUDIO_VERSION)
     }
