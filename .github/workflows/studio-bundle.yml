@@ -116,7 +116,7 @@ jobs:
 
       - name: Build guest tree
         run: |
-          mkdir -p guest/usr/local/lib/studio/bin
+          mkdir -p guest/usr/local/bin guest/usr/local/lib/studio
           cp -r studio-src/dist guest/usr/local/lib/studio/dist
           cp -r studio-src/node_modules guest/usr/local/lib/studio/node_modules
           cat > guest/usr/local/bin/studio <<'EOF'
@@ -134,6 +134,9 @@ jobs:
           # the bin launcher; on the runner both 18648 and 8648 are free.
           HERMES_WEB_UI_HOME="$PWD/.smoke-home" timeout 20 node dist/server/index.js > smoke.log 2>&1
           code=$?
+          # Re-enable errexit: every assertion below must fail the step, and
+          # `set +e` would let them be swallowed by the final `echo SMOKE_OK`.
+          set -e
           head -20 smoke.log
           # Timeout (124) means the server stayed up for the whole window: boot OK.
           test "$code" -eq 0 -o "$code" -eq 124 || { echo "server exited early ($code)"; tail -40 smoke.log; exit 1; }
