@@ -72,6 +72,7 @@ class RuntimeInstaller(private val context: Context) {
     private val githubCliMarker = File(rootfs, ".pocket-github-cli-version")
     private val dshAndroidCompatibilityMarker = File(rootfs, ".pocket-dsh-android-compat-version")
     private val macosMetadataRepairMarker = File(rootfs, ".pocket-macos-metadata-repair")
+    private val studioMarker = File(rootfs, ".pocket-studio-version")
 
     fun isInstalled(): Boolean {
         val proot = File(context.applicationInfo.nativeLibraryDir, "libproot.so")
@@ -742,6 +743,44 @@ class RuntimeInstaller(private val context: Context) {
         }
     }
 
+    /** True when the Ekko Studio server bundle has been extracted into the guest. */
+    fun isStudioInstalled(): Boolean =
+        studioMarker.readTextOrNull() == STUDIO_VERSION &&
+            File(rootfs, "usr/local/lib/studio/dist/server/index.js").isFile &&
+            File(rootfs, STUDIO_GUEST_ENTRY.removePrefix("/")).isFile
+
+    /**
+     * Installs the Ekko Studio web UI server bundle (hermes-web-ui) into the
+     * guest. The server is a long-running guest process managed by
+     * [StudioServerManager]; installation only stages files and the wrapper.
+     */
+    suspend fun ensureStudioInstalled(
+        proot: File,
+        fraction: Float,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        check(STUDIO_BUNDLE.sha256.isNotBlank()) {
+            "Studio bundle checksum is not configured yet; publish pocketdev-studio-arm64-$STUDIO_VERSION.tar.zst and fill STUDIO_BUNDLE"
+        }
+        if (isStudioInstalled()) return
+        // forceDownload: the offline APK embeds the other bundles as assets, but
+        // the Studio bundle is never among them, so embedding must stay off.
+        installRuntimeOverlay(
+            bundle = STUDIO_BUNDLE,
+            message = "Installing Ekko Studio $STUDIO_VERSION",
+            from = fraction,
+            to = 0.995f,
+            onProgress = onProgress,
+            forceDownload = true,
+            baseUrl = STUDIO_BUNDLE_BASE_URL,
+        )
+        // Static verification only: launching the server entry from here would
+        // start listening on the Studio port and hang verifyGuest.
+        check(isStudioInstalled()) { "The Ekko Studio runtime bundle is incomplete" }
+        check(File(rootfs, "usr/local/bin/node").isFile) { "Guest Node.js is missing; repair the core runtime first" }
+        studioMarker.writeText(STUDIO_VERSION)
+    }
+
     /**
      * DSH uses POSIX hard links for no-clobber publication of new session and
      * workspace files. Android blocks that syscall inside PRoot. PRoot's
@@ -1052,11 +1091,13 @@ class RuntimeInstaller(private val context: Context) {
         to: Float,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
         forceEmbedded: Boolean = false,
+        forceDownload: Boolean = false,
+        baseUrl: String = BuildConfig.RUNTIME_RELEASE_BASE_URL,
     ) {
         // Stack overlays honor the same offline/online flavor as the Core bundle:
         // the offline APK ships every stack bundle inside its assets, while the
         // online APK fetches each one from the release URL on demand.
-        val archive = obtainRuntimeBundle(bundle, preferEmbedded = forceEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES, from, to * 0.8f + from * 0.2f, onProgress)
+        val archive = obtainRuntimeBundle(bundle, preferEmbedded = forceEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES, from, to * 0.8f + from * 0.2f, onProgress, forceDownload, baseUrl)
         onProgress(RuntimeInstallProgress(message, to * 0.8f + from * 0.2f, indeterminate = true))
         extractZstdTar(archive, rootfs)
         stripMacosMetadataArtifacts(rootfs)
@@ -1099,10 +1140,12 @@ class RuntimeInstaller(private val context: Context) {
         from: Float,
         to: Float,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
+        forceDownload: Boolean = false,
+        baseUrl: String = BuildConfig.RUNTIME_RELEASE_BASE_URL,
     ): File {
         downloads.mkdirs()
         val destination = File(downloads, bundle.fileName)
-        val useEmbedded = preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES
+        val useEmbedded = !forceDownload && (preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES)
         if (useEmbedded) {
             onProgress(RuntimeInstallProgress("Loading ${bundle.label} bundle", from, 0, bundle.compressedBytes))
             val temporary = File(downloads, "${bundle.fileName}.part")
@@ -1129,7 +1172,7 @@ class RuntimeInstaller(private val context: Context) {
             return destination
         }
 
-        val url = "${BuildConfig.RUNTIME_RELEASE_BASE_URL}/${bundle.fileName}"
+        val url = "$baseUrl/${bundle.fileName}"
         downloadVerified(url, destination, bundle.sha256) { downloaded, total ->
             val ratio = if (total > 0) downloaded.toFloat() / total else 0f
             onProgress(RuntimeInstallProgress("Downloading ${bundle.label} bundle", from + ratio * (to - from), downloaded, total.takeIf { it > 0 }))
@@ -2137,6 +2180,11 @@ fi
             }
         }
         connection.disconnect()
+        if (expectedChecksum.isBlank()) {
+            // No checksum configured (bundle not published yet): fail closed.
+            temporary.delete()
+            error("No checksum configured for ${destination.name}; refusing to install unverified content")
+        }
         val actual = digest(temporary, algorithm)
         if (!actual.equals(expectedChecksum, ignoreCase = true)) {
             temporary.delete()
@@ -2177,6 +2225,18 @@ fi
         const val OPENCODE2_GUEST_PATH = "/root/.opencode/bin/opencode2"
         const val HERMES_GUEST_PATH = "/usr/local/bin/hermes"
         const val HERMES2_GUEST_PATH = "/usr/local/bin/hermes2"
+        const val STUDIO_VERSION = "0.7.21"
+        const val STUDIO_GUEST_HOME = "/root/.hermes-web-ui"
+        const val STUDIO_GUEST_ENTRY = "/usr/local/bin/studio"
+        const val STUDIO_DEFAULT_PORT = 8648
+
+        /**
+         * The Studio bundle is published from this repository (tag
+         * runtime-studio-<version>), not from the shared upstream release that
+         * hosts the other runtime bundles — hence the dedicated base URL.
+         */
+        const val STUDIO_BUNDLE_BASE_URL =
+            "https://github.com/Davinci198/mobile-harness-0/releases/download/runtime-studio-$STUDIO_VERSION"
         private const val AGY_VERSION = "1.1.27"
         private const val AGY_RELEASE_URL = "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.1.27-5211191891591168/linux-arm/cli_linux_arm64.tar.gz"
         private const val AGY_RELEASE_SHA512 = "ed45f6930785aa4b42f14e07ace1c9d91a94fb76e760f54acbd7d3d3951e1f957fd456a0dae2a3124dd9a3b689bf7afb7c9303a3e4ba95037fc10063424d9bf9"
@@ -2246,6 +2306,14 @@ fi
             fileName = "pocketdev-agy-arm64-2026.09.1.tar.zst",
             sha256 = "a659ab9188956fc4721ca86fb21b5118e0e489f47a5e02ae6b4f2fb423659d78",
             compressedBytes = 41_870_025L,
+        )
+        private val STUDIO_BUNDLE = RuntimeBundle(
+            label = "Ekko Studio",
+            fileName = "pocketdev-studio-arm64-$STUDIO_VERSION.tar.zst",
+            // Filled once the runtime-studio-0.7.21 release is published; the
+            // placeholder forces an explicit update instead of a silent mismatch.
+            sha256 = "",
+            compressedBytes = 0L,
         )
         private const val MAX_TERMINAL_LINE = 500
         private const val MAX_COLLECTED_OUTPUT = 24_000

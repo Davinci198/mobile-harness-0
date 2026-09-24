@@ -1,0 +1,134 @@
+name: studio-bundle
+
+# Builds the Ekko Studio (hermes-web-ui) guest bundle for Mobile Harness:
+# dist/ + pruned runtime node_modules + wrapper, packaged as
+# pocketdev-studio-arm64-<version>.tar.zst with a sha256 checksum.
+
+on:
+  workflow_dispatch:
+    inputs:
+      studio_version:
+        description: 'hermes-web-ui npm version to bundle'
+        required: false
+        default: '0.7.21'
+      upload_release:
+        description: 'Upload artifacts to the runtime-studio release'
+        required: false
+        default: 'true'
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    # Native arm64 runner (free for public repos): node-pty compiles for
+    # aarch64 and sharp resolves @img/sharp-linuxarm64 — both match the guest.
+    # An x86_64 runner would silently produce binaries that cannot load there.
+    runs-on: ubuntu-24.04-arm
+    env:
+      STUDIO_VERSION: ${{ github.event.inputs.studio_version || '0.7.21' }}
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Fetch hermes-web-ui package
+        run: |
+          mkdir -p studio-src
+          npm pack hermes-web-ui@${STUDIO_VERSION} --pack-destination studio-src
+          tar -xzf "studio-src/hermes-web-ui-${STUDIO_VERSION}.tgz" -C studio-src --strip-components=1
+          ls studio-src
+
+      - name: Apply Mobile Harness patch (DSH readiness timeout 30s -> 240s)
+        run: |
+          cd studio-src/dist/server
+          cp index.js index.js.orig
+          sed -i 's/readiness timed out after 30 seconds"),3e4/readiness timed out after 240 seconds"),24e4/' index.js
+          grep -c 'readiness timed out after 240 seconds' index.js
+
+      - name: Install production dependencies
+        working-directory: studio-src
+        run: |
+          npm ci --omit=dev --no-audit --no-fund
+          # Belt and braces: the sharp prebuilt for linux/arm64 glibc, matching
+          # the guest (aarch64 Ubuntu). The native runner usually resolves it
+          # via optionalDependencies already.
+          npm install --no-save --no-audit --no-fund @img/sharp-linuxarm64 || true
+
+      - name: Prune node_modules to esbuild runtime externals
+        working-directory: studio-src
+        run: |
+          mkdir -p runtime-modules
+          cp -r node_modules/socket.io runtime-modules/
+          cp -r node_modules/socket.io-adapter runtime-modules/ 2>/dev/null || true
+          cp -r node_modules/socket.io-parser runtime-modules/ 2>/dev/null || true
+          cp -r node_modules/@socket.io runtime-modules/ 2>/dev/null || true
+          cp -r node_modules/engine.io runtime-modules/
+          cp -r node_modules/engine.io-parser runtime-modules/
+          cp -r node_modules/@engine.io runtime-modules/ 2>/dev/null || true
+          cp -r node_modules/sharp runtime-modules/
+          cp -r node_modules/@img runtime-modules/
+          cp -r node_modules/node-pty runtime-modules/
+          # ajv codegen emits require("ajv/dist/runtime/*") and the server
+          # requires ajv-formats at runtime; both are pure JS and cheap.
+          cp -r node_modules/ajv runtime-modules/
+          cp -r node_modules/ajv-formats runtime-modules/
+          rm -rf node_modules
+          mv runtime-modules node_modules
+
+      - name: Build guest tree
+        run: |
+          mkdir -p guest/usr/local/lib/studio/bin
+          cp -r studio-src/dist guest/usr/local/lib/studio/dist
+          cp -r studio-src/node_modules guest/usr/local/lib/studio/node_modules
+          cat > guest/usr/local/bin/studio <<'EOF'
+          #!/bin/sh
+          export HERMES_WEB_UI_HOME="${HERMES_WEB_UI_HOME:-/root/.hermes-web-ui}"
+          exec /usr/local/bin/node /usr/local/lib/studio/dist/server/index.js "$@"
+          EOF
+          chmod +x guest/usr/local/bin/studio
+
+      - name: Smoke test (server boots on the arm64 runner)
+        working-directory: guest/usr/local/lib/studio
+        run: |
+          set +e
+          # No CLI args here: dist/server/index.js expects its env configured by
+          # the bin launcher; on the runner both 18648 and 8648 are free.
+          HERMES_WEB_UI_HOME="$PWD/.smoke-home" timeout 20 node dist/server/index.js > smoke.log 2>&1
+          code=$?
+          head -20 smoke.log
+          # Timeout (124) means the server stayed up for the whole window: boot OK.
+          test "$code" -eq 0 -o "$code" -eq 124 || { echo "server exited early ($code)"; tail -40 smoke.log; exit 1; }
+          node -e "require('node:assert').ok(require('fs').existsSync('node_modules/socket.io/package.json'))"
+          node -e "require('node:assert').ok(require('fs').existsSync('node_modules/node-pty/build/Release/pty.node'))"
+          node -e "process.report.getReport().header.arch==='arm64' || (require('node:assert').ok(require('fs').existsSync('node_modules/@img/sharp-linuxarm64'))); console.log('arch check done')"
+          file node_modules/node-pty/build/Release/pty.node | grep -q 'ARM aarch64'
+          echo SMOKE_OK
+
+      - name: Pack bundle
+        run: |
+          cd guest
+          tar --numeric-owner --owner=0 --group=0 --no-xattrs -cf - usr | zstd -19 -T0 -o "../pocketdev-studio-arm64-${STUDIO_VERSION}.tar.zst"
+          cd ..
+          sha256sum "pocketdev-studio-arm64-${STUDIO_VERSION}.tar.zst" | tee studio-bundle.sha256
+          stat -c '%s' "pocketdev-studio-arm64-${STUDIO_VERSION}.tar.zst"
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketdev-studio-arm64-${{ env.STUDIO_VERSION }}
+          path: |
+            pocketdev-studio-arm64-${{ env.STUDIO_VERSION }}.tar.zst
+            studio-bundle.sha256
+
+      - name: Attach to runtime-studio release
+        if: ${{ github.event.inputs.upload_release == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: runtime-studio-${{ env.STUDIO_VERSION }}
+          name: Studio runtime ${{ env.STUDIO_VERSION }}
+          files: |
+            pocketdev-studio-arm64-${{ env.STUDIO_VERSION }}.tar.zst
+            studio-bundle.sha256
+          fail_on_unmatched_files: true
