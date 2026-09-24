@@ -53,31 +53,66 @@ jobs:
           # The npm tarball ships no package-lock.json (files: bin/ + dist/),
           # so npm ci cannot be used here.
           npm install --omit=dev --no-audit --no-fund
+          # node-pty ships prebuilds for darwin/win32 only, so linux needs the
+          # node-gyp build; some npm versions no longer run dependency install
+          # scripts unless approved. Rebuild only when the binary is missing.
+          if [ ! -f node_modules/node-pty/build/Release/pty.node ]; then
+            npm rebuild node-pty
+          fi
           # Belt and braces: the sharp prebuilt for linux/arm64 glibc, matching
-          # the guest (aarch64 Ubuntu). The native runner usually resolves it
-          # via optionalDependencies already.
-          npm install --no-save --no-audit --no-fund @img/sharp-linuxarm64 || true
+          # the guest (aarch64 Ubuntu). npm resolves it via optionalDependencies
+          # on the arm64 runner; pinned to the installed sharp version because
+          # the platform packages are published in lockstep (0.35.4 == sharp).
+          sharp_version="$(node -p "require('./node_modules/sharp/package.json').version")"
+          npm install --no-save --no-audit --no-fund "@img/sharp-linux-arm64@$sharp_version" || true
 
       - name: Prune node_modules to esbuild runtime externals
         working-directory: studio-src
         run: |
-          mkdir -p runtime-modules
-          cp -r node_modules/socket.io runtime-modules/
-          cp -r node_modules/socket.io-adapter runtime-modules/ 2>/dev/null || true
-          cp -r node_modules/socket.io-parser runtime-modules/ 2>/dev/null || true
-          cp -r node_modules/@socket.io runtime-modules/ 2>/dev/null || true
-          cp -r node_modules/engine.io runtime-modules/
-          cp -r node_modules/engine.io-parser runtime-modules/
-          cp -r node_modules/@engine.io runtime-modules/ 2>/dev/null || true
-          cp -r node_modules/sharp runtime-modules/
-          cp -r node_modules/@img runtime-modules/
-          cp -r node_modules/node-pty runtime-modules/
-          # ajv codegen emits require("ajv/dist/runtime/*") and the server
-          # requires ajv-formats at runtime; both are pure JS and cheap.
-          cp -r node_modules/ajv runtime-modules/
-          cp -r node_modules/ajv-formats runtime-modules/
+          # Copy the dependency closure of the esbuild externals declared in
+          # scripts/build-server.mjs (node:sqlite is a Node builtin) and drop
+          # everything else: the full production tree is ~280MB of packages the
+          # bundle never requires (vue-flow, katex, sherpa-onnx, ...). ajv and
+          # ajv-formats are not production dependencies of the published package
+          # and the server boots without them (verified against 0.7.21).
+          node <<'EOF'
+          const fs = require('fs')
+          const path = require('path')
+          const src = 'node_modules'
+          const dst = 'runtime-modules'
+          const roots = ['socket.io', 'sharp', 'node-pty']
+          const required = new Set(roots)
+          const seen = new Set()
+          const queue = [...roots]
+          fs.mkdirSync(dst, { recursive: true })
+          while (queue.length) {
+            const name = queue.shift()
+            if (seen.has(name)) continue
+            const manifest = path.join(src, name, 'package.json')
+            if (!fs.existsSync(manifest)) {
+              if (required.has(name)) throw new Error(`missing required dependency: ${name}`)
+              continue // optional dependency npm skipped for this platform
+            }
+            seen.add(name)
+            const pkg = JSON.parse(fs.readFileSync(manifest, 'utf8'))
+            for (const dep of Object.keys(pkg.dependencies || {})) {
+              required.add(dep)
+              queue.push(dep)
+            }
+            for (const dep of Object.keys(pkg.optionalDependencies || {})) queue.push(dep)
+          }
+          for (const name of seen) {
+            const to = path.join(dst, name)
+            fs.mkdirSync(path.dirname(to), { recursive: true })
+            fs.cpSync(path.join(src, name), to, { recursive: true })
+          }
+          console.log(`pruned ${seen.size} packages: ${[...seen].sort().join(' ')}`)
+          EOF
           rm -rf node_modules
           mv runtime-modules node_modules
+          # Fail here, not three steps later at the smoke test, if the closure
+          # is incomplete or a native module did not build.
+          node -e "require('socket.io'); require('sharp'); require('node-pty'); console.log('runtime externals resolve OK')"
 
       - name: Build guest tree
         run: |
@@ -104,7 +139,7 @@ jobs:
           test "$code" -eq 0 -o "$code" -eq 124 || { echo "server exited early ($code)"; tail -40 smoke.log; exit 1; }
           node -e "require('node:assert').ok(require('fs').existsSync('node_modules/socket.io/package.json'))"
           node -e "require('node:assert').ok(require('fs').existsSync('node_modules/node-pty/build/Release/pty.node'))"
-          node -e "process.report.getReport().header.arch==='arm64' || (require('node:assert').ok(require('fs').existsSync('node_modules/@img/sharp-linuxarm64'))); console.log('arch check done')"
+          node -e "process.report.getReport().header.arch==='arm64' || (require('node:assert').ok(require('fs').existsSync('node_modules/@img/sharp-linux-arm64'))); console.log('arch check done')"
           file node_modules/node-pty/build/Release/pty.node | grep -q 'ARM aarch64'
           echo SMOKE_OK
 
