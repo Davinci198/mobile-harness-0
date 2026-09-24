@@ -39,6 +39,7 @@ class AgentWorkTest {
             conversationHistory = emptyList<ChatMessage>(),
             provider = ProviderProfile(ProviderKind.ANTHROPIC),
         )
+        val firstEvent = withTimeout(1_000) { event.await() } as AgentWorkEvent.Execution
         val request = ToolRequest(
             sessionId = handle.sessionId,
             toolName = "Write",
@@ -48,7 +49,6 @@ class AgentWorkTest {
         handle.respondToApproval(request, true)
         handle.stop()
 
-        val firstEvent = withTimeout(1_000) { event.await() } as AgentWorkEvent.Execution
         assertEquals(AgentKind.CLAUDE_CODE, firstEvent.agent)
         assertEquals(RuntimeEvent.SessionStarted("session-1"), firstEvent.event)
         assertEquals(listOf("session-1"), bridge.approvals)
