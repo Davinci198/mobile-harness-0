@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.net.Uri
 import android.provider.Settings
+import android.view.ViewGroup
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -82,6 +83,7 @@ import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Close
@@ -200,6 +202,7 @@ import com.jarves.mh.model.projectSlug
 import com.jarves.mh.runtime.RuntimeExecutionService
 import com.jarves.mh.runtime.RuntimeInstaller
 import com.jarves.mh.runtime.RuntimeSetupService
+import com.jarves.mh.runtime.StudioServerManager
 import com.jarves.mh.runtime.supportsArm64Runtime
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import androidx.compose.foundation.rememberScrollState
@@ -221,6 +224,8 @@ import com.jarves.mh.ui.theme.PocketOrange
 import java.io.ByteArrayInputStream
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlin.concurrent.thread
 
 
 import com.jarves.mh.ui.theme.AppThemeMode
@@ -239,6 +244,7 @@ private enum class WorkspaceTab(val label: String, val icon: ImageVector) {
     TERMINAL("Terminal", Icons.Default.Terminal),
     CHANGES("Changes", Icons.Default.Code),
     PREVIEW("Preview", Icons.Default.Preview),
+    STUDIO("Studio", Icons.Default.Dashboard),
 }
 
 /** PLAN-TERMINAL pas 3: true = TerminalView VT real (PtyTerminalScreen),
@@ -4158,6 +4164,14 @@ private fun WorkspaceScreen(
                     onKeepFileChange,
                 )
                 WorkspaceTab.PREVIEW -> PreviewTab(state.previewReady, state.previewUrl)
+                WorkspaceTab.STUDIO -> {
+                    val studioContext = LocalContext.current
+                    StudioTab(
+                        installer = remember(studioContext) {
+                            RuntimeInstaller(studioContext.applicationContext)
+                        },
+                    )
+                }
             }
         }
     }
@@ -5352,6 +5366,181 @@ private fun DiffLineRow(line: DiffLine) {
         lineHeight = 16.sp,
         softWrap = false,
     )
+}
+
+private enum class StudioUiState { CHECKING, NOT_INSTALLED, INSTALLING, STARTING, READY, FAILED }
+
+/**
+ * Workspace tab that runs the Ekko Studio web server inside the guest and
+ * shows it in a localhost-restricted WebView. Start is best-effort: the tab
+ * polls the health endpoint while the server boots (SQLite + gateway scan can
+ * take a while on first start).
+ */
+@Composable
+private fun StudioTab(installer: RuntimeInstaller) {
+    val context = LocalContext.current
+    var uiState by remember { mutableStateOf(StudioUiState.CHECKING) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var url by remember { mutableStateOf("http://127.0.0.1:${StudioServerManager.PORT}") }
+    var attempt by remember { mutableIntStateOf(0) }
+
+    val manager = remember(installer) { StudioServerManager(context.applicationContext, installer) }
+
+    var progressLine by remember { mutableStateOf("") }
+
+    fun launch() {
+        uiState = StudioUiState.STARTING
+        errorMessage = null
+        thread(name = "studio-start") {
+            val result = runCatching { manager.start() }
+                .getOrElse { StudioServerManager.StartResult.Failure(it.message ?: "start failed") }
+            when (result) {
+                is StudioServerManager.StartResult.Started -> {
+                    // Wait (bounded) for HTTP readiness before switching the WebView.
+                    var ready = false
+                    val deadline = System.currentTimeMillis() + 30_000
+                    while (System.currentTimeMillis() < deadline) {
+                        if (manager.healthCheck()) {
+                            ready = true
+                            break
+                        }
+                        Thread.sleep(500)
+                        if (!manager.isRunning()) break
+                    }
+                    uiState = if (ready || manager.healthCheck()) StudioUiState.READY else StudioUiState.FAILED
+                    if (!ready) errorMessage = "Serverul nu răspunde încă — reîncearcă"
+                }
+                is StudioServerManager.StartResult.Failure -> {
+                    uiState = StudioUiState.FAILED
+                    errorMessage = result.message
+                }
+            }
+        }
+    }
+
+    fun install() {
+        uiState = StudioUiState.INSTALLING
+        errorMessage = null
+        thread(name = "studio-install") {
+            val proot = runCatching { installer.installedRuntime() }.getOrNull()
+            if (proot == null) {
+                uiState = StudioUiState.FAILED
+                errorMessage = "Core runtime is not ready"
+                return@thread
+            }
+            val result = runBlocking {
+                runCatching {
+                    installer.ensureStudioInstalled(
+                        proot = proot.proot,
+                        fraction = 0f,
+                        onProgress = { progress ->
+                            progressLine = progress.message
+                        },
+                    )
+                }
+            }
+            result.fold(
+                onSuccess = { launch() },
+                onFailure = {
+                    uiState = StudioUiState.FAILED
+                    errorMessage = it.message ?: "Studio install failed"
+                },
+            )
+        }
+    }
+
+    LaunchedEffect(attempt) {
+        when {
+            StudioServerManager.portOpen() -> uiState = StudioUiState.READY
+            installer.isStudioInstalled() -> launch()
+            else -> uiState = StudioUiState.NOT_INSTALLED
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        when (uiState) {
+            StudioUiState.CHECKING -> EmptyState(
+                Icons.Default.Dashboard,
+                "Checking Studio…",
+                "Looking for the Ekko Studio server in the guest runtime.",
+            )
+            StudioUiState.NOT_INSTALLED -> Column {
+                EmptyState(
+                    Icons.Default.Dashboard,
+                    "Studio not installed",
+                    "Descarcă și instalează bundle-ul Ekko Studio (hermes-web-ui) în guest.",
+                )
+                Button(
+                    onClick = { install() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    Text("Install Studio")
+                }
+                Text(
+                    "Necesită release-ul runtime-studio-${RuntimeInstaller.STUDIO_VERSION} publicat.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
+                )
+            }
+            StudioUiState.INSTALLING -> EmptyState(
+                Icons.Default.Dashboard,
+                "Installing Studio…",
+                progressLine.ifBlank { "Downloading the Ekko Studio bundle" },
+            )
+            StudioUiState.STARTING -> EmptyState(
+                Icons.Default.Dashboard,
+                "Starting Studio…",
+                "Booting the Ekko Studio server inside the Ubuntu guest. First start can take up to a minute.",
+            )
+            StudioUiState.FAILED -> Column {
+                EmptyState(
+                    Icons.Default.Dashboard,
+                    "Studio failed to start",
+                    errorMessage ?: "Unknown error",
+                )
+                Text(
+                    manager.tailLog().lineSequence().lastOrNull().orEmpty(),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(
+                    onClick = { attempt++ },
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 24.dp),
+                ) {
+                    Text("Retry")
+                }
+            }
+            StudioUiState.READY -> AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.allowFileAccess = false
+                        settings.allowContentAccess = false
+                        settings.mediaPlaybackRequiresUserGesture = true
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                                // Keep the Studio tab pinned to the local server;
+                                // null host (about:blank etc.) stays in-frame.
+                                val host = request.url.host ?: return false
+                                return host !in listOf("127.0.0.1", "localhost")
+                            }
+                        }
+                        loadUrl(url)
+                    }
+                },
+                update = { view -> if (view.url == null) view.loadUrl(url) },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
 }
 
 @Composable
