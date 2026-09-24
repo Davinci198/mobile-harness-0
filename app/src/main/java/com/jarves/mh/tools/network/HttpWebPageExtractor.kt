@@ -23,7 +23,7 @@ class HttpWebPageExtractor(
         }
         val html = response.body.toString(Charsets.UTF_8)
         val title = Regex("<title[^>]*>(.*?)</title>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-            .find(html)?.groupValues?.getOrNull(1)?.let(::decode).orEmpty()
+            .find(html)?.groupValues?.getOrNull(1)?.let(::decode)?.trim()?.take(200).orEmpty()
         val text = decode(Regex("<script[^>]*>.*?</script>|<style[^>]*>.*?</style>|<[^>]+>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).replace(html, " "))
             .replace(Regex("\\s+"), " ").trim()
         val links = Regex("<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
