@@ -43,11 +43,17 @@ import com.jarves.mh.runtime.ClaudeRuntimeBridge
 import com.jarves.mh.runtime.DshRuntimeBridge
 import com.jarves.mh.runtime.AgentRegistry
 import com.jarves.mh.runtime.AgentUpdateInfo
+import com.jarves.mh.runtime.AgentWork
+import com.jarves.mh.runtime.AgentWorkEvent
 import com.jarves.mh.runtime.AntigravityAuthController
 import com.jarves.mh.runtime.AntigravityAuthState
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.AntigravityRuntimeBridge
+import com.jarves.mh.runtime.ChangeHistoryMutationStatus
+import com.jarves.mh.runtime.ChangeSelection
 import com.jarves.mh.runtime.NativeSpawnProcess
+import com.jarves.mh.runtime.ProjectAgent
+import com.jarves.mh.runtime.ProjectAgentChangeHistory
 import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.HermesRuntimeBridge
 import com.jarves.mh.runtime.OpenCodeRuntimeBridge
@@ -122,7 +128,7 @@ private data class ProjectTerminalResult(
 )
 
 private data class RuntimeRetryRequest(
-    val runtime: com.jarves.mh.runtime.RuntimeBridge,
+    val projectAgent: ProjectAgent,
     val project: Project,
     val prompt: String,
     val history: List<ChatMessage>,
@@ -189,6 +195,7 @@ data class AppUiState(
     val pendingAttachments: List<ChatAttachment> = emptyList(),
     val pendingApproval: ToolRequest? = null,
     val changes: List<ChangeItem> = emptyList(),
+    val pendingChangesByAgent: Map<AgentKind, Int> = emptyMap(),
     val activity: List<ActivityItem> = emptyList(),
     val liveProcess: List<ActivityItem> = emptyList(),
     val liveThinking: Boolean = false,
@@ -272,6 +279,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     private val dshRuntime = DshRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val installer = RuntimeInstaller(application)
+    private val changeHistory = ProjectAgentChangeHistory(application.filesDir)
     private val openCodeRuntime = OpenCodeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val hermesRuntime = HermesRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val antigravityRuntime = AntigravityRuntimeBridge(
@@ -286,7 +294,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
     )
     private val agentRegistry = AgentRegistry.builtIns(claudeRuntime, dshRuntime, antigravityRuntime, openCodeRuntime, hermesRuntime)
-    private fun activeRuntime(): com.jarves.mh.runtime.RuntimeBridge = agentRegistry.require(_state.value.agentKind).runtime
+    private val agentWork = AgentWork(agentRegistry.all(), changeHistory)
     private val providerApi = ProviderApiClient()
     private fun appUpdater(): AppUpdater = AppUpdater(
         getApplication(),
@@ -360,10 +368,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 preferences.saveMessages(write.projectId, write.chatId, write.messages)
             }
         }
-        viewModelScope.launch { dshRuntime.events.collect(::onRuntimeEvent) }
-        viewModelScope.launch { antigravityRuntime.events.collect(::onRuntimeEvent) }
-        viewModelScope.launch { openCodeRuntime.events.collect(::onRuntimeEvent) }
-        viewModelScope.launch { hermesRuntime.events.collect(::onRuntimeEvent) }
+        viewModelScope.launch {
+            agentWork.events.collect { event ->
+                when (event) {
+                    is AgentWorkEvent.Execution -> onRuntimeEvent(event.event)
+                }
+            }
+        }
         viewModelScope.launch {
             antigravityAuthController.state.collect { auth ->
                 _state.update { it.copy(antigravityAuth = auth) }
@@ -433,10 +444,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             preferences.saveProjects(cleanedProjects)
             _state.update { it.copy(projects = cleanedProjects) }
         }
-        // Runtime setup snapshot and Claude events — collected here alongside the other
-        // agent event streams so all collectors live in one init block.
         viewModelScope.launch { RuntimeSetupController.snapshot.collect(::onSetupSnapshot) }
-        viewModelScope.launch { claudeRuntime.events.collect(::onRuntimeEvent) }
         viewModelScope.launch { bootstrap() }
     }
 
@@ -1007,12 +1015,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Keeps both agent bridges mapped to the same workspace root; the active one is used. */
-    private fun configureBridgeRoots(projectId: String, rootPath: String) {
-        claudeRuntime.configureProjectRoot(projectId, rootPath)
-        dshRuntime.configureProjectRoot(projectId, rootPath)
-        antigravityRuntime.configureProjectRoot(projectId, rootPath)
-    }
+    private fun configureBridgeRoots(projectId: String, rootPath: String): Boolean =
+        agentWork.configureProjectRoot(projectId, rootPath)
 
     private suspend fun bootstrap() {
         if (!supportsArm64Runtime(android.os.Build.SUPPORTED_ABIS, System.getProperty("os.arch"))) {
@@ -1525,12 +1529,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 primaryAgentKind = if (selectingInitialAgent) kind else current.primaryAgentKind,
                 provider = provider,
                 activeApiKeyName = vault.list(provider.kind.name).firstOrNull(ApiKeyInfo::isActive)?.name,
+                changes = emptyList(),
                 // Ping results belong to the previous agent; never leak them across.
                 apiPingStatus = ApiPingStatus.IDLE,
                 apiPingMessage = null,
             )
         }
         reloadModelScanPrefs()
+        _state.value.activeProject?.let { project ->
+            viewModelScope.launch {
+                val projectAgent = ProjectAgent(project.id, kind)
+                val loaded = withContext(Dispatchers.IO) {
+                    agentWork.review(projectAgent).changes to agentWork.pendingCounts(projectAgent.projectId, kind)
+                }
+                if (_state.value.activeProject?.id == project.id && _state.value.agentKind == kind) {
+                    _state.update { it.copy(changes = loaded.first, pendingChangesByAgent = loaded.second) }
+                }
+            }
+        }
     }
 
     /** Installs the other agent on demand (Settings) with live progress, then switches to it. */
@@ -2074,7 +2090,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
-        configureBridgeRoots(project.id, project.rootPath)
+        if (!configureBridgeRoots(project.id, project.rootPath)) {
+            _state.update { it.copy(toastMessage = "Accept or undo pending changes before opening this project") }
+            return
+        }
         val terminal = loadProjectTerminal(project)
         val suggestedRoot = if (project.rootPath.isBlank()) detectNestedProjectRoot(project) else null
         val chats = preferences.loadProjectChats(project.id).ifEmpty {
@@ -2099,6 +2118,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 taskStartedAtMillis = null,
                 taskFinishedAtMillis = null,
                 changes = emptyList(),
+                pendingChangesByAgent = emptyMap(),
                 workspaceFiles = emptyList(),
                 androidProjectDetected = false,
                 filesLoading = true,
@@ -2116,9 +2136,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         refreshProjectFiles()
+        val projectAgent = ProjectAgent(project.id, _state.value.agentKind)
         viewModelScope.launch {
-            val pending = activeRuntime().loadPendingChanges(project.id)
-            if (_state.value.activeProject?.id == project.id) _state.update { it.copy(changes = pending) }
+            val loaded = withContext(Dispatchers.IO) {
+                agentWork.review(projectAgent).changes to agentWork.pendingCounts(projectAgent.projectId, projectAgent.agent)
+            }
+            if (_state.value.activeProject?.id == projectAgent.projectId && _state.value.agentKind == projectAgent.agent) {
+                _state.update { it.copy(changes = loaded.first, pendingChangesByAgent = loaded.second) }
+            }
         }
     }
 
@@ -2155,6 +2180,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 preferences.saveProjects(_state.value.projects)
                 viewModelScope.launch(Dispatchers.IO) {
                     workspaceDir.deleteRecursively()
+                    File(getApplication<Application>().filesDir, "change-history/${active.id}").deleteRecursively()
+                    File(getApplication<Application>().filesDir, "checkpoints/${active.id}").deleteRecursively()
                     terminalHistoryFile(active.id).delete()
                     preferences.deleteProjectChats(active.id)
                 }
@@ -2168,6 +2195,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 projectChats = emptyList(),
                 activeChatId = null,
                 changes = emptyList(),
+                pendingChangesByAgent = emptyMap(),
                 workspaceFiles = emptyList(),
                 androidProjectDetected = false,
                 filesLoading = false,
@@ -2250,6 +2278,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 taskStartedAtMillis = null,
                 taskFinishedAtMillis = null,
                 changes = emptyList(),
+                pendingChangesByAgent = emptyMap(),
                 workspaceFiles = emptyList(),
                 androidProjectDetected = false,
                 filesLoading = true,
@@ -2861,6 +2890,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val filesDir = getApplication<Application>().filesDir
             File(filesDir, "workspaces/${project.id}").deleteRecursively()
+            File(filesDir, "change-history/${project.id}").deleteRecursively()
+            File(filesDir, "checkpoints/${project.id}").deleteRecursively()
             terminalHistoryFile(project.id).delete()
             preferences.deleteProjectChats(project.id)
         }
@@ -2885,7 +2916,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val root = current.suggestedProjectRoot ?: return
         if (current.isRunning || current.projectTerminalRunning) return
         val updated = project.copy(rootPath = root)
-        configureBridgeRoots(updated.id, updated.rootPath)
+        if (!configureBridgeRoots(updated.id, updated.rootPath)) {
+            _state.update { it.copy(toastMessage = "Accept or undo pending changes before changing the project root") }
+            return
+        }
         val projects = current.projects.map { if (it.id == updated.id) updated else it }
         val guestRoot = projectGuestRoot(updated)
         preferences.saveProjects(projects)
@@ -3276,7 +3310,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         failedApiKeyIds.clear()
         activeRuntimeRequest = RuntimeRetryRequest(
-            runtime = activeRuntime(),
+            projectAgent = ProjectAgent(project.id, state.value.agentKind),
             project = project,
             prompt = runtimePrompt,
             history = history,
@@ -3284,8 +3318,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
         viewModelScope.launch {
             activeRuntimeRequest?.let { request ->
-                request.runtime.startSession(
-                    request.project.id,
+                agentWork.start(
+                    request.projectAgent,
                     request.project.slug,
                     request.project.kind,
                     request.prompt,
@@ -3298,42 +3332,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun answerApproval(approved: Boolean) {
         val request = state.value.pendingApproval ?: return
-        viewModelScope.launch { activeRuntime().respondToApproval(request, approved) }
+        viewModelScope.launch { agentWork.handleFor(request.sessionId)?.respondToApproval(request, approved) }
     }
 
     fun stopTask() {
+        val sessionId = _state.value.activeSessionId ?: return
         if (!_state.value.isRunning) return
         _state.update { it.copy(isSending = false) }
-        viewModelScope.launch { activeRuntime().stopActiveSession() }
+        viewModelScope.launch { agentWork.handleFor(sessionId)?.stop() }
     }
+
+    private fun isCurrentProjectAgent(projectAgent: ProjectAgent): Boolean =
+        _state.value.activeProject?.id == projectAgent.projectId && _state.value.agentKind == projectAgent.agent
 
     fun undoLastChanges() {
         val project = _state.value.activeProject ?: return
+        val projectAgent = ProjectAgent(project.id, _state.value.agentKind)
         viewModelScope.launch {
-            val restored = activeRuntime().undoLastChanges(project.id)
+            val result = withContext(Dispatchers.IO) { agentWork.undo(projectAgent, ChangeSelection.All) }
+            if (!isCurrentProjectAgent(projectAgent)) return@launch
+            val counts = withContext(Dispatchers.IO) { agentWork.pendingCounts(projectAgent.projectId, projectAgent.agent) }
+            val message = when (result.status) {
+                ChangeHistoryMutationStatus.APPLIED -> ActivityItem("Changes undone", "Restored files to their state before the task")
+                ChangeHistoryMutationStatus.CONFLICT -> ActivityItem("Change conflict", "Newer changes exist for ${result.conflicts.joinToString()}")
+                ChangeHistoryMutationStatus.UNCHANGED -> ActivityItem("Undo unavailable", "No restorable Change History was found")
+            }
             _state.update { current ->
                 current.copy(
-                    changes = if (restored) emptyList() else current.changes,
-                    activity = listOf(
-                        ActivityItem(
-                            if (restored) "Changes undone" else "Undo unavailable",
-                            if (restored) "Restored files to their state before the task" else "No restorable checkpoint was found",
-                        ),
-                    ) + current.activity,
+                    changes = result.review?.changes ?: current.changes,
+                    pendingChangesByAgent = counts,
+                    activity = listOf(message) + current.activity,
                 )
             }
-            if (restored) refreshProjectFiles()
+            if (result.status == ChangeHistoryMutationStatus.APPLIED) refreshProjectFiles()
         }
     }
 
     fun keepLastChanges() {
         val project = _state.value.activeProject ?: return
+        val projectAgent = ProjectAgent(project.id, _state.value.agentKind)
         viewModelScope.launch {
-            activeRuntime().acceptLastChanges(project.id)
-            _state.update {
-                it.copy(
-                    changes = emptyList(),
-                    activity = listOf(ActivityItem("Changes kept", "Accepted the task's file changes")) + it.activity,
+            val result = withContext(Dispatchers.IO) { agentWork.accept(projectAgent, ChangeSelection.All) }
+            if (!isCurrentProjectAgent(projectAgent)) return@launch
+            val counts = withContext(Dispatchers.IO) { agentWork.pendingCounts(projectAgent.projectId, projectAgent.agent) }
+            _state.update { current ->
+                current.copy(
+                    changes = result.review?.changes ?: current.changes,
+                    pendingChangesByAgent = counts,
+                    activity = listOf(ActivityItem("Changes kept", "Accepted the task's file changes")) + current.activity,
                 )
             }
         }
@@ -3341,19 +3387,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun undoFileChange(path: String) {
         val project = _state.value.activeProject ?: return
+        val projectAgent = ProjectAgent(project.id, _state.value.agentKind)
         viewModelScope.launch {
-            if (activeRuntime().undoFileChange(project.id, path)) {
-                _state.update { current -> current.copy(changes = current.changes.filterNot { it.path == path }) }
-                refreshProjectFiles()
+            val result = withContext(Dispatchers.IO) {
+                agentWork.undo(projectAgent, ChangeSelection.Paths(setOf(path)))
+            }
+            if (!isCurrentProjectAgent(projectAgent)) return@launch
+            when (result.status) {
+                ChangeHistoryMutationStatus.APPLIED -> {
+                    val counts = withContext(Dispatchers.IO) {
+                        agentWork.pendingCounts(projectAgent.projectId, projectAgent.agent)
+                    }
+                    _state.update { current ->
+                        current.copy(
+                            changes = result.review?.changes ?: current.changes,
+                            pendingChangesByAgent = counts,
+                        )
+                    }
+                    refreshProjectFiles()
+                }
+                ChangeHistoryMutationStatus.CONFLICT -> _state.update { current ->
+                    current.copy(activity = listOf(ActivityItem("Change conflict", "Newer changes exist for $path")) + current.activity)
+                }
+                ChangeHistoryMutationStatus.UNCHANGED -> Unit
             }
         }
     }
 
     fun keepFileChange(path: String) {
         val project = _state.value.activeProject ?: return
+        val projectAgent = ProjectAgent(project.id, _state.value.agentKind)
         viewModelScope.launch {
-            if (activeRuntime().acceptFileChange(project.id, path)) {
-                _state.update { current -> current.copy(changes = current.changes.filterNot { it.path == path }) }
+            val result = withContext(Dispatchers.IO) {
+                agentWork.accept(projectAgent, ChangeSelection.Paths(setOf(path)))
+            }
+            if (!isCurrentProjectAgent(projectAgent)) return@launch
+            if (result.status == ChangeHistoryMutationStatus.APPLIED) {
+                val counts = withContext(Dispatchers.IO) {
+                    agentWork.pendingCounts(projectAgent.projectId, projectAgent.agent)
+                }
+                _state.update { current ->
+                    current.copy(
+                        changes = result.review?.changes ?: current.changes,
+                        pendingChangesByAgent = counts,
+                    )
+                }
             }
         }
     }
@@ -3597,6 +3675,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 is RuntimeEvent.FilesChanged -> current.copy(
                     changes = event.changes,
+                    pendingChangesByAgent = current.pendingChangesByAgent + (current.agentKind to event.changes.size),
                     liveThinking = false,
                     liveProcess = if (event.paths.isEmpty()) current.liveProcess else current.liveProcess +
                         ActivityItem(
@@ -3685,8 +3764,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             kotlinx.coroutines.delay(300)
-            request.runtime.startSession(
-                request.project.id,
+            agentWork.start(
+                request.projectAgent,
                 request.project.slug,
                 request.project.kind,
                 request.prompt,
