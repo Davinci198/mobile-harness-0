@@ -10,13 +10,13 @@ import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.RiskLevel
 import java.io.File
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -30,8 +30,7 @@ class AgentWorkTest {
             override val capabilities = setOf(AgentCapability.INTERACTIVE_APPROVALS)
         }
         val work = AgentWork(listOf(driver), ProjectAgentChangeHistory(File("unused")))
-        val event = async { work.events.first() }
-        yield()
+        val event = async(start = CoroutineStart.UNDISPATCHED) { work.events.first() }
 
         val start = async {
             work.start(

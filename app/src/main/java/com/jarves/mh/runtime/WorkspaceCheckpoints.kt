@@ -56,7 +56,8 @@ class WorkspaceCheckpoints(
         val cachedRoot = projectRoots[projectId]
         val rootFile = projectRootFile(projectId)
         val previous = cachedRoot ?: readProjectRoot(projectId)
-        val initializingMetadata = cachedRoot == null && !rootFile.isFile
+        val initializingMetadata = cachedRoot == null && !rootFile.isFile &&
+            isValidCheckpoint(File(filesDir, "checkpoints/$projectId/latest"))
         if (!initializingMetadata && previous != normalized && hasPendingHistory(projectId)) return false
         writeAtomically(projectRootFile(projectId), normalized)
         projectRoots[projectId] = normalized
