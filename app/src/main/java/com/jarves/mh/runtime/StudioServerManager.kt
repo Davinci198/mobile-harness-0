@@ -112,7 +112,7 @@ class StudioServerManager(
             if (isStudioProcess(pid)) Process.killProcess(pid)
         }
         stopWrapper()
-        runCatching { File(installer.rootfs, GUEST_PID_FILE.removePrefix("/")).delete() }
+        runCatching { installer.guestFile(GUEST_PID_FILE).delete() }
         activeProcess = null
         Log.d(TAG, "Studio server stopped")
     }
@@ -137,7 +137,7 @@ class StudioServerManager(
      * the rootfs, which is plain host storage, so no guest round trip is needed.
      */
     private fun guestPid(): Int? = runCatching {
-        val file = File(installer.rootfs, GUEST_PID_FILE.removePrefix("/"))
+        val file = installer.guestFile(GUEST_PID_FILE)
         if (!file.isFile) return@runCatching null
         file.readText().trim().toIntOrNull()?.takeIf { it > 0 }
     }.getOrNull()

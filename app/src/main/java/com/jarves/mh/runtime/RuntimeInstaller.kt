@@ -743,6 +743,9 @@ class RuntimeInstaller(private val context: Context) {
         }
     }
 
+    /** Host-side path into the guest rootfs (plain storage, no PRoot needed). */
+    fun guestFile(relativePath: String): File = File(rootfs, relativePath.removePrefix("/"))
+
     /** True when the Ekko Studio server bundle has been extracted into the guest. */
     fun isStudioInstalled(): Boolean =
         studioMarker.readTextOrNull() == STUDIO_VERSION &&

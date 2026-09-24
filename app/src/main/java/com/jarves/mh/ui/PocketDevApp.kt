@@ -224,6 +224,7 @@ import com.jarves.mh.ui.theme.PocketOrange
 import java.io.ByteArrayInputStream
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlin.concurrent.thread
 
 
@@ -5427,14 +5428,16 @@ private fun StudioTab(installer: RuntimeInstaller) {
                 errorMessage = "Core runtime is not ready"
                 return@thread
             }
-            val result = runCatching {
-                installer.ensureStudioInstalled(
-                    proot = proot.proot,
-                    fraction = 0f,
-                    onProgress = { progress ->
-                        progressLine = progress.message
-                    },
-                )
+            val result = runBlocking {
+                runCatching {
+                    installer.ensureStudioInstalled(
+                        proot = proot.proot,
+                        fraction = 0f,
+                        onProgress = { progress ->
+                            progressLine = progress.message
+                        },
+                    )
+                }
             }
             result.fold(
                 onSuccess = { launch() },
@@ -5474,7 +5477,7 @@ private fun StudioTab(installer: RuntimeInstaller) {
                     Text("Install Studio")
                 }
                 Text(
-                    "Necesită release-ul runtime-studio-${installer.STUDIO_VERSION} publicat.",
+                    "Necesită release-ul runtime-studio-${RuntimeInstaller.STUDIO_VERSION} publicat.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
