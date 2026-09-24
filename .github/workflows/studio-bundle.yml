@@ -50,7 +50,9 @@ jobs:
       - name: Install production dependencies
         working-directory: studio-src
         run: |
-          npm ci --omit=dev --no-audit --no-fund
+          # The npm tarball ships no package-lock.json (files: bin/ + dist/),
+          # so npm ci cannot be used here.
+          npm install --omit=dev --no-audit --no-fund
           # Belt and braces: the sharp prebuilt for linux/arm64 glibc, matching
           # the guest (aarch64 Ubuntu). The native runner usually resolves it
           # via optionalDependencies already.
