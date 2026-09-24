@@ -46,7 +46,10 @@ class StudioServerManagerTest {
 
     @Test
     fun `studio port does not collide with known guest services`() {
-        val usedPorts = setOf(20128, 3082, 8642, 8700, 9119)
+        // 8650/18650 are Studio's own preview backend/agent-bridge ports
+        // (version-preview-manager); 20128 is OmniRoute, 3082 DSH web UI,
+        // 8642 the Hermes gateway, 8700/9119 agent web UIs.
+        val usedPorts = setOf(20128, 3082, 8642, 8650, 8700, 9119, 18650)
         assertFalse(RuntimeInstaller.STUDIO_DEFAULT_PORT in usedPorts)
         assertEquals(8648, RuntimeInstaller.STUDIO_DEFAULT_PORT)
     }
