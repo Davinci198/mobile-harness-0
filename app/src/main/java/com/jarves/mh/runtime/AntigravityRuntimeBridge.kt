@@ -280,7 +280,7 @@ class AntigravityRuntimeBridge(
                 userStopRequested = true
                 activeProcess?.destroy()
             }
-            startForegroundRuntime(projectSlug)
+            startForegroundRuntime(projectSlug, sessionId)
             val installed = installer.installedRuntime()
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
@@ -406,12 +406,13 @@ class AntigravityRuntimeBridge(
         if (finished.add(sessionId)) eventBus.emit(RuntimeEvent.SessionFailed(sessionId, reason))
     }
 
-    private fun startForegroundRuntime(projectName: String) {
+    private fun startForegroundRuntime(projectName: String, sessionId: String) {
         ContextCompat.startForegroundService(
             context,
             android.content.Intent(context, RuntimeExecutionService::class.java)
                 .setAction(RuntimeExecutionService.ACTION_START)
-                .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, projectName),
+                .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, projectName)
+                .putExtra(RuntimeExecutionService.EXTRA_SESSION_ID, sessionId),
         )
     }
 
@@ -423,6 +424,7 @@ class AntigravityRuntimeBridge(
                 android.content.Intent(context, RuntimeExecutionService::class.java)
                     .setAction(if (completed) RuntimeExecutionService.ACTION_COMPLETE else RuntimeExecutionService.ACTION_FAILED)
                     .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, projectName)
+                    .putExtra(RuntimeExecutionService.EXTRA_SESSION_ID, activeSessionId)
                     .putExtra(RuntimeExecutionService.EXTRA_DETAIL, detail),
             )
         }.onFailure { context.stopService(android.content.Intent(context, RuntimeExecutionService::class.java)) }
@@ -434,7 +436,8 @@ class AntigravityRuntimeBridge(
         runCatching {
             context.startService(
                 android.content.Intent(context, RuntimeExecutionService::class.java)
-                    .setAction(RuntimeExecutionService.ACTION_CANCELLED),
+                    .setAction(RuntimeExecutionService.ACTION_CANCELLED)
+                    .putExtra(RuntimeExecutionService.EXTRA_SESSION_ID, activeSessionId),
             )
         }.onFailure { context.stopService(android.content.Intent(context, RuntimeExecutionService::class.java)) }
     }

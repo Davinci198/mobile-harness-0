@@ -130,7 +130,7 @@ internal abstract class HeadlessCliBridge(
                     }.start()
                 }
             }
-            startForegroundRuntime(projectSlug)
+            startForegroundRuntime(projectSlug, sessionId)
             val installed = installer.installedRuntime()
             check(installer.isAgentInstalled(kind)) {
                 "${kind.title} is not installed. Open Settings → Coding agent to install it."
@@ -492,12 +492,13 @@ internal abstract class HeadlessCliBridge(
         return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
     }
 
-    private fun startForegroundRuntime(projectName: String) {
+    private fun startForegroundRuntime(projectName: String, sessionId: String) {
         androidx.core.content.ContextCompat.startForegroundService(
             context,
             android.content.Intent(context, RuntimeExecutionService::class.java)
                 .setAction(RuntimeExecutionService.ACTION_START)
-                .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, projectName),
+                .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, projectName)
+                .putExtra(RuntimeExecutionService.EXTRA_SESSION_ID, sessionId),
         )
     }
 
@@ -512,6 +513,7 @@ internal abstract class HeadlessCliBridge(
                         else RuntimeExecutionService.ACTION_FAILED,
                     )
                     .putExtra(RuntimeExecutionService.EXTRA_PROJECT_NAME, projectName)
+                    .putExtra(RuntimeExecutionService.EXTRA_SESSION_ID, activeSessionId)
                     .putExtra(RuntimeExecutionService.EXTRA_DETAIL, detail),
             )
         }.onFailure { error ->
@@ -526,7 +528,8 @@ internal abstract class HeadlessCliBridge(
         runCatching {
             context.startService(
                 android.content.Intent(context, RuntimeExecutionService::class.java)
-                    .setAction(RuntimeExecutionService.ACTION_CANCELLED),
+                    .setAction(RuntimeExecutionService.ACTION_CANCELLED)
+                    .putExtra(RuntimeExecutionService.EXTRA_SESSION_ID, activeSessionId),
             )
         }.onFailure {
             context.stopService(android.content.Intent(context, RuntimeExecutionService::class.java))
