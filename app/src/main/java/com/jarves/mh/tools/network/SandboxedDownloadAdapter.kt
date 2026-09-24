@@ -2,6 +2,7 @@ package com.jarves.mh.tools.network
 
 import java.io.File
 import java.security.MessageDigest
+import java.nio.file.Files
 
 class SandboxedDownloadAdapter(
     private val root: File,
