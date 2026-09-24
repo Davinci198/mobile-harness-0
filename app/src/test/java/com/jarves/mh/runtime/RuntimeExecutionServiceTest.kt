@@ -29,8 +29,7 @@ class RuntimeExecutionServiceTest {
     @After
     fun tearDown() {
         ledgerDir.deleteRecursively()
-        RuntimeTaskController.recoveryActive = false
-        RuntimeTaskController.stopAction = null
+        RuntimeTaskController.reset()
     }
 
     private fun begin(sessionId: String, description: String) {

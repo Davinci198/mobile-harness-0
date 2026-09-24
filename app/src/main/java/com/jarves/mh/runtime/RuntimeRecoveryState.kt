@@ -24,7 +24,8 @@ internal object RuntimeRecoveryState {
     fun beginIn(filesDir: File, sessionId: String, description: String) {
         runCatching {
             ledger(filesDir).apply {
-                var lines = readLines().filter { it.isNotBlank() && !it.startsWith("$sessionId|") }
+                var lines = (if (isFile) readLines() else emptyList())
+                    .filter { it.isNotBlank() && !it.startsWith("$sessionId|") }
                 lines += "$sessionId|${description.take(160).replace('\n', ' ')}"
                 writeText(lines.takeLast(MAX_ENTRIES).joinToString(separator = "\n", postfix = "\n"))
             }

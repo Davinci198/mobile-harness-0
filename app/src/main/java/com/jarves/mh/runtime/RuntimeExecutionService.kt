@@ -53,10 +53,18 @@ internal object RuntimeTaskController {
 
     fun activeCount(): Int = activeSessions.size
 
-    fun describe(): String? = activeSessions[newestSessionId]
+    fun describe(): String? = newestSessionId?.let { activeSessions[it] }
 
     fun requestStop() {
         stopAction?.invoke()
+    }
+
+    /** Drops all bookkeeping. Unit tests call this between test cases. */
+    internal fun reset() {
+        activeSessions.clear()
+        newestSessionId = null
+        stopAction = null
+        recoveryActive = false
     }
 }
 
