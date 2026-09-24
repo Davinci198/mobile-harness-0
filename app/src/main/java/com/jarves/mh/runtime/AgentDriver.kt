@@ -40,6 +40,8 @@ class AgentRegistry(drivers: List<AgentDriver>) {
     fun require(kind: AgentKind): AgentDriver =
         byId[kind.stableId] ?: error("Agent '${kind.stableId}' is not registered")
 
+    fun all(): List<AgentDriver> = byId.values.sortedBy { it.kind.ordinal }
+
     companion object {
         fun builtIns(
             claude: RuntimeBridge,

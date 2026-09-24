@@ -3,10 +3,8 @@ package com.jarves.mh.runtime
 import android.content.Context
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatMessage
-import com.jarves.mh.model.ChangeItem
-import com.jarves.mh.model.DiffLine
-import com.jarves.mh.model.DiffLineType
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProviderProfile
@@ -19,7 +17,6 @@ import com.jarves.mh.tools.ToolPermissionLevel
 import com.jarves.mh.tools.ToolPermissionStore
 import java.io.File
 import java.io.RandomAccessFile
-import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +30,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import org.json.JSONArray
 
 internal object ProviderRuntimeErrorDetector {
     fun detect(line: String): String? {
@@ -75,6 +71,7 @@ class ClaudeRuntimeBridge(
     ),
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
+    private val checkpoints = WorkspaceCheckpoints(context.filesDir).forAgent(AgentKind.CLAUDE_CODE)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
     override val events: Flow<RuntimeEvent> = eventBus
     private val pending = ConcurrentHashMap<String, PendingPermission>()
@@ -82,7 +79,6 @@ class ClaudeRuntimeBridge(
     private val toolNames = ConcurrentHashMap<String, String>()
     private val seenToolCalls = ConcurrentHashMap.newKeySet<String>()
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
-    private val projectRoots = ConcurrentHashMap<String, String>()
     @Volatile private var activeProcess: Process? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
@@ -146,9 +142,9 @@ class ClaudeRuntimeBridge(
             // messages into the conversation.
             val installed = installer.installedRuntime()
             installer.ensureSettingsAndHooks()
-            val workspace = ensureWorkspace(projectId)
-            createCheckpoint(projectId, workspace)
-            val before = snapshot(workspace)
+            val workspace = checkpoints.ensureWorkspace(projectId)
+            checkpoints.createCheckpoint(projectId, workspace)
+            val before = checkpoints.snapshot(workspace)
             formatGateway = if (provider.kind.protocol in setOf(
                     com.jarves.mh.model.ProviderProtocol.OPENAI_CHAT,
                     com.jarves.mh.model.ProviderProtocol.OPENAI_RESPONSES,
@@ -242,14 +238,13 @@ class ClaudeRuntimeBridge(
                         RuntimeEvent.ToolRejected(sessionId, permission.request.approvalId),
                     )
                 }
-                val changed = changedFiles(workspace, before)
+                val changed = checkpoints.changedFiles(workspace, before)
                 if (changed.isNotEmpty()) {
                     Log.d("ClaudeBridge", "Changed files: $changed")
-                    saveChangedPaths(projectId, changed)
-                    val details = loadPendingChanges(projectId)
+                    checkpoints.saveChangedPaths(projectId, changed, workspace)
+                    val paths = checkpoints.readChangedPaths(projectId).filterNot(checkpoints::isInternalRuntimePath)
+                    val details = checkpoints.buildChangeDetails(projectId, workspace, paths)
                     eventBus.emit(RuntimeEvent.FilesChanged(sessionId, details))
-                } else if (!File(checkpointDir(projectId), "changes.json").isFile) {
-                    acceptLastChanges(projectId)
                 }
                 if (exit == 0) {
                     emitCompletedOnce(sessionId)
@@ -305,75 +300,6 @@ class ClaudeRuntimeBridge(
 
     override suspend fun stopActiveSession() {
         activeSessionId?.let { stopSession(it) }
-    }
-
-    override suspend fun undoLastChanges(projectId: String): Boolean = withContext(Dispatchers.IO) {
-        val checkpoint = checkpointDir(projectId)
-        val backup = File(checkpoint, "project")
-        val manifest = File(checkpoint, "changes.json")
-        if (!backup.isDirectory || !manifest.isFile) return@withContext false
-        val workspace = ensureWorkspace(projectId)
-        val paths = runCatching {
-            val array = JSONArray(manifest.readText())
-            (0 until array.length()).map(array::getString)
-        }.getOrElse { return@withContext false }.filterNot(::isInternalRuntimePath)
-
-        paths.forEach { path ->
-            val target = safeWorkspaceFile(workspace, path)
-            val original = safeWorkspaceFile(backup, path)
-            if (original.isFile) {
-                target.parentFile?.mkdirs()
-                original.copyTo(target, overwrite = true)
-            } else if (target.isFile) {
-                target.delete()
-            }
-        }
-        checkpoint.deleteRecursively()
-        true
-    }
-
-    override suspend fun acceptLastChanges(projectId: String) {
-        withContext(Dispatchers.IO) {
-            checkpointDir(projectId).deleteRecursively()
-        }
-    }
-
-    override suspend fun loadPendingChanges(projectId: String): List<ChangeItem> = withContext(Dispatchers.IO) {
-        val workspace = ensureWorkspace(projectId)
-        val paths = readChangedPaths(projectId).filterNot(::isInternalRuntimePath)
-        if (paths.isEmpty()) emptyList() else buildChangeDetails(projectId, workspace, paths)
-    }
-
-    override suspend fun undoFileChange(projectId: String, path: String): Boolean = withContext(Dispatchers.IO) {
-        if (isInternalRuntimePath(path) || path !in readChangedPaths(projectId)) return@withContext false
-        val workspace = ensureWorkspace(projectId)
-        val backup = File(checkpointDir(projectId), "project")
-        val target = safeWorkspaceFile(workspace, path)
-        val original = safeWorkspaceFile(backup, path)
-        if (original.isFile) {
-            target.parentFile?.mkdirs()
-            original.copyTo(target, overwrite = true)
-        } else if (target.isFile) {
-            target.delete()
-        }
-        removeChangedPath(projectId, path)
-        true
-    }
-
-    override suspend fun acceptFileChange(projectId: String, path: String): Boolean = withContext(Dispatchers.IO) {
-        if (isInternalRuntimePath(path) || path !in readChangedPaths(projectId)) return@withContext false
-        val workspace = ensureWorkspace(projectId)
-        val backup = File(checkpointDir(projectId), "project")
-        val current = safeWorkspaceFile(workspace, path)
-        val baseline = safeWorkspaceFile(backup, path)
-        if (current.isFile) {
-            baseline.parentFile?.mkdirs()
-            current.copyTo(baseline, overwrite = true)
-        } else if (baseline.isFile) {
-            baseline.delete()
-        }
-        removeChangedPath(projectId, path)
-        true
     }
 
     private suspend fun watchPermissionRequests(sessionId: String) {
@@ -707,237 +633,6 @@ class ClaudeRuntimeBridge(
         return sb.toString()
     }
 
-    private fun ensureWorkspace(projectId: String): File {
-        val base = File(context.filesDir, "workspaces/$projectId").apply { mkdirs() }.canonicalFile
-        val rootPath = projectRoots[projectId].orEmpty()
-        if (rootPath.isBlank()) return base
-        val selected = File(base, rootPath).canonicalFile
-        require(selected.toPath().startsWith(base.toPath())) { "Unsafe project root" }
-        return selected.apply { mkdirs() }
-    }
-
-    fun configureProjectRoot(projectId: String, rootPath: String) {
-        val normalized = rootPath.trim().trim('/')
-        require(normalized.isBlank() || (!normalized.contains("..") && !normalized.startsWith('/'))) {
-            "Unsafe project root"
-        }
-        val previous = projectRoots.put(projectId, normalized).orEmpty()
-        if (previous != normalized) checkpointDir(projectId).deleteRecursively()
-    }
-
-    private fun checkpointDir(projectId: String) = File(context.filesDir, "checkpoints/$projectId/latest")
-
-    private fun createCheckpoint(projectId: String, workspace: File) {
-        val checkpoint = checkpointDir(projectId)
-        // Keep the original baseline until every pending file is accepted or undone.
-        if (File(checkpoint, "project").isDirectory && File(checkpoint, "changes.json").isFile) return
-        checkpoint.deleteRecursively()
-        val backup = File(checkpoint, "project").apply { mkdirs() }
-        val workspacePath = workspace.canonicalFile.toPath()
-        workspace.walkTopDown()
-            .onEnter { directory ->
-                directory == workspace || (
-                    !java.nio.file.Files.isSymbolicLink(directory.toPath()) &&
-                        runCatching { directory.canonicalFile.toPath().startsWith(workspacePath) }.getOrDefault(false)
-                    )
-            }
-            .filter {
-                it.isFile &&
-                    !isInternalRuntimePath(it.relativeTo(workspace).invariantSeparatorsPath) &&
-                    !java.nio.file.Files.isSymbolicLink(it.toPath())
-            }
-            .forEach { source ->
-                val relative = source.relativeTo(workspace).invariantSeparatorsPath
-                val destination = safeWorkspaceFile(backup, relative)
-                destination.parentFile?.mkdirs()
-                source.copyTo(destination, overwrite = true)
-            }
-    }
-
-    private fun saveChangedPaths(projectId: String, paths: List<String>) {
-        val manifest = File(checkpointDir(projectId), "changes.json")
-        manifest.parentFile?.mkdirs()
-        val merged = (readChangedPaths(projectId) + paths)
-            .filterNot(::isInternalRuntimePath)
-            .distinct()
-            .sorted()
-        manifest.writeText(JSONArray(merged).toString())
-    }
-
-    private fun readChangedPaths(projectId: String): List<String> {
-        val manifest = File(checkpointDir(projectId), "changes.json")
-        if (!manifest.isFile) return emptyList()
-        return runCatching {
-            val array = JSONArray(manifest.readText())
-            (0 until array.length()).map(array::getString)
-        }.getOrDefault(emptyList())
-    }
-
-    private fun removeChangedPath(projectId: String, path: String) {
-        val remaining = readChangedPaths(projectId).filterNot { it == path }
-        if (remaining.isEmpty()) {
-            checkpointDir(projectId).deleteRecursively()
-        } else {
-            File(checkpointDir(projectId), "changes.json").writeText(JSONArray(remaining).toString())
-        }
-    }
-
-    private fun buildChangeDetails(projectId: String, workspace: File, paths: List<String>): List<ChangeItem> {
-        val backup = File(checkpointDir(projectId), "project")
-        return paths.map { path ->
-            val before = safeWorkspaceFile(backup, path).takeIf(File::isFile)?.readBytes() ?: ByteArray(0)
-            val after = safeWorkspaceFile(workspace, path).takeIf(File::isFile)?.readBytes() ?: ByteArray(0)
-            val binary = before.any { it == 0.toByte() } || after.any { it == 0.toByte() }
-            val (additions, deletions) = lineChanges(before, after)
-            ChangeItem(
-                path = path,
-                additions = additions,
-                deletions = deletions,
-                diffLines = buildDiffLines(before, after),
-                binary = binary,
-            )
-        }
-    }
-
-    private fun buildDiffLines(beforeBytes: ByteArray, afterBytes: ByteArray): List<DiffLine> {
-        if (beforeBytes.any { it == 0.toByte() } || afterBytes.any { it == 0.toByte() }) {
-            return listOf(DiffLine(DiffLineType.INFO, "Binary file changed"))
-        }
-        val before = textLines(beforeBytes)
-        val after = textLines(afterBytes)
-        if (before.size > MAX_RENDERED_DIFF_LINES || after.size > MAX_RENDERED_DIFF_LINES) {
-            return listOf(
-                DiffLine(
-                    DiffLineType.INFO,
-                    "Diff is too large to display (${before.size} → ${after.size} lines). Undo and Keep still work.",
-                ),
-            )
-        }
-
-        val lcs = Array(before.size + 1) { IntArray(after.size + 1) }
-        for (oldIndex in before.lastIndex downTo 0) {
-            for (newIndex in after.lastIndex downTo 0) {
-                lcs[oldIndex][newIndex] = if (before[oldIndex] == after[newIndex]) {
-                    lcs[oldIndex + 1][newIndex + 1] + 1
-                } else {
-                    maxOf(lcs[oldIndex + 1][newIndex], lcs[oldIndex][newIndex + 1])
-                }
-            }
-        }
-
-        val result = mutableListOf<DiffLine>()
-        var oldIndex = 0
-        var newIndex = 0
-        while (oldIndex < before.size || newIndex < after.size) {
-            when {
-                oldIndex < before.size && newIndex < after.size && before[oldIndex] == after[newIndex] -> {
-                    result += DiffLine(DiffLineType.CONTEXT, before[oldIndex], oldIndex + 1, newIndex + 1)
-                    oldIndex++
-                    newIndex++
-                }
-                newIndex < after.size && (oldIndex == before.size || lcs[oldIndex][newIndex + 1] >= lcs[oldIndex + 1][newIndex]) -> {
-                    result += DiffLine(DiffLineType.ADDITION, after[newIndex], null, newIndex + 1)
-                    newIndex++
-                }
-                oldIndex < before.size -> {
-                    result += DiffLine(DiffLineType.DELETION, before[oldIndex], oldIndex + 1, null)
-                    oldIndex++
-                }
-            }
-        }
-        return collapseUnchangedLines(result)
-    }
-
-    private fun collapseUnchangedLines(lines: List<DiffLine>): List<DiffLine> {
-        val changedIndexes = lines.indices.filter { lines[it].type != DiffLineType.CONTEXT }
-        if (changedIndexes.isEmpty()) return lines
-        val visible = BooleanArray(lines.size)
-        changedIndexes.forEach { changed ->
-            for (index in maxOf(0, changed - DIFF_CONTEXT_LINES)..minOf(lines.lastIndex, changed + DIFF_CONTEXT_LINES)) {
-                visible[index] = true
-            }
-        }
-        val result = mutableListOf<DiffLine>()
-        var index = 0
-        while (index < lines.size) {
-            if (visible[index]) {
-                result += lines[index++]
-            } else {
-                val start = index
-                while (index < lines.size && !visible[index]) index++
-                result += DiffLine(DiffLineType.INFO, "… ${index - start} unchanged lines …")
-            }
-        }
-        return result
-    }
-
-    private fun lineChanges(beforeBytes: ByteArray, afterBytes: ByteArray): Pair<Int, Int> {
-        if (beforeBytes.any { it == 0.toByte() } || afterBytes.any { it == 0.toByte() }) {
-            return (if (afterBytes.isNotEmpty()) 1 else 0) to (if (beforeBytes.isNotEmpty()) 1 else 0)
-        }
-        val before = textLines(beforeBytes)
-        val after = textLines(afterBytes)
-        if (before.size > MAX_DIFF_LINES || after.size > MAX_DIFF_LINES) {
-            return maxOf(0, after.size - before.size) to maxOf(0, before.size - after.size)
-        }
-        var previous = IntArray(after.size + 1)
-        before.forEach { oldLine ->
-            val current = IntArray(after.size + 1)
-            after.forEachIndexed { index, newLine ->
-                current[index + 1] = if (oldLine == newLine) {
-                    previous[index] + 1
-                } else {
-                    maxOf(previous[index + 1], current[index])
-                }
-            }
-            previous = current
-        }
-        val common = previous[after.size]
-        return (after.size - common) to (before.size - common)
-    }
-
-    private fun textLines(bytes: ByteArray): List<String> {
-        if (bytes.isEmpty()) return emptyList()
-        val lines = bytes.decodeToString().split('\n')
-        return if (lines.lastOrNull().isNullOrEmpty()) lines.dropLast(1) else lines
-    }
-
-    private fun safeWorkspaceFile(root: File, relative: String): File {
-        require(relative.isNotBlank() && !relative.startsWith('/')) { "Unsafe workspace path" }
-        val file = File(root, relative)
-        val rootPath = root.canonicalFile.toPath()
-        val parentPath = (file.parentFile ?: root).canonicalFile.toPath()
-        require(parentPath.startsWith(rootPath)) { "Workspace path escapes project" }
-        return file
-    }
-
-    private fun snapshot(root: File): Map<String, String> = root.walkTopDown()
-        .filter { it.isFile && !isInternalRuntimePath(it.relativeTo(root).invariantSeparatorsPath) }
-        .associate { it.relativeTo(root).path to digest(it) }
-
-    private fun changedFiles(root: File, before: Map<String, String>): List<String> {
-        val after = snapshot(root)
-        return (before.keys + after.keys).distinct().filter { before[it] != after[it] }.sorted()
-    }
-
-    private fun isInternalRuntimePath(path: String): Boolean {
-        val normalized = path.replace('\\', '/')
-        return normalized == ".claude" || normalized == ".claude.json" || normalized.startsWith(".claude/")
-    }
-
-    private fun digest(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-
     private fun classifyRisk(tool: String, command: String?): RiskLevel {
         val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
         return when {
@@ -1052,9 +747,6 @@ class ClaudeRuntimeBridge(
     private class ProviderSessionException(message: String) : IllegalStateException(message)
 
     companion object {
-        private const val MAX_DIFF_LINES = 2_000
-        private const val MAX_RENDERED_DIFF_LINES = 600
-        private const val DIFF_CONTEXT_LINES = 3
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
     }
 }

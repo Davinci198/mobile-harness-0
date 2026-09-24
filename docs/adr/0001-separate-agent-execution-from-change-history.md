@@ -1,0 +1,3 @@
+# Separate Agent Execution from Project and Agent Change History
+
+Change History belongs to one Project and one Agent, persists across Agent Executions and application restarts, and remains reviewable when an Agent Execution completes, stops, fails, or is interrupted. Agent Execution keeps Approval, while a deep `AgentWork` module coordinates five execution adapters with Change History behind a unified event stream. Undo is blocked by a Change Conflict rather than overwriting newer Workspace content; acceptance remains available. Legacy Project checkpoints migrate incrementally to the active Agent so the redesign can ship in vertical slices without changing update behavior in one irreversible cutover.

@@ -2,8 +2,8 @@ package com.jarves.mh.runtime
 
 import android.content.Context
 import androidx.core.content.ContextCompat
+import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatMessage
-import com.jarves.mh.model.ChangeItem
 import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RuntimeEvent
@@ -142,7 +142,7 @@ class AntigravityRuntimeBridge(
     private val saveConversationId: (String, String) -> Unit,
 ) : RuntimeBridge {
     private val installer = RuntimeInstaller(context)
-    private val checkpoints = WorkspaceCheckpoints(context.filesDir)
+    private val checkpoints = WorkspaceCheckpoints(context.filesDir).forAgent(AgentKind.ANTIGRAVITY)
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
     override val events: Flow<RuntimeEvent> = eventBus
     private val finished = ConcurrentHashMap.newKeySet<String>()
@@ -151,15 +151,13 @@ class AntigravityRuntimeBridge(
     @Volatile private var userStopRequested = false
     @Volatile private var foregroundResultPosted = false
 
-    fun configureProjectRoot(projectId: String, rootPath: String) = checkpoints.configureProjectRoot(projectId, rootPath)
-
     /**
      * Lightweight connectivity probe: sends a tiny hello to agy and returns its
      * reply text. No foreground service, no checkpoints, no saved conversation.
      * The timeout is intentionally internal — callers only see success/failure.
      */
     suspend fun hello(timeoutMillis: Long = HELLO_TIMEOUT_MILLIS): String = withContext(Dispatchers.IO) {
-        if (!installer.isAgentInstalled(com.jarves.mh.model.AgentKind.ANTIGRAVITY)) {
+        if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             throw IllegalStateException("Antigravity CLI is not installed.")
         }
         try {
@@ -272,7 +270,7 @@ class AntigravityRuntimeBridge(
         foregroundResultPosted = false
         finished.remove(sessionId)
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
-        if (!installer.isAgentInstalled(com.jarves.mh.model.AgentKind.ANTIGRAVITY)) {
+        if (!installer.isAgentInstalled(AgentKind.ANTIGRAVITY)) {
             emitFailure(sessionId, "Antigravity CLI is not installed. Open Settings → Coding agent to install it.")
             return@withContext sessionId
         }
@@ -362,9 +360,10 @@ class AntigravityRuntimeBridge(
                 friendlyError(pending.toString().takeLast(1_000).ifBlank { "Antigravity exited with code $exit" })
             }
             val paths = checkpoints.changedFiles(workspace, before)
-            checkpoints.saveChangedPaths(projectId, paths)
+            checkpoints.saveChangedPaths(projectId, paths, workspace)
             if (paths.isNotEmpty()) {
-                eventBus.emit(RuntimeEvent.FilesChanged(sessionId, checkpoints.buildChangeDetails(projectId, workspace, paths)))
+                val details = checkpoints.buildChangeDetails(projectId, workspace, checkpoints.readChangedPaths(projectId))
+                eventBus.emit(RuntimeEvent.FilesChanged(sessionId, details))
             }
             emitCompleted(sessionId)
             finishForegroundRuntime(true, projectSlug, "Antigravity finished the task in $projectSlug.")
@@ -398,57 +397,6 @@ class AntigravityRuntimeBridge(
     }
 
     override suspend fun stopActiveSession() = activeSessionId?.let { stopSession(it) } ?: Unit
-
-    override suspend fun undoLastChanges(projectId: String): Boolean = withContext(Dispatchers.IO) {
-        val checkpoint = checkpoints.checkpointDir(projectId)
-        val backup = File(checkpoint, "project")
-        val paths = checkpoints.readChangedPaths(projectId)
-        if (!backup.isDirectory || paths.isEmpty()) return@withContext false
-        val workspace = checkpoints.ensureWorkspace(projectId)
-        paths.forEach { restore(workspace, backup, it) }
-        checkpoint.deleteRecursively()
-        true
-    }
-
-    override suspend fun acceptLastChanges(projectId: String): Unit = withContext(Dispatchers.IO) {
-        checkpoints.checkpointDir(projectId).deleteRecursively()
-        Unit
-    }
-
-    override suspend fun loadPendingChanges(projectId: String): List<ChangeItem> = withContext(Dispatchers.IO) {
-        val paths = checkpoints.readChangedPaths(projectId)
-        if (paths.isEmpty()) emptyList() else checkpoints.buildChangeDetails(projectId, checkpoints.ensureWorkspace(projectId), paths)
-    }
-
-    override suspend fun undoFileChange(projectId: String, path: String): Boolean = withContext(Dispatchers.IO) {
-        if (path !in checkpoints.readChangedPaths(projectId)) return@withContext false
-        restore(checkpoints.ensureWorkspace(projectId), File(checkpoints.checkpointDir(projectId), "project"), path)
-        checkpoints.removeChangedPath(projectId, path)
-        true
-    }
-
-    override suspend fun acceptFileChange(projectId: String, path: String): Boolean = withContext(Dispatchers.IO) {
-        if (path !in checkpoints.readChangedPaths(projectId)) return@withContext false
-        val workspace = checkpoints.ensureWorkspace(projectId)
-        val backup = File(checkpoints.checkpointDir(projectId), "project")
-        val current = checkpoints.safeWorkspaceFile(workspace, path)
-        val baseline = checkpoints.safeWorkspaceFile(backup, path)
-        if (current.isFile) {
-            baseline.parentFile?.mkdirs()
-            current.copyTo(baseline, overwrite = true)
-        } else baseline.delete()
-        checkpoints.removeChangedPath(projectId, path)
-        true
-    }
-
-    private fun restore(workspace: File, backup: File, path: String) {
-        val target = checkpoints.safeWorkspaceFile(workspace, path)
-        val original = checkpoints.safeWorkspaceFile(backup, path)
-        if (original.isFile) {
-            target.parentFile?.mkdirs()
-            original.copyTo(target, overwrite = true)
-        } else target.delete()
-    }
 
     private suspend fun emitCompleted(sessionId: String) {
         if (finished.add(sessionId)) eventBus.emit(RuntimeEvent.SessionCompleted(sessionId))

@@ -965,6 +965,7 @@ fun AgentScreen(
                                 val isSelected = viewedAgent == agent
                                 val isInstalled = agent == state.agentKind || state.installedAgentVersions.containsKey(agent)
                                 val updateAvailable = state.agentUpdates.containsKey(agent)
+                                val pendingChangeCount = state.pendingChangesByAgent[agent] ?: 0
                                 val shortTitle = when (agent) {
                                     AgentKind.ANTIGRAVITY -> "Antigravity"
                                     AgentKind.DEEPSEEK_HARNESS -> "DeepSeek"
@@ -995,6 +996,20 @@ fun AgentScreen(
                                                 color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1,
                                             )
+                                            if (pendingChangeCount > 0) {
+                                                Spacer(Modifier.width(4.dp))
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                                ) {
+                                                    Text(
+                                                        pendingChangeCount.toString(),
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                                        fontSize = 9.sp,
+                                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                    )
+                                                }
+                                            }
                                             if (updateAvailable) {
                                                 Spacer(Modifier.width(3.dp))
                                                 Box(Modifier.size(5.dp).background(PocketOrange, CircleShape))
