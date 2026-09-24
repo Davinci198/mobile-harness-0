@@ -5,11 +5,10 @@ import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
+import com.jarves.mh.model.RiskLevel
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
-import com.jarves.mh.model.RiskLevel
 import java.io.File
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
@@ -32,23 +31,14 @@ class AgentWorkTest {
         val work = AgentWork(listOf(driver), ProjectAgentChangeHistory(File("unused")))
         val event = async(start = CoroutineStart.UNDISPATCHED) { work.events.first() }
 
-        val start = async {
-            work.start(
-                projectAgent = ProjectAgent("project", AgentKind.CLAUDE_CODE),
-                projectSlug = "project",
-                projectKind = ProjectKind.PROJECT,
-                prompt = "hello",
-                conversationHistory = emptyList<ChatMessage>(),
-                provider = ProviderProfile(ProviderKind.ANTHROPIC),
-            )
-        }
-        val firstEvent = withTimeout(1_000) { event.await() } as AgentWorkEvent.Execution
-        val handle = work.handleFor("session-1")
-        if (handle == null) {
-            bridge.forceStop()
-            withTimeout(1_000) { start.await() }
-            throw AssertionError("AgentWork did not retain the live execution handle")
-        }
+        val handle = work.start(
+            projectAgent = ProjectAgent("project", AgentKind.CLAUDE_CODE),
+            projectSlug = "project",
+            projectKind = ProjectKind.PROJECT,
+            prompt = "hello",
+            conversationHistory = emptyList<ChatMessage>(),
+            provider = ProviderProfile(ProviderKind.ANTHROPIC),
+        )
         val request = ToolRequest(
             sessionId = handle.sessionId,
             toolName = "Write",
@@ -57,8 +47,8 @@ class AgentWorkTest {
         )
         handle.respondToApproval(request, true)
         handle.stop()
-        withTimeout(1_000) { start.await() }
 
+        val firstEvent = withTimeout(1_000) { event.await() } as AgentWorkEvent.Execution
         assertEquals(AgentKind.CLAUDE_CODE, firstEvent.agent)
         assertEquals(RuntimeEvent.SessionStarted("session-1"), firstEvent.event)
         assertEquals(listOf("session-1"), bridge.approvals)
@@ -67,8 +57,7 @@ class AgentWorkTest {
 }
 
 private class FakeRuntimeBridge : RuntimeBridge {
-    private val release = CompletableDeferred<Unit>()
-    private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 4)
+    private val eventBus = MutableSharedFlow<RuntimeEvent>(replay = 1, extraBufferCapacity = 4)
     override val events: Flow<RuntimeEvent> = eventBus
     val approvals = mutableListOf<String>()
     val stopped = mutableListOf<String>()
@@ -82,7 +71,6 @@ private class FakeRuntimeBridge : RuntimeBridge {
         provider: ProviderProfile,
     ): String {
         eventBus.emit(RuntimeEvent.SessionStarted("session-1"))
-        withTimeout(2_000) { release.await() }
         return "session-1"
     }
 
@@ -93,11 +81,6 @@ private class FakeRuntimeBridge : RuntimeBridge {
     override suspend fun stopSession(sessionId: String) {
         stopped += sessionId
         eventBus.emit(RuntimeEvent.SessionFailed(sessionId, "Stopped by test"))
-        release.complete(Unit)
-    }
-
-    fun forceStop() {
-        release.complete(Unit)
     }
 
     override suspend fun stopActiveSession() = Unit
