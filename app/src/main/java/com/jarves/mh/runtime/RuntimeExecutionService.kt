@@ -62,6 +62,14 @@ internal object RuntimeTaskController {
 
 class RuntimeExecutionService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
+
+    /**
+     * Whether the wake lock SHOULD be held. Auto-protection turns it on for
+     * every task and for the Studio keepalive; the notification toggle
+     * (Termux-style "Acquire/Release wake lock" button) flips it manually.
+     * When the user releases it, the watchdog refreshes must not re-acquire.
+     */
+    @Volatile private var wakeLockDesired: Boolean = true
     private var projectName: String = "your project"
     private var notificationTitle: String = "Mobile Harness is working"
     private var canStop: Boolean = true
@@ -103,6 +111,14 @@ class RuntimeExecutionService : Service() {
         val sessionId = intent.getStringExtra(EXTRA_SESSION_ID)
         when (intent.action ?: ACTION_START) {
             ACTION_STOP -> handleStop()
+            ACTION_TOGGLE_WAKELOCK -> {
+                // Termux-style notification toggle: the button label flips
+                // because the notification is rebuilt with the new state.
+                wakeLockDesired = wakeLock?.isHeld != true
+                if (wakeLockDesired) acquireWakeLock() else releaseWakeLock()
+                Log.d(TAG, "Wake lock ${if (wakeLockDesired) "acquired" else "released"} from notification toggle")
+                if (taskRunning() || studioKeepalive) refreshNotification()
+            }
             ACTION_PROGRESS -> {
                 if (!taskRunning()) return START_STICKY
                 refreshNotification(
@@ -155,9 +171,10 @@ class RuntimeExecutionService : Service() {
                 RuntimeRecoveryState.beginIn(filesDir, sid, description)
                 // A user-started task takes over the device: the recovery
                 // window ends here, so this session's own cleanup sweeps work
-                // normally again.
+                // normally again. Protection resets to ON for the fresh task.
                 RuntimeTaskController.recoveryActive = false
                 recoverySessionIds = emptyList()
+                wakeLockDesired = true
                 promoteToForeground()
             }
         }
@@ -283,25 +300,26 @@ class RuntimeExecutionService : Service() {
             .setOnlyAlertOnce(true)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+        // Termux-style wake lock toggle first, then the task action.
+        if (wakeLock?.isHeld == true) {
+            builder.addAction(0, "Release wake lock", pendingAction(ACTION_TOGGLE_WAKELOCK, 4))
+        } else {
+            builder.addAction(0, "Acquire wake lock", pendingAction(ACTION_TOGGLE_WAKELOCK, 4))
+        }
         if (includeStop) {
-            val stopIntent = PendingIntent.getService(
-                this,
-                2,
-                Intent(this, RuntimeExecutionService::class.java).setAction(ACTION_STOP),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-            builder.addAction(0, "Stop task", stopIntent)
+            builder.addAction(0, "Stop task", pendingAction(ACTION_STOP, 2))
         } else if (studioKeepalive) {
-            val stopStudioIntent = PendingIntent.getService(
-                this,
-                3,
-                Intent(this, RuntimeExecutionService::class.java).setAction(ACTION_STOP_STUDIO),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-            builder.addAction(0, "Stop Studio", stopStudioIntent)
+            builder.addAction(0, "Stop Studio", pendingAction(ACTION_STOP_STUDIO, 3))
         }
         return builder.build()
     }
+
+    private fun pendingAction(action: String, requestCode: Int): PendingIntent = PendingIntent.getService(
+        this,
+        requestCode,
+        Intent(this, RuntimeExecutionService::class.java).setAction(action),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
 
     private fun finishTask(title: String, detail: String, failed: Boolean, sessionId: String?) {
         val noneLeft = sessionId?.let {
@@ -383,7 +401,7 @@ class RuntimeExecutionService : Service() {
     )
 
     private fun acquireWakeLock() {
-        if (wakeLock?.isHeld == true) return
+        if (!wakeLockDesired || wakeLock?.isHeld == true) return
         wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.jarves.mh:active-coding-task")
             .apply { acquire(MAX_WAKE_LOCK_MS) }
@@ -440,6 +458,7 @@ class RuntimeExecutionService : Service() {
         const val ACTION_CANCELLED = "com.jarves.mh.CANCEL_RUNTIME"
         const val ACTION_KEEPALIVE = "com.jarves.mh.KEEPALIVE_RUNTIME"
         const val ACTION_STOP_STUDIO = "com.jarves.mh.STOP_STUDIO_RUNTIME"
+        const val ACTION_TOGGLE_WAKELOCK = "com.jarves.mh.TOGGLE_WAKELOCK_RUNTIME"
         const val EXTRA_PROJECT_NAME = "project_name"
         const val EXTRA_DETAIL = "detail"
         const val EXTRA_TITLE = "title"
