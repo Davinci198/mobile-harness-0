@@ -5384,7 +5384,7 @@ private fun StudioTab(installer: RuntimeInstaller) {
     var url by remember { mutableStateOf("http://127.0.0.1:${StudioServerManager.PORT}") }
     var attempt by remember { mutableIntStateOf(0) }
 
-    val manager = remember(installer) { StudioServerManager(context.applicationContext, installer) }
+    val manager = remember(installer) { StudioServerManager(installer) }
 
     var progressLine by remember { mutableStateOf("") }
 
