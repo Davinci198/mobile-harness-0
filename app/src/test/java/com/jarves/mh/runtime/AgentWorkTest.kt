@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -42,8 +43,13 @@ class AgentWorkTest {
                 provider = ProviderProfile(ProviderKind.ANTHROPIC),
             )
         }
-        val firstEvent = event.await() as AgentWorkEvent.Execution
-        val handle = requireNotNull(work.handleFor("session-1"))
+        val firstEvent = withTimeout(1_000) { event.await() } as AgentWorkEvent.Execution
+        val handle = work.handleFor("session-1")
+        if (handle == null) {
+            bridge.forceStop()
+            withTimeout(1_000) { start.await() }
+            throw AssertionError("AgentWork did not retain the live execution handle")
+        }
         val request = ToolRequest(
             sessionId = handle.sessionId,
             toolName = "Write",
@@ -52,7 +58,7 @@ class AgentWorkTest {
         )
         handle.respondToApproval(request, true)
         handle.stop()
-        start.await()
+        withTimeout(1_000) { start.await() }
 
         assertEquals(AgentKind.CLAUDE_CODE, firstEvent.agent)
         assertEquals(RuntimeEvent.SessionStarted("session-1"), firstEvent.event)
@@ -77,7 +83,7 @@ private class FakeRuntimeBridge : RuntimeBridge {
         provider: ProviderProfile,
     ): String {
         eventBus.emit(RuntimeEvent.SessionStarted("session-1"))
-        release.await()
+        withTimeout(2_000) { release.await() }
         return "session-1"
     }
 
@@ -88,6 +94,10 @@ private class FakeRuntimeBridge : RuntimeBridge {
     override suspend fun stopSession(sessionId: String) {
         stopped += sessionId
         eventBus.emit(RuntimeEvent.SessionFailed(sessionId, "Stopped by test"))
+        release.complete(Unit)
+    }
+
+    fun forceStop() {
         release.complete(Unit)
     }
 
