@@ -660,7 +660,9 @@ private fun BackgroundTaskSetupScreen(
                                 1 -> if (batteryGranted) {
                                     currentStep = 2
                                 } else {
-                                    val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
                                     runCatching { batteryLauncher.launch(intent) }
                                         .onFailure {
                                             batteryLauncher.launch(
