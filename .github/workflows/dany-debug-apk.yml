@@ -18,6 +18,8 @@ on:
 
 jobs:
   build:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +48,16 @@ jobs:
         with:
           name: mh-dany-debug
           path: app/build/outputs/apk/**/*.apk
+      - name: Publish main release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: debug-main-${{ github.sha }}
+          name: Mobile Harness ${{ github.sha }}
+          files: |
+            app/build/outputs/apk/online/debug/*.apk
+            app/build/outputs/apk/offline/debug/*.apk
+          fail_on_unmatched_files: true
       - name: Attach APKs to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
