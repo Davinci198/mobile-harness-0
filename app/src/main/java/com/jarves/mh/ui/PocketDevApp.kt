@@ -5457,7 +5457,10 @@ private fun StudioTab(installer: RuntimeInstaller) {
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // imePadding: MainActivity is edge-to-edge, so windowSoftInputMode
+    // adjustResize does nothing by itself and the keyboard used to cover the
+    // Studio WebView (the chat composer stayed under it).
+    Column(Modifier.fillMaxSize().imePadding()) {
         when (uiState) {
             StudioUiState.CHECKING -> EmptyState(
                 Icons.Default.Dashboard,
