@@ -44,7 +44,12 @@ class AgentWorkTest {
         }
         val firstEvent = event.await() as AgentWorkEvent.Execution
         val handle = requireNotNull(work.handleFor("session-1"))
-        val request = ToolRequest(sessionId = handle.sessionId, toolName = "Write", risk = RiskLevel.REVIEW)
+        val request = ToolRequest(
+            sessionId = handle.sessionId,
+            toolName = "Write",
+            explanation = "Write test file",
+            risk = RiskLevel.REVIEW,
+        )
         handle.respondToApproval(request, true)
         handle.stop()
         start.await()
