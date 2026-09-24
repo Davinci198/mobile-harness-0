@@ -2,7 +2,10 @@ package com.jarves.mh.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -104,10 +107,11 @@ import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.ui.theme.AppThemeMode
+import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { APPEARANCE, TOOLS, PERMISSIONS, RUNTIME, UPDATE_CHANNEL }
+private enum class SettingsSection { APPEARANCE, TOOLS, PERMISSIONS, BACKGROUND, RUNTIME, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,6 +150,27 @@ fun SettingsScreen(
     var terminalCleared by remember { mutableStateOf(false) }
     var showReliabilityHelp by rememberSaveable { mutableStateOf(false) }
     var stackPendingRemoval by remember { mutableStateOf<DevStack?>(null) }
+    val powerManager = context.getSystemService(PowerManager::class.java)
+    var backgroundExecutionEnabled by remember {
+        mutableStateOf(powerManager.isIgnoringBatteryOptimizations(context.packageName))
+    }
+    val backgroundSettingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        backgroundExecutionEnabled = powerManager.isIgnoringBatteryOptimizations(context.packageName)
+    }
+
+    fun openBackgroundSettings() {
+        val requestIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:${context.packageName}")
+        }
+        val detailsIntent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:${context.packageName}"),
+        )
+        runCatching { backgroundSettingsLauncher.launch(requestIntent) }
+            .onFailure { backgroundSettingsLauncher.launch(detailsIntent) }
+    }
 
     stackPendingRemoval?.let { stack ->
         AlertDialog(
@@ -226,6 +251,36 @@ fun SettingsScreen(
                         ModernThemeChoice("Dark", Icons.Default.DarkMode, state.themeMode == AppThemeMode.DARK, { onSetThemeMode(AppThemeMode.DARK) }, Modifier.weight(1f))
                         ModernThemeChoice("Light", Icons.Default.LightMode, state.themeMode == AppThemeMode.LIGHT, { onSetThemeMode(AppThemeMode.LIGHT) }, Modifier.weight(1f))
                         ModernThemeChoice("System", Icons.Default.PhoneAndroid, state.themeMode == AppThemeMode.SYSTEM, { onSetThemeMode(AppThemeMode.SYSTEM) }, Modifier.weight(1f))
+                    }
+                }
+            }
+
+            item {
+                SettingsAccordion(
+                    title = "Background execution",
+                    subtitle = if (backgroundExecutionEnabled) "Active for coding tasks" else "Battery optimization may stop tasks",
+                    icon = Icons.Default.Security,
+                    expanded = expanded == SettingsSection.BACKGROUND,
+                    onClick = { toggle(SettingsSection.BACKGROUND) },
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (backgroundExecutionEnabled) "Active" else "Inactive",
+                            fontWeight = FontWeight.Bold,
+                            color = if (backgroundExecutionEnabled) PocketGreen else MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Android keeps coding tasks running in a foreground service while a task is active.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = ::openBackgroundSettings,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (backgroundExecutionEnabled) "Review Android setting" else "Enable in Android settings")
                     }
                 }
             }
