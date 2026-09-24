@@ -94,6 +94,12 @@ class ToolPermissionStore(private val storage: ToolPermissionStorage) {
             "DeviceToast",
             "DeviceNotification",
             "DeviceOpenHttpsLink",
+            "VisitWeb",
+            "HttpRequest",
+            "DownloadFile",
+            "VisitWeb",
+            "HttpRequest",
+            "DownloadFile",
         )
 
         fun overrideKey(toolName: String) = "$KEY_OVERRIDE_PREFIX$toolName"

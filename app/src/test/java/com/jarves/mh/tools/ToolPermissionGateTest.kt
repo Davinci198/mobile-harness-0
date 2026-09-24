@@ -82,6 +82,9 @@ class ToolPermissionGateTest {
             "DeviceToast",
             "DeviceNotification",
             "DeviceOpenHttpsLink",
+            "VisitWeb",
+            "HttpRequest",
+            "DownloadFile",
         )
         assertTrue(ToolPermissionStore.knownTools.containsAll(expected))
     }
