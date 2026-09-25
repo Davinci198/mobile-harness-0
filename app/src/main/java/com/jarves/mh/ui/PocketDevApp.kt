@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -127,6 +128,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -2043,10 +2045,6 @@ private fun RootScreenHost(
     var screen by rememberSaveable { mutableStateOf(RootScreen.PROJECTS) }
     var showQuickTerminal by rememberSaveable { mutableStateOf(false) }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    val terminalLines by viewModel.terminalLines.collectAsStateWithLifecycle()
-    val isTerminalRunning by viewModel.isTerminalRunning.collectAsStateWithLifecycle()
-    val terminalLiveOutput by viewModel.terminalLiveOutput.collectAsStateWithLifecycle()
-    val terminalCurrentCommand by viewModel.terminalCurrentCommand.collectAsStateWithLifecycle()
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -2078,6 +2076,7 @@ private fun RootScreenHost(
                 )
             }
         },
+        floatingActionButtonPosition = FabPosition.Start,
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (screen) {
@@ -2165,24 +2164,20 @@ private fun RootScreenHost(
         }
     }
     if (showQuickTerminal) {
+        val ptyContext = LocalContext.current
         QuickTerminalSheet(
             onDismiss = { showQuickTerminal = false },
         ) {
-            TerminalScreen(
-                lines = terminalLines,
-                isRunning = isTerminalRunning,
-                onRun = viewModel::runTerminalCommand,
-                onInput = viewModel::sendTerminalInput,
-                onInterrupt = viewModel::interruptTerminalCommand,
-                onClear = viewModel::clearTerminal,
-                onToggleTheme = viewModel::toggleTheme,
-                themeMode = state.themeMode,
-                liveOutput = terminalLiveOutput,
-                currentCommand = terminalCurrentCommand,
-                showThemeAction = false,
-                showQuickCommands = true,
-                compactHeader = true,
-            )
+            // Acelasi PTY registry ca tab-ul Terminal din workspace; sesiunea
+            // "global" traieste independent de proiecte. Sheet-ul ridica deja
+            // continutul peste tastatura, deci consumam ime-ul aici ca sa nu
+            // primim padding dublu in PtyTerminalScreen.
+            Box(Modifier.fillMaxSize().consumeWindowInsets(WindowInsets.ime)) {
+                PtyTerminalScreen(
+                    installer = remember(ptyContext) { RuntimeInstaller(ptyContext.applicationContext) },
+                    projectSlug = "global",
+                )
+            }
         }
     }
 }
