@@ -269,7 +269,7 @@ data class AppUiState(
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private fun s(id: Int, vararg args: Any): String = getApplication<Application>().getString(id, *args)
+    private fun s(id: Int, vararg args: Any?): String = getApplication<Application>().getString(id, *args)
 
     private val vault = ApiKeyVault(application)
     private val preferences = AppPreferences(application)
@@ -2352,7 +2352,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         projectImporting = false,
                         projectImportMessage = null,
-                        toastMessage = s(R.string.zip_import_failed, error.message?.take(180) ?: getString(R.string.zip_invalid_archive)),
+                        toastMessage = s(R.string.zip_import_failed, error.message?.take(180) ?: s(R.string.zip_invalid_archive)),
                     )
                 }
             }
@@ -2567,7 +2567,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         gitCloneRunning = false,
                         gitCloneMessage = null,
-                        toastMessage = s(R.string.gh_clone_fail, error.message?.lineSequence()?.lastOrNull()?.take(180) ?: getString(R.string.studio_unknown_error)),
+                        toastMessage = s(R.string.gh_clone_fail, error.message?.lineSequence()?.lastOrNull()?.take(180) ?: s(R.string.studio_unknown_error)),
                     )
                 }
             }
@@ -2991,7 +2991,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(
                     toastMessage = result.fold(
                         onSuccess = { "${project.slug}.zip exported" },
-                        onFailure = { error -> s(R.string.export_failed, error.message ?: getString(R.string.studio_unknown_error)) },
+                        onFailure = { error -> s(R.string.export_failed, error.message ?: s(R.string.studio_unknown_error)) },
                     ),
                 )
             }
