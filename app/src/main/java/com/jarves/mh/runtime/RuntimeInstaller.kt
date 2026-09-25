@@ -1949,7 +1949,15 @@ fi
      * never touched.
      */
     fun killGuestOrphans() {
-        val markers = listOf("libproot.so", OPENCODE_GUEST_PATH, HERMES_GUEST_PATH, CLAUDE_GUEST_PATH, "hermes-agent", "opencode serve")
+        // After a process-death recovery the "orphans" may be the user's still
+        // working agent (START_STICKY recreated the service, the guest survived).
+        // The service clears this flag when the user presses Stop or when a new
+        // task deliberately takes over the device.
+        if (RuntimeTaskController.recoveryActive) {
+            android.util.Log.w("RuntimeInstaller", "killGuestOrphans skipped: recovery in progress, sparing surviving guest processes")
+            return
+        }
+        val markers = GuestOrphanScan.orphanMarkers()
         val mine = android.os.Process.myPid()
         val candidates = File("/proc").listFiles { file -> file.name.toIntOrNull() != null } ?: return
         for (dir in candidates) {
@@ -1970,6 +1978,9 @@ fi
         }
         clearStaleOpencodeServiceRegistration()
     }
+
+    /** Number of reparented guest processes currently alive (recovery reporting). */
+    fun countGuestOrphans(): Int = GuestOrphanScan.countSurvivors(GuestOrphanScan.orphanMarkers())
 
     /**
      * `opencode run --standalone` registers a managed service in

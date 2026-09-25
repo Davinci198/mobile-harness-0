@@ -200,6 +200,8 @@ import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.runtime.RuntimeExecutionService
+import com.jarves.mh.runtime.RuntimeExecutionService.Companion.ACTION_KEEPALIVE
+import com.jarves.mh.runtime.RuntimeExecutionService.Companion.EXTRA_PROJECT_NAME
 import com.jarves.mh.runtime.RuntimeInstaller
 import com.jarves.mh.runtime.RuntimeSetupService
 import com.jarves.mh.runtime.StudioServerManager
@@ -5521,7 +5523,21 @@ private fun StudioTab(installer: RuntimeInstaller) {
                     Text("Retry")
                 }
             }
-            StudioUiState.READY -> AndroidView(
+            StudioUiState.READY -> {
+                // While the Studio server is up, hold a foreground keepalive so
+                // Android does not freeze the process (and the guest node child
+                // with it) when the app is backgrounded.
+                LaunchedEffect(uiState) {
+                    runCatching {
+                        androidx.core.content.ContextCompat.startForegroundService(
+                            context,
+                            android.content.Intent(context, RuntimeExecutionService::class.java)
+                                .setAction(ACTION_KEEPALIVE)
+                                .putExtra(EXTRA_PROJECT_NAME, "Ekko Studio"),
+                        )
+                    }
+                }
+                AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(
@@ -5546,7 +5562,8 @@ private fun StudioTab(installer: RuntimeInstaller) {
                 },
                 update = { view -> if (view.url == null) view.loadUrl(url) },
                 modifier = Modifier.fillMaxSize(),
-            )
+                )
+            }
         }
     }
 }
