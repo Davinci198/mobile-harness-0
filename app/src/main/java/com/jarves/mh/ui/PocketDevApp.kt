@@ -4596,9 +4596,9 @@ private fun ChatTab(
                         Text(stringResource(R.string.chat_readonly), fontWeight = FontWeight.SemiBold)
                         Text(
                             if (readOnlyBlocked) {
-                                stringResource(R.string.chat_other_blocked),
+                                stringResource(R.string.chat_other_blocked)
                             } else {
-                                stringResource(R.string.chat_other_done),
+                                stringResource(R.string.chat_other_done)
                             },
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
