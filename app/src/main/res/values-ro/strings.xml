@@ -201,4 +201,23 @@
     <string name="pty_paste">Lipește</string>
     <string name="pty_hide_keyboard">Ascunde tastatura</string>
     <string name="pty_show_keyboard">Arată tastatura</string>
+    <string name="agent_discovering_from">Se descoperă modele din %1$s…</string>
+    <string name="agent_discovered">Au fost descoperite %1$d modele din %2$s.</string>
+    <string name="agent_key_for">Cheie %1$s</string>
+    <string name="agent_available_antigravity">%1$d disponibile pentru Antigravity</string>
+    <string name="agent_models_of">%1$d din %2$d</string>
+    <string name="agent_catalog_line">%1$s · %2$d modele</string>
+    <string name="agent_provider_msg">Furnizor: %1$s</string>
+    <string name="agent_not_installed">%1$s nu este instalat</string>
+    <string name="agent_install_package">Instalează pachetul agentului de %1$s pentru a-l folosi cu proiectele tale existente.</string>
+    <string name="agent_install_btn">Instalează %1$s</string>
+    <string name="agent_key_added">Cheie API adăugată pentru %1$s.</string>
+    <string name="agent_key_activated">Cheia API activă a fost schimbată pentru %1$s.</string>
+    <string name="agent_key_removed">Cheie API eliminată din %1$s.</string>
+    <string name="agent_fixed_by">Corectat de %1$s</string>
+    <string name="agent_models_count">%1$d modele</string>
+    <string name="agent_saved_tokens">Tokenuri salvate (%1$d)</string>
+    <string name="agent_saved_keys">Chei salvate (%1$d)</string>
+    <string name="agent_update_btn">Actualizează %1$s</string>
+    <string name="pty_error">Eroare PTY: %1$s</string>
 </resources>

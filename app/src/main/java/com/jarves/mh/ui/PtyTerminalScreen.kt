@@ -138,7 +138,7 @@ fun PtyTerminalScreen(
     Column(modifier = modifier.fillMaxSize().imePadding()) {
         error?.let {
             Text(
-                text = "PTY error: $it",
+                text = stringResource(R.string.pty_error, it),
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(12.dp),
             )
