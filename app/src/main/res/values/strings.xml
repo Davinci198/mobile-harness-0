@@ -201,4 +201,23 @@
     <string name="pty_paste">Paste</string>
     <string name="pty_hide_keyboard">Hide keyboard</string>
     <string name="pty_show_keyboard">Show keyboard</string>
+    <string name="agent_discovering_from">Discovering models from %1$s…</string>
+    <string name="agent_discovered">Discovered %1$d models from %2$s.</string>
+    <string name="agent_key_for">%1$s Key</string>
+    <string name="agent_available_antigravity">%1$d available for Antigravity</string>
+    <string name="agent_models_of">%1$d of %2$d</string>
+    <string name="agent_catalog_line">%1$s · %2$d models</string>
+    <string name="agent_provider_msg">Provider: %1$s</string>
+    <string name="agent_not_installed">%1$s is not installed</string>
+    <string name="agent_install_package">Install its %1$s agent package to use it with your existing projects.</string>
+    <string name="agent_install_btn">Install %1$s</string>
+    <string name="agent_key_added">API key added for %1$s.</string>
+    <string name="agent_key_activated">Active API key changed for %1$s.</string>
+    <string name="agent_key_removed">API key removed from %1$s.</string>
+    <string name="agent_fixed_by">Fixed by %1$s</string>
+    <string name="agent_models_count">%1$d models</string>
+    <string name="agent_saved_tokens">Saved tokens (%1$d)</string>
+    <string name="agent_saved_keys">Saved keys (%1$d)</string>
+    <string name="agent_update_btn">Update %1$s</string>
+    <string name="pty_error">PTY error: %1$s</string>
 </resources>

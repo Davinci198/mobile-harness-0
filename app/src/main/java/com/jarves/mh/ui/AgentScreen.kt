@@ -300,7 +300,7 @@ fun AgentScreen(
         }
         scope.launch {
             isDiscovering = true
-            status = "Discovering models from ${selectedKind.title}…"
+            status = context.getString(R.string.agent_discovering_from, selectedKind.title)
             statusOk = true
             statusProviderMessage = null
             val kind = selectedKind
@@ -310,14 +310,14 @@ fun AgentScreen(
                 is ModelDiscoveryResult.Success -> {
                     models = result.models
                     if (apiKey.isBlank() && newApiKey.isNotBlank()) {
-                        val keyName = newKeyName.trim().ifBlank { "${kind.title} Key" }
+                        val keyName = newKeyName.trim().ifBlank { context.getString(R.string.agent_key_for, kind.title) }
                         savedKeys = onAddApiKey(kind, keyName, newApiKey.trim())
                         apiKey = getSavedApiKey(kind)
                         newKeyName = ""
                         newApiKey = ""
                         newKeyVisible = false
                     }
-                    status = "Discovered ${result.models.size} models from ${selectedKind.title}."
+                    status = context.getString(R.string.agent_discovered, result.models.size, selectedKind.title)
                     statusOk = true
                     statusProviderMessage = null
                     showModels = true
@@ -371,7 +371,7 @@ fun AgentScreen(
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(R.string.agent_select_model), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text(
-                            "${filteredAntigravityModels.size} available for Antigravity",
+                            stringResource(R.string.agent_available_antigravity, filteredAntigravityModels.size),
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -482,7 +482,7 @@ fun AgentScreen(
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(R.string.agent_available_models), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text(
-                            if (models.isEmpty()) selectedKind.title else "${filteredModels.size} of ${models.size}",
+                            if (models.isEmpty()) selectedKind.title else stringResource(R.string.agent_models_of, filteredModels.size, models.size),
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -583,7 +583,7 @@ fun AgentScreen(
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    "${catalog.kindName} · ${catalog.models.size} models",
+                                    stringResource(R.string.agent_catalog_line, catalog.kindName, catalog.models.size),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Medium,
                                 )
@@ -650,7 +650,7 @@ fun AgentScreen(
                             }
                             statusProviderMessage?.let { providerMessage ->
                                 Text(
-                                    "Provider: $providerMessage",
+                                    stringResource(R.string.agent_provider_msg, providerMessage),
                                     fontSize = 10.sp,
                                     lineHeight = 14.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -673,7 +673,7 @@ fun AgentScreen(
                             CircularProgressIndicator(Modifier.size(32.dp), color = PocketOrange, strokeWidth = 3.dp)
                             Spacer(Modifier.height(14.dp))
                             Text(
-                                "Discovering models from ${selectedKind.title}…",
+                                stringResource(R.string.agent_discovering_from, selectedKind.title),
                                 fontSize = 13.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1088,13 +1088,13 @@ fun AgentScreen(
                         ) {
                             Column(Modifier.padding(16.dp)) {
                                 Text(
-                                    "${viewedAgent.title} is not installed",
+                                    stringResource(R.string.agent_not_installed, viewedAgent.title),
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
                                 )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
-                                    "Install its ${viewedAgent.downloadNote} agent package to use it with your existing projects.",
+                                    stringResource(R.string.agent_install_package, viewedAgent.downloadNote),
                                     fontSize = 12.sp,
                                     lineHeight = 17.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1106,7 +1106,7 @@ fun AgentScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp),
                                 ) {
-                                    Text("Install ${viewedAgent.title}", fontWeight = FontWeight.Bold)
+                                    Text(stringResource(R.string.agent_install_btn, viewedAgent.title), fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1181,20 +1181,20 @@ fun AgentScreen(
                             newKeyName = ""
                             newApiKey = ""
                             apiKey = getSavedApiKey(selectedKind)
-                            status = "API key added for ${selectedKind.title}."
+                            status = context.getString(R.string.agent_key_added, selectedKind.title)
                             statusOk = true
                         },
                         onActivateKey = { keyId ->
                             savedKeys = onActivateApiKey(selectedKind, keyId)
                             apiKey = getSavedApiKey(selectedKind)
-                            status = "Active API key changed for ${selectedKind.title}."
+                            status = context.getString(R.string.agent_key_activated, selectedKind.title)
                             statusOk = true
                         },
                         onRemoveKey = { keyId ->
                             savedKeys = onRemoveApiKey(selectedKind, keyId)
                             apiKey = getSavedApiKey(selectedKind)
                             keyConnectionStatuses = keyConnectionStatuses - keyId
-                            status = "API key removed from ${selectedKind.title}."
+                            status = context.getString(R.string.agent_key_removed, selectedKind.title)
                             statusOk = true
                         },
                         onOpenModelSheet = {
@@ -1644,6 +1644,7 @@ private fun AgentProviderCard(
     onDiscover: () -> Unit,
     onValidate: () -> Unit,
 ) {
+    val context = LocalContext.current
     val visibleKinds = remember(state.agentKind) { providersForAgent(state.agentKind) }
     var connectionExpanded by rememberSaveable(selectedKind) { mutableStateOf(false) }
     // Keep this state across provider changes so selecting Custom API can
@@ -1746,7 +1747,7 @@ private fun AgentProviderCard(
                             value = baseUrl,
                             onValueChange = { if (!selectedKind.fixedBaseUrl) onBaseUrl(it) },
                             label = { Text(stringResource(R.string.settings_base_url)) },
-                            supportingText = if (selectedKind.fixedBaseUrl) ({ Text("Fixed by ${selectedKind.title}") }) else null,
+                            supportingText = if (selectedKind.fixedBaseUrl) ({ Text(stringResource(R.string.agent_fixed_by, selectedKind.title)) }) else null,
                             readOnly = selectedKind.fixedBaseUrl,
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
@@ -1781,7 +1782,7 @@ private fun AgentProviderCard(
                 ) {
                     Text(stringResource(R.string.agent_model_access), fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     Text(
-                        if (isDiscovering) stringResource(R.string.agent_discovering) else if (models.isEmpty()) stringResource(R.string.agent_discover_models) else "${models.size} models",
+                        if (isDiscovering) stringResource(R.string.agent_discovering) else if (models.isEmpty()) stringResource(R.string.agent_discover_models) else stringResource(R.string.agent_models_count, models.size),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = PocketOrange,
@@ -1814,7 +1815,7 @@ private fun AgentProviderCard(
                         Text(status, fontSize = 10.sp, lineHeight = 14.sp, color = if (statusOk) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
                     }
                     statusProviderMessage?.let { providerMessage ->
-                        Text("Provider: $providerMessage", fontSize = 10.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 21.dp, top = 4.dp))
+                        Text(stringResource(R.string.agent_provider_msg, providerMessage), fontSize = 10.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 21.dp, top = 4.dp))
                     }
                 }
             }
@@ -1853,7 +1854,7 @@ private fun AgentProviderCard(
                     )
                     keyStatus.providerMessage?.let { providerMessage ->
                         Text(
-                            "Provider: $providerMessage",
+                            stringResource(R.string.agent_provider_msg, providerMessage),
                             fontSize = 10.sp,
                             lineHeight = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1869,7 +1870,7 @@ private fun AgentProviderCard(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (selectedKind == ProviderKind.CLAUDE) "Saved tokens (${savedKeys.size})" else "Saved keys (${savedKeys.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        Text(if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_saved_tokens, savedKeys.size) else stringResource(R.string.agent_saved_keys, savedKeys.size), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                         Text(
                             if (addKeyExpanded) stringResource(R.string.settings_cancel) else stringResource(R.string.agent_add_key),
                             fontSize = 11.sp,
@@ -1903,7 +1904,7 @@ private fun AgentProviderCard(
                                         Column(Modifier.weight(1f)) {
                                             Text(it.message, fontSize = 10.sp, lineHeight = 14.sp, color = if (it.successful == false) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                                             it.providerMessage?.let { providerMessage ->
-                                                Text("Provider: $providerMessage", fontSize = 10.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                Text(stringResource(R.string.agent_provider_msg, providerMessage), fontSize = 10.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                             }
                                         }
                                     }
@@ -1919,7 +1920,7 @@ private fun AgentProviderCard(
                                 onValueChange = { input ->
                                     if ((input.startsWith("sk-") || input.startsWith("ant-") || input.length > 30) && !input.contains(" ") && newApiKey.isBlank()) {
                                         onNewApiKey(input.trim())
-                                        onNewKeyName("${selectedKind.title} Key")
+                                        onNewKeyName(context.getString(R.string.agent_key_for, selectedKind.title))
                                     } else onNewKeyName(input)
                                 },
                                 label = { Text(if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_token_name) else stringResource(R.string.settings_key_name)) },
@@ -2097,7 +2098,7 @@ private fun AgentUpdateBlock(
                                 enabled = state.agentUpdating == null && state.agentInstalling == null,
                                 shape = RoundedCornerShape(10.dp),
                             ) {
-                                Text("Update ${agent.title}", fontSize = 12.sp)
+                                Text(stringResource(R.string.agent_update_btn, agent.title), fontSize = 12.sp)
                             }
                         }
                     }
