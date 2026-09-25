@@ -428,16 +428,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val workspaceDir = File(application.filesDir, "workspaces/${project.id}")
                 val userFiles = if (workspaceDir.isDirectory) {
                     workspaceDir.walkTopDown().filter { file ->
-                        file.isFile && !file.name.startsWith(".claude") && file.name != ".pocket-dev-stacks.json"
+                        file.isFile && file.name != ".pocket-dev-stacks.json"
                     }.count()
                 } else 0
-                val keep = userMessages > 0 || userFiles > 0
-                if (!keep) {
-                    workspaceDir.deleteRecursively()
-                    terminalHistoryFile(project.id).delete()
-                    preferences.deleteProjectChats(project.id)
-                }
-                keep
+                // Startup must never destroy data: an "empty" quick project can
+                // still hold agent state (chat history, .claude config). It is at
+                // most dropped from the list; files, chats and terminal history
+                // stay on disk.
+                userMessages > 0 || userFiles > 0
             } else true
         }
         if (cleanedProjects.size != loadedProjects.size) {
@@ -1184,8 +1182,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         if (result.isSuccess) {
-            // The real version probe can finish in a fraction of a second on fast phones.
-            // Keep the successful loading state visible long enough to be understandable.
+            // A fraction of a second on fast phones, but long enough to keep the
+            // final state from flashing. The screen reports real progress now, so
+            // it never fakes a setup that did not happen.
             val remaining = MINIMUM_INITIALIZATION_SCREEN_MS - (SystemClock.elapsedRealtime() - startedAt)
             if (remaining > 0) delay(remaining)
             _state.update {
@@ -3843,7 +3842,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
-        private const val MINIMUM_INITIALIZATION_SCREEN_MS = 3_000L
+        private const val MINIMUM_INITIALIZATION_SCREEN_MS = 400L
         private const val MAX_VISIBLE_WORKSPACE_ENTRIES = 2_000
         private const val MAX_PROJECT_TERMINAL_HISTORY = 100
         private const val MAX_PROJECT_TERMINAL_OUTPUT = 200_000

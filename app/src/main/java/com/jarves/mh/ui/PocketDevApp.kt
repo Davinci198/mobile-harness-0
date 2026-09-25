@@ -1627,20 +1627,9 @@ private fun StartupLoadingScreen(
         view.keepScreenOn = true
         onDispose { view.keepScreenOn = false }
     }
-    val messages = remember {
-        listOf(
-            "Setting up your workspace",
-            "Preparing your coding tools",
-            "Almost ready",
-        )
-    }
-    var messageIndex by remember(state.startupStage) { mutableIntStateOf(0) }
-    LaunchedEffect(messages) {
-        while (true) {
-            delay(3_000)
-            messageIndex = (messageIndex + 1) % messages.size
-        }
-    }
+    // Real stage message ("Checking this device…", "Opening your private
+    // workspace", runtime progress) instead of canned setup claims.
+    val stageMessage = state.startupMessage.ifBlank { "Starting Mobile Harness" }
     val logoTransition = rememberInfiniteTransition(label = "startup logo")
     val logoPulse by logoTransition.animateFloat(
         initialValue = 0.96f,
@@ -1668,7 +1657,7 @@ private fun StartupLoadingScreen(
             )
             Spacer(Modifier.height(22.dp))
             AnimatedContent(
-                targetState = messages[messageIndex],
+                targetState = stageMessage,
                 label = "startup message",
             ) { message ->
                 Text(
