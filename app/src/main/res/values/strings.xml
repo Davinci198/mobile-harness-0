@@ -225,7 +225,7 @@
     <string name="ag_auth_code">Authorization code</string>
     <string name="ag_auto_note">Automatic tool approval is enabled for Antigravity. It can edit project files and run commands without confirmation. Changes remain reviewable in PocketDev.</string>
     <string name="ag_completing">Completing Google sign-in…</string>
-    <string name="ag_connect_desc">PocketDev runs Google's official agy CLI inside its private Linux environment. Google handles authentication and agy owns the saved session.</string>
+    <string name="ag_connect_desc">PocketDev runs Google\'s official agy CLI inside its private Linux environment. Google handles authentication and agy owns the saved session.</string>
     <string name="ag_connect_title">Connect your Google account</string>
     <string name="ag_connected_as">Connected as %1$s</string>
     <string name="ag_copy_url">Copy sign-in URL</string>
@@ -239,12 +239,12 @@
     <string name="boot_connecting_agent">Connecting local agent</string>
     <string name="boot_copy_logs">Copy setup logs</string>
     <string name="boot_expand_details">Expand setup details</string>
-    <string name="boot_failed_start">Mobile Harness couldn't finish starting</string>
+    <string name="boot_failed_start">Mobile Harness couldn\'t finish starting</string>
     <string name="boot_getting_ready">Getting everything ready</string>
     <string name="boot_jump_latest">Jump to latest</string>
     <string name="boot_live_terminal">Live setup terminal</string>
     <string name="boot_log_copied">Setup log copied</string>
-    <string name="boot_offline">You're offline</string>
+    <string name="boot_offline">You\'re offline</string>
     <string name="boot_open_internet">Open internet settings</string>
     <string name="boot_please_retry">Please try again.</string>
     <string name="boot_private_linux">Private Linux environment</string>
@@ -335,7 +335,7 @@
     <string name="gh_search_repos">Search repositories</string>
     <string name="gh_select_repo">Select a repository</string>
     <string name="gh_signin">Sign in with GitHub</string>
-    <string name="gh_signin_desc">Sign in with GitHub's official CLI to browse public and private repositories.</string>
+    <string name="gh_signin_desc">Sign in with GitHub\'s official CLI to browse public and private repositories.</string>
     <string name="gh_starting">Starting GitHub sign-in…</string>
     <string name="gh_tap_code">Tap the code to copy it. PocketDev will connect automatically after approval.</string>
     <string name="home_bring_existing">Bring an existing project</string>
@@ -484,7 +484,7 @@
     <string name="studio_installing">Installing Studio…</string>
     <string name="studio_looking">Looking for the Ekko Studio server in the guest runtime.</string>
     <string name="studio_needs_release">Requires the published runtime-studio-%1$s release.</string>
-    <string name="studio_no_response">The server isn't responding yet — try again.</string>
+    <string name="studio_no_response">The server isn\'t responding yet — try again.</string>
     <string name="studio_not_installed">Studio not installed</string>
     <string name="studio_not_installed_desc">Download and install the Ekko Studio (hermes-web-ui) bundle in the guest.</string>
     <string name="studio_retry">Retry</string>
