@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.runtime.RuntimeInstaller
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
@@ -259,6 +260,9 @@ private const val DEFAULT_TEXT_SIZE_SP = 16f
  * poate comuta si inchide. Listele sunt snapshot-state Compose, deci modificarile
  * declansate din tastatura (≡ -> New session) recompun interfata.
  */
+/** Marker for KeepAliveTracker: at least one PTY session exists. */
+private const val PTY_SESSION_HOLD = "pty"
+
 private object PtyTerminalRegistry {
     val backends = mutableStateListOf<PtyTerminalBackend>()
     private val activeByProject = mutableStateMapOf<String, Int>()
@@ -282,6 +286,7 @@ private object PtyTerminalRegistry {
         val backend = PtyTerminalBackend(installer, context, projectSlug)
         backends.add(backend)
         activeByProject[projectSlug] = backends.lastIndex
+        KeepAliveTracker.acquire(PTY_SESSION_HOLD)
         return backend
     }
 
@@ -301,6 +306,7 @@ private object PtyTerminalRegistry {
                 v > idx -> activeByProject[project] = v - 1
             }
         }
+        if (backends.isEmpty()) KeepAliveTracker.release(PTY_SESSION_HOLD)
     }
 }
 

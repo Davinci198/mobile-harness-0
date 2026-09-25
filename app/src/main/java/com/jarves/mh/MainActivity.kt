@@ -7,6 +7,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.jarves.mh.data.AppPreferences
+import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.ui.MainViewModel
 import com.jarves.mh.ui.PocketDevApp
 import com.jarves.mh.ui.theme.PocketTheme
@@ -15,6 +17,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        KeepAliveTracker.init(this, AppPreferences(application).keepAliveEnabled)
         setContent {
             val vm: MainViewModel = viewModel()
             val state by vm.state.collectAsStateWithLifecycle()

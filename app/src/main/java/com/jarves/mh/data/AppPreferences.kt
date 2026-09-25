@@ -35,6 +35,16 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("background_setup_complete", false)
         set(value) { preferences.edit().putBoolean("background_setup_complete", value).apply() }
 
+    /**
+     * Termux-style always-on keep-alive (default on): the app stays in a
+     * foreground service so swipe-away and memory pressure cannot kill open
+     * terminal sessions. With it off, the service runs only while something
+     * is registered in KeepAliveTracker.
+     */
+    var keepAliveEnabled: Boolean
+        get() = preferences.getBoolean("keep_alive_enabled", true)
+        set(value) { preferences.edit().putBoolean("keep_alive_enabled", value).apply() }
+
     /** Coding agent engine the user picked during setup. Absent = pre-agent-choice install → Claude. */
     var agentKind: String
         get() = preferences.getString("agent_kind", AgentKind.CLAUDE_CODE.stableId) ?: AgentKind.CLAUDE_CODE.stableId

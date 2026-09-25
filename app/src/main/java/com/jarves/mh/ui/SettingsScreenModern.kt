@@ -66,6 +66,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -95,6 +96,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarves.mh.BuildConfig
 import com.jarves.mh.data.ApiKeyInfo
+import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.DEEPSEEK_HARNESS_PROVIDERS
 import com.jarves.mh.model.DSH_PROTOCOL_PROVIDERS
@@ -106,6 +108,7 @@ import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.runtime.AntigravityAuthStatus
+import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketOrange
@@ -154,6 +157,8 @@ fun SettingsScreen(
     var backgroundExecutionEnabled by remember {
         mutableStateOf(powerManager.isIgnoringBatteryOptimizations(context.packageName))
     }
+    val keepAlivePrefs = remember { AppPreferences(context) }
+    var keepAliveEnabled by remember { mutableStateOf(keepAlivePrefs.keepAliveEnabled) }
     val backgroundSettingsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) {
@@ -281,6 +286,25 @@ fun SettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(if (backgroundExecutionEnabled) "Review Android setting" else "Enable in Android settings")
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Keep alive when closed", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Termux-style: the app keeps running after you swipe it away, so open terminal sessions survive. When off, it is protected only while a session or task is active.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = keepAliveEnabled,
+                            onCheckedChange = { value ->
+                                keepAliveEnabled = value
+                                keepAlivePrefs.keepAliveEnabled = value
+                                KeepAliveTracker.setEnabled(context, value)
+                            },
+                        )
                     }
                 }
             }
