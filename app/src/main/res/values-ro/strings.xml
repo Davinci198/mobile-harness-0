@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">Mobile Harness</string>
-    <string name="settings_language_title">Language</string>
-    <string name="settings_language_system">Follow system</string>
+    <string name="settings_language_title">Limbă</string>
+    <string name="settings_language_system">După sistem</string>
     <string name="settings_language_english">English</string>
     <string name="settings_language_romanian">Română</string>
 </resources>

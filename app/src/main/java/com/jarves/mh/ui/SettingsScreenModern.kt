@@ -2,6 +2,7 @@ package com.jarves.mh.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -85,6 +87,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -95,7 +98,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarves.mh.BuildConfig
+import com.jarves.mh.R
 import com.jarves.mh.data.ApiKeyInfo
+import com.jarves.mh.data.AppLocale
 import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.DEEPSEEK_HARNESS_PROVIDERS
@@ -256,6 +261,21 @@ fun SettingsScreen(
                         ModernThemeChoice("Dark", Icons.Default.DarkMode, state.themeMode == AppThemeMode.DARK, { onSetThemeMode(AppThemeMode.DARK) }, Modifier.weight(1f))
                         ModernThemeChoice("Light", Icons.Default.LightMode, state.themeMode == AppThemeMode.LIGHT, { onSetThemeMode(AppThemeMode.LIGHT) }, Modifier.weight(1f))
                         ModernThemeChoice("System", Icons.Default.PhoneAndroid, state.themeMode == AppThemeMode.SYSTEM, { onSetThemeMode(AppThemeMode.SYSTEM) }, Modifier.weight(1f))
+                    }
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            stringResource(R.string.settings_language_title),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        val langTag = AppLocale.currentTag(context)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ModernThemeChoice(stringResource(R.string.settings_language_system), Icons.Default.Language, langTag == AppLocale.TAG_SYSTEM, { AppLocale.set(context, AppLocale.TAG_SYSTEM) }, Modifier.weight(1f))
+                            ModernThemeChoice(stringResource(R.string.settings_language_english), Icons.Default.Language, langTag == AppLocale.TAG_ENGLISH, { AppLocale.set(context, AppLocale.TAG_ENGLISH) }, Modifier.weight(1f))
+                            ModernThemeChoice(stringResource(R.string.settings_language_romanian), Icons.Default.Language, langTag == AppLocale.TAG_ROMANIAN, { AppLocale.set(context, AppLocale.TAG_ROMANIAN) }, Modifier.weight(1f))
+                        }
                     }
                 }
             }
