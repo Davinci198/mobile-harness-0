@@ -1,6 +1,7 @@
 package com.jarves.mh.runtime
 
 import android.content.Context
+import com.jarves.mh.R
 import java.io.File
 import java.io.RandomAccessFile
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +22,7 @@ class AntigravityAuthController(
     private val mutableState = MutableStateFlow(
         AntigravityAuthState(
             status = if (initiallySignedIn) AntigravityAuthStatus.SIGNED_IN else AntigravityAuthStatus.SIGNED_OUT,
-            message = initialAccountEmail.takeIf(String::isNotBlank)?.let { "Connected as $it" },
+            message = initialAccountEmail.takeIf(String::isNotBlank)?.let { context.getString(R.string.connected_as, it) },
             accountEmail = initialAccountEmail.takeIf(String::isNotBlank),
         ),
     )
@@ -49,11 +50,11 @@ class AntigravityAuthController(
         if (!installer.isAgentInstalled(com.jarves.mh.model.AgentKind.ANTIGRAVITY)) {
             mutableState.value = AntigravityAuthState(
                 AntigravityAuthStatus.ERROR,
-                message = "Install Antigravity CLI before signing in.",
+                message = context.getString(R.string.ag_install_first),
             )
             return@withContext
         }
-        mutableState.value = AntigravityAuthState(AntigravityAuthStatus.STARTING, message = "Starting Google sign-in…")
+        mutableState.value = AntigravityAuthState(AntigravityAuthStatus.STARTING, message = context.getString(R.string.ag_starting_signin))
         codeSubmitted = false
         authOutput.delete()
         val runtime = installer.installedRuntime()
@@ -78,7 +79,7 @@ class AntigravityAuthController(
             ptyColumns = 120,
         )
         process = running
-        val native = running as? NativeSpawnProcess ?: error("Unsupported Antigravity authentication process")
+        val native = running as? NativeSpawnProcess ?: error(context.getString(R.string.ag_bad_process))
         var offset = 0L
         val output = StringBuilder()
         var handshakeReplies = 0
@@ -135,7 +136,7 @@ class AntigravityAuthController(
                     loginMenuAdvanced = true
                     if (mutableState.value.status == AntigravityAuthStatus.STARTING) {
                         mutableState.value = mutableState.value.copy(
-                            message = "Google OAuth selected — waiting for the browser sign-in URL…",
+                            message = context.getString(R.string.ag_oauth_selected),
                         )
                     }
                 }
@@ -144,7 +145,7 @@ class AntigravityAuthController(
                     mutableState.value = AntigravityAuthState(
                         AntigravityAuthStatus.AWAITING_CODE,
                         authorizationUrl = url,
-                        message = "Finish signing in with Google, then paste the one-time code.",
+                        message = context.getString(R.string.ag_finish_signin),
                     )
                 }
                 if (isSignedInScreen(clean)) {
@@ -152,7 +153,7 @@ class AntigravityAuthController(
                     onSignedInChanged(true, email)
                     mutableState.value = AntigravityAuthState(
                         AntigravityAuthStatus.SIGNED_IN,
-                        message = email?.let { "Connected as $it" } ?: "Google account connected",
+                        message = email?.let { context.getString(R.string.connected_as, it) } ?: context.getString(R.string.ag_google_connected),
                         accountEmail = email,
                     )
                     // Leave the official CLI cleanly so it has a chance to flush
@@ -201,7 +202,7 @@ class AntigravityAuthController(
                     running.outputStream.flush()
                     privacyScreenCompleted = true
                     mutableState.value = mutableState.value.copy(
-                        message = "Google connected — finishing private Antigravity setup…",
+                        message = context.getString(R.string.ag_finishing_setup),
                     )
                 }
                 if (!workspaceTrustCompleted &&
@@ -215,18 +216,18 @@ class AntigravityAuthController(
                     workspaceTrustCompleted = true
                 }
                 if (clean.contains("authentication failed", true) || clean.contains("failed to exchange", true)) {
-                    error("Google authentication failed. Start a new sign-in attempt.")
+                    error(context.getString(R.string.ag_auth_failed))
                 }
             }
             if (!codeSubmitted && mutableState.value.status == AntigravityAuthStatus.STARTING) {
                 val exit = running.waitFor()
-                error("Antigravity login closed before producing an authorization URL (exit $exit).")
+                error(context.getString(R.string.ag_no_auth_url, exit))
             }
         } catch (error: Throwable) {
             if (mutableState.value.status != AntigravityAuthStatus.SIGNED_IN) {
                 mutableState.value = AntigravityAuthState(
                     AntigravityAuthStatus.ERROR,
-                    message = error.message?.take(240) ?: "Antigravity sign-in failed",
+                    message = error.message?.take(240) ?: context.getString(R.string.ag_signin_failed),
                 )
             }
         } finally {
@@ -240,9 +241,9 @@ class AntigravityAuthController(
 
     fun submitCode(code: String) {
         val value = code.trim()
-        require(value.isNotBlank()) { "Paste the authorization code from Google" }
-        val running = process ?: error("Start Google sign-in again")
-        check(running.isAlive) { "The sign-in session expired. Start again." }
+        require(value.isNotBlank()) { context.getString(R.string.ag_paste_code) }
+        val running = process ?: error(context.getString(R.string.ag_start_again))
+        check(running.isAlive) { context.getString(R.string.ag_session_expired) }
         // agy's interactive editor runs the PTY in raw mode and treats CR+LF as
         // the Enter key. LF alone inserts/repaints a line without submitting it.
         running.outputStream.write((value + "\r\n").toByteArray())
@@ -250,7 +251,7 @@ class AntigravityAuthController(
         codeSubmitted = true
         mutableState.value = mutableState.value.copy(
             status = AntigravityAuthStatus.COMPLETING,
-            message = "Completing Google sign-in…",
+            message = context.getString(R.string.ag_completing),
         )
     }
 
@@ -259,7 +260,7 @@ class AntigravityAuthController(
         val previousEmail = mutableState.value.accountEmail
         mutableState.value = AntigravityAuthState(
             status = AntigravityAuthStatus.STARTING,
-            message = "Signing out of Antigravity…",
+            message = context.getString(R.string.ag_signing_out),
             accountEmail = previousEmail,
         )
         try {
@@ -270,16 +271,16 @@ class AntigravityAuthController(
             val credential = officialCredentialFile()
             if (credential.exists()) {
                 check(credential.delete()) {
-                    "Could not remove the official Antigravity credential. Your account remains connected."
+                    context.getString(R.string.ag_credential_remove)
                 }
             }
-            check(!hasOfficialCredential()) { "Antigravity logout did not complete." }
+            check(!hasOfficialCredential()) { context.getString(R.string.ag_logout_incomplete) }
             onSignedInChanged(false, null)
-            mutableState.value = AntigravityAuthState(AntigravityAuthStatus.SIGNED_OUT, message = "Signed out")
+            mutableState.value = AntigravityAuthState(AntigravityAuthStatus.SIGNED_OUT, message = context.getString(R.string.signed_out))
         } catch (error: Throwable) {
             mutableState.value = AntigravityAuthState(
                 status = AntigravityAuthStatus.SIGNED_IN,
-                message = error.message?.take(240) ?: "Could not log out of Antigravity",
+                message = error.message?.take(240) ?: context.getString(R.string.ag_logout_fail),
                 accountEmail = previousEmail,
             )
             throw error

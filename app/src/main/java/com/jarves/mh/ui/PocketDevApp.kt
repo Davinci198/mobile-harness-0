@@ -3664,7 +3664,7 @@ private fun ApiStatusChip(state: AppUiState, onSettings: () -> Unit, onPing: () 
                 } else {
                     Icon(
                         Icons.Default.Refresh,
-                        contentDescription = "Ping API",
+                        contentDescription = stringResource(R.string.a11y_ping_api),
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -4789,7 +4789,7 @@ private fun WorkBlockCard(message: ChatMessage) {
             items = message.workItems,
             headline = activityHeadline(message.workItems, seconds, message.workItems.isEmpty()),
         )
-        if (message.workItems.lastOrNull()?.title?.startsWith("Task stopped") == true) {
+        if (message.workItems.lastOrNull()?.title?.startsWith(stringResource(R.string.task_stopped)) == true) {
             Text(
                 text = stringResource(R.string.chat_worked, formatDuration(seconds)),
                 modifier = Modifier.padding(start = 29.dp, bottom = 6.dp),
