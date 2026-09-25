@@ -5386,7 +5386,7 @@ private fun StudioTab(installer: RuntimeInstaller) {
     var url by remember { mutableStateOf("http://127.0.0.1:${StudioServerManager.PORT}") }
     var attempt by remember { mutableIntStateOf(0) }
 
-    val manager = remember(installer) { StudioServerManager(context.applicationContext, installer) }
+    val manager = remember(installer) { StudioServerManager(installer) }
 
     var progressLine by remember { mutableStateOf("") }
 
@@ -5459,7 +5459,10 @@ private fun StudioTab(installer: RuntimeInstaller) {
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // imePadding: MainActivity is edge-to-edge, so windowSoftInputMode
+    // adjustResize does nothing by itself and the keyboard used to cover the
+    // Studio WebView (the chat composer stayed under it).
+    Column(Modifier.fillMaxSize().imePadding()) {
         when (uiState) {
             StudioUiState.CHECKING -> EmptyState(
                 Icons.Default.Dashboard,
@@ -5471,6 +5474,9 @@ private fun StudioTab(installer: RuntimeInstaller) {
                     Icons.Default.Dashboard,
                     "Studio not installed",
                     "Descarcă și instalează bundle-ul Ekko Studio (hermes-web-ui) în guest.",
+                    // fillMaxSize would swallow the whole Column and leave the
+                    // Install button below the screen with zero height.
+                    modifier = Modifier.weight(1f),
                 )
                 Button(
                     onClick = { install() },
@@ -5500,6 +5506,8 @@ private fun StudioTab(installer: RuntimeInstaller) {
                     Icons.Default.Dashboard,
                     "Studio failed to start",
                     errorMessage ?: "Unknown error",
+                    // Keep the tail log and the Retry button on screen.
+                    modifier = Modifier.weight(1f),
                 )
                 Text(
                     manager.tailLog().lineSequence().lastOrNull().orEmpty(),
@@ -5714,8 +5722,8 @@ private fun blockedPreviewResponse(): WebResourceResponse =
     WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
 
 @Composable
-private fun EmptyState(icon: ImageVector, title: String, body: String) {
-    Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+private fun EmptyState(icon: ImageVector, title: String, body: String, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(icon, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(12.dp))

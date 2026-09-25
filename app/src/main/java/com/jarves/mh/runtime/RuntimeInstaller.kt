@@ -746,11 +746,19 @@ class RuntimeInstaller(private val context: Context) {
     /** Host-side path into the guest rootfs (plain storage, no PRoot needed). */
     fun guestFile(relativePath: String): File = File(rootfs, relativePath.removePrefix("/"))
 
+    /**
+     * True when the extracted bundle is on disk. The version marker is
+     * deliberately not required here: [ensureStudioInstalled] writes it only
+     * after this verification passes, so including it would make the check
+     * impossible to satisfy on a first install.
+     */
+    private fun studioBundleExtracted(): Boolean =
+        File(rootfs, "usr/local/lib/studio/dist/server/index.js").isFile &&
+            File(rootfs, STUDIO_GUEST_ENTRY.removePrefix("/")).isFile
+
     /** True when the Ekko Studio server bundle has been extracted into the guest. */
     fun isStudioInstalled(): Boolean =
-        studioMarker.readTextOrNull() == STUDIO_VERSION &&
-            File(rootfs, "usr/local/lib/studio/dist/server/index.js").isFile &&
-            File(rootfs, STUDIO_GUEST_ENTRY.removePrefix("/")).isFile
+        studioMarker.readTextOrNull() == STUDIO_VERSION && studioBundleExtracted()
 
     /**
      * Installs the Ekko Studio web UI server bundle (hermes-web-ui) into the
@@ -779,7 +787,7 @@ class RuntimeInstaller(private val context: Context) {
         )
         // Static verification only: launching the server entry from here would
         // start listening on the Studio port and hang verifyGuest.
-        check(isStudioInstalled()) { "The Ekko Studio runtime bundle is incomplete" }
+        check(studioBundleExtracted()) { "The Ekko Studio runtime bundle is incomplete" }
         check(File(rootfs, "usr/local/bin/node").isFile) { "Guest Node.js is missing; repair the core runtime first" }
         studioMarker.writeText(STUDIO_VERSION)
     }
@@ -2324,10 +2332,10 @@ fi
         private val STUDIO_BUNDLE = RuntimeBundle(
             label = "Ekko Studio",
             fileName = "pocketdev-studio-arm64-$STUDIO_VERSION.tar.zst",
-            // Filled once the runtime-studio-0.7.21 release is published; the
-            // placeholder forces an explicit update instead of a silent mismatch.
-            sha256 = "",
-            compressedBytes = 0L,
+            // sha256 of the artifact published by the studio-bundle workflow on
+            // the runtime-studio-0.7.21 release (studio-bundle.sha256).
+            sha256 = "e8ec002f99a0ab5dc346737c4caac6be125677fe7a0130fc7f58004c7f6ca7ec",
+            compressedBytes = 52_162_158L,
         )
         private const val MAX_TERMINAL_LINE = 500
         private const val MAX_COLLECTED_OUTPUT = 24_000

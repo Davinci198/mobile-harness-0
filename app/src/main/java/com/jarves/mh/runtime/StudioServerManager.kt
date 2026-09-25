@@ -1,6 +1,5 @@
 package com.jarves.mh.runtime
 
-import android.content.Context
 import android.os.Process
 import android.util.Log
 import java.io.File
@@ -23,11 +22,28 @@ import java.net.URL
  * guest pid in [GUEST_PID_FILE] is what [stop] uses for a precise teardown.
  */
 class StudioServerManager(
-    private val context: Context,
     private val installer: RuntimeInstaller,
 ) {
     private var activeProcess: java.lang.Process? = null
-    private val outputFile get() = File(context.cacheDir, "studio-server-output.log")
+
+    // Durable on purpose: cacheDir is wiped on every app update, which threw
+    // away the exact log needed to debug a failed start. Guest /root lives in
+    // the rootfs and survives updates. Read it with:
+    //   adb shell run-as com.jarves.mh tail -100 \
+    //     files/runtime/ubuntu/root/studio-server-output.log
+    private val outputFile get() = installer.guestFile("root/studio-server-output.log")
+
+    // pocket_spawn opens the log with O_TRUNC, so a retry would erase the
+    // error that caused it. Keep the previous run next to the live log.
+    private fun archivePreviousLog() {
+        runCatching {
+            if (outputFile.isFile && outputFile.length() > 0) {
+                val archived = File(outputFile.parentFile, "${outputFile.name}.1")
+                archived.delete()
+                outputFile.renameTo(archived)
+            }
+        }
+    }
 
     fun isRunning(): Boolean = guestPid()?.let { pid -> isStudioProcess(pid) } == true
 
@@ -51,6 +67,7 @@ class StudioServerManager(
             Thread.sleep(300)
         }
         stopWrapper()
+        archivePreviousLog()
 
         val command = "echo \$\$ > $GUEST_PID_FILE && exec ${RuntimeInstaller.STUDIO_GUEST_ENTRY}"
         val environment = mapOf(
