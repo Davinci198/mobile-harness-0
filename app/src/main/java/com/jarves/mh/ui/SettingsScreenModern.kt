@@ -185,9 +185,9 @@ fun SettingsScreen(
     stackPendingRemoval?.let { stack ->
         AlertDialog(
             onDismissRequest = { stackPendingRemoval = null },
-            title = { Text("Remove ${stack.label}?") },
+            title = { Text(stringResource(R.string.settings_remove_toolchain_title, stack.label)) },
             text = {
-                Text("This removes the toolchain and its runtime caches to free storage. Your projects and source files will not be deleted.")
+                Text(stringResource(R.string.settings_remove_toolchain_body))
             },
             confirmButton = {
                 TextButton(
@@ -195,9 +195,9 @@ fun SettingsScreen(
                         stackPendingRemoval = null
                         onRemoveDevStack(stack)
                     },
-                ) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+                ) { Text(stringResource(R.string.settings_remove), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { stackPendingRemoval = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { stackPendingRemoval = null }) { Text(stringResource(R.string.settings_cancel)) } },
         )
     }
 
@@ -234,8 +234,8 @@ fun SettingsScreen(
                         }
                         Spacer(Modifier.width(10.dp))
                         Column {
-                            Text("Settings", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-                            Text("Preferences & Configuration", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.settings_title), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                            Text(stringResource(R.string.settings_subtitle), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 },
@@ -251,16 +251,16 @@ fun SettingsScreen(
 
             item {
                 SettingsAccordion(
-                    title = "Appearance",
-                    subtitle = when (state.themeMode) { AppThemeMode.DARK -> "Dark theme"; AppThemeMode.LIGHT -> "Light theme"; AppThemeMode.SYSTEM -> "Follow system" },
+                    title = stringResource(R.string.settings_appearance),
+                    subtitle = when (state.themeMode) { AppThemeMode.DARK -> stringResource(R.string.settings_theme_dark); AppThemeMode.LIGHT -> stringResource(R.string.settings_theme_light); AppThemeMode.SYSTEM -> stringResource(R.string.settings_theme_system) },
                     icon = Icons.Default.Tune,
                     expanded = expanded == SettingsSection.APPEARANCE,
                     onClick = { toggle(SettingsSection.APPEARANCE) },
                 ) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ModernThemeChoice("Dark", Icons.Default.DarkMode, state.themeMode == AppThemeMode.DARK, { onSetThemeMode(AppThemeMode.DARK) }, Modifier.weight(1f))
-                        ModernThemeChoice("Light", Icons.Default.LightMode, state.themeMode == AppThemeMode.LIGHT, { onSetThemeMode(AppThemeMode.LIGHT) }, Modifier.weight(1f))
-                        ModernThemeChoice("System", Icons.Default.PhoneAndroid, state.themeMode == AppThemeMode.SYSTEM, { onSetThemeMode(AppThemeMode.SYSTEM) }, Modifier.weight(1f))
+                        ModernThemeChoice(stringResource(R.string.settings_chip_dark), Icons.Default.DarkMode, state.themeMode == AppThemeMode.DARK, { onSetThemeMode(AppThemeMode.DARK) }, Modifier.weight(1f))
+                        ModernThemeChoice(stringResource(R.string.settings_chip_light), Icons.Default.LightMode, state.themeMode == AppThemeMode.LIGHT, { onSetThemeMode(AppThemeMode.LIGHT) }, Modifier.weight(1f))
+                        ModernThemeChoice(stringResource(R.string.settings_chip_system), Icons.Default.PhoneAndroid, state.themeMode == AppThemeMode.SYSTEM, { onSetThemeMode(AppThemeMode.SYSTEM) }, Modifier.weight(1f))
                     }
                     if (Build.VERSION.SDK_INT >= 33) {
                         Spacer(Modifier.height(12.dp))
@@ -282,21 +282,21 @@ fun SettingsScreen(
 
             item {
                 SettingsAccordion(
-                    title = "Background execution",
-                    subtitle = if (backgroundExecutionEnabled) "Active for coding tasks" else "Battery optimization may stop tasks",
+                    title = stringResource(R.string.settings_background_title),
+                    subtitle = if (backgroundExecutionEnabled) stringResource(R.string.settings_bg_active_sub) else stringResource(R.string.settings_bg_inactive_sub),
                     icon = Icons.Default.Security,
                     expanded = expanded == SettingsSection.BACKGROUND,
                     onClick = { toggle(SettingsSection.BACKGROUND) },
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            if (backgroundExecutionEnabled) "Active" else "Inactive",
+                            if (backgroundExecutionEnabled) stringResource(R.string.settings_active) else stringResource(R.string.settings_inactive),
                             fontWeight = FontWeight.Bold,
                             color = if (backgroundExecutionEnabled) PocketGreen else MaterialTheme.colorScheme.error,
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "Android keeps coding tasks running in a foreground service while a task is active.",
+                            stringResource(R.string.settings_bg_desc),
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -305,13 +305,13 @@ fun SettingsScreen(
                         onClick = ::openBackgroundSettings,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (backgroundExecutionEnabled) "Review Android setting" else "Enable in Android settings")
+                        Text(if (backgroundExecutionEnabled) stringResource(R.string.settings_review_android_setting) else stringResource(R.string.settings_enable_android_setting))
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("Keep alive when closed", fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.settings_keepalive_title), fontWeight = FontWeight.SemiBold)
                             Text(
-                                "Termux-style: the app keeps running after you swipe it away, so open terminal sessions survive. When off, it is protected only while a session or task is active.",
+                                stringResource(R.string.settings_keepalive_desc),
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -332,13 +332,13 @@ fun SettingsScreen(
             item {
                 val installedCount = state.installedDevStacks.size
                 SettingsAccordion(
-                    title = "Developer tools",
-                    subtitle = "Core tools + $installedCount optional toolchain${if (installedCount == 1) "" else "s"}",
+                    title = stringResource(R.string.settings_devtools_title),
+                    subtitle = stringResource(R.string.settings_devstack_subtitle, installedCount),
                     icon = Icons.Default.Code,
                     expanded = expanded == SettingsSection.TOOLS,
                     onClick = { toggle(SettingsSection.TOOLS) },
                 ) {
-                    Text("Node.js, npm, Git, and Claude Code are included.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.settings_devstack_desc), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
                     DevStack.entries.forEachIndexed { index, stack ->
                         val installed = stack in state.installedDevStacks
@@ -350,14 +350,14 @@ fun SettingsScreen(
                                 Text(stack.installsSummary, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             when {
-                                removing -> Text("Removing…", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                removing -> Text(stringResource(R.string.settings_removing), color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 installing -> Text("${(state.devStackProgress * 100).toInt()}%", color = PocketOrange, fontWeight = FontWeight.Bold)
-                                installed && stack == DevStack.WEB -> Text("Included", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                installed && stack == DevStack.WEB -> Text(stringResource(R.string.settings_included), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 installed -> TextButton(
                                     onClick = { stackPendingRemoval = stack },
                                     enabled = state.devStackInstalling == null,
-                                ) { Text("Remove", color = MaterialTheme.colorScheme.error) }
-                                else -> OutlinedButton(onClick = { onInstallDevStack(stack) }, enabled = state.devStackInstalling == null) { Text("Add") }
+                                ) { Text(stringResource(R.string.settings_remove), color = MaterialTheme.colorScheme.error) }
+                                else -> OutlinedButton(onClick = { onInstallDevStack(stack) }, enabled = state.devStackInstalling == null) { Text(stringResource(R.string.settings_add)) }
                             }
                         }
                         if (installing) {
@@ -393,7 +393,7 @@ fun SettingsScreen(
                                             }
                                         }
                                         Text(
-                                            state.devStackMessage ?: "Downloading…",
+                                            state.devStackMessage ?: stringResource(R.string.settings_downloading),
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1,
@@ -402,7 +402,7 @@ fun SettingsScreen(
                                     }
                                 }
                             } ?: Text(
-                                state.devStackMessage ?: "Processing…",
+                                state.devStackMessage ?: stringResource(R.string.settings_processing),
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -416,46 +416,46 @@ fun SettingsScreen(
 
             item {
                 SettingsAccordion(
-                    title = "Tool permissions",
+                    title = stringResource(R.string.settings_permissions_title),
                     subtitle = when (state.toolPermissionGlobal) {
-                        com.jarves.mh.tools.ToolPermissionLevel.ALLOW -> "Global: allow"
-                        com.jarves.mh.tools.ToolPermissionLevel.ASK -> "Global: ask"
-                        com.jarves.mh.tools.ToolPermissionLevel.FORBID -> "Global: forbid"
+                        com.jarves.mh.tools.ToolPermissionLevel.ALLOW -> stringResource(R.string.settings_perm_global_allow)
+                        com.jarves.mh.tools.ToolPermissionLevel.ASK -> stringResource(R.string.settings_perm_global_ask)
+                        com.jarves.mh.tools.ToolPermissionLevel.FORBID -> stringResource(R.string.settings_perm_global_forbid)
                     },
                     icon = Icons.Default.Security,
                     expanded = expanded == SettingsSection.PERMISSIONS,
                     onClick = { toggle(SettingsSection.PERMISSIONS) },
                 ) {
                     Text(
-                        "Controls how agent tools (Bash, Edit, Write…) are approved. Ask waits for your confirmation; an override for a tool always wins over the global default.",
+                        stringResource(R.string.settings_permissions_desc),
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(10.dp))
-                    Text("Global default", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text(stringResource(R.string.settings_global_default), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     Spacer(Modifier.height(6.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         PermissionLevelChoice(
-                            label = "Allow",
+                            label = stringResource(R.string.settings_allow),
                             selected = state.toolPermissionGlobal == com.jarves.mh.tools.ToolPermissionLevel.ALLOW,
                             onClick = { onSetToolPermissionGlobal(com.jarves.mh.tools.ToolPermissionLevel.ALLOW) },
                             modifier = Modifier.weight(1f),
                         )
                         PermissionLevelChoice(
-                            label = "Ask",
+                            label = stringResource(R.string.settings_ask),
                             selected = state.toolPermissionGlobal == com.jarves.mh.tools.ToolPermissionLevel.ASK,
                             onClick = { onSetToolPermissionGlobal(com.jarves.mh.tools.ToolPermissionLevel.ASK) },
                             modifier = Modifier.weight(1f),
                         )
                         PermissionLevelChoice(
-                            label = "Forbid",
+                            label = stringResource(R.string.settings_forbid),
                             selected = state.toolPermissionGlobal == com.jarves.mh.tools.ToolPermissionLevel.FORBID,
                             onClick = { onSetToolPermissionGlobal(com.jarves.mh.tools.ToolPermissionLevel.FORBID) },
                             modifier = Modifier.weight(1f),
                         )
                     }
                     Spacer(Modifier.height(12.dp))
-                    Text("Per-tool overrides", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text(stringResource(R.string.settings_per_tool_overrides), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     com.jarves.mh.tools.ToolPermissionStore.knownTools.forEach { tool ->
                         val effective = state.toolPermissionOverrides[tool] ?: state.toolPermissionGlobal
                         Row(
@@ -464,7 +464,7 @@ fun SettingsScreen(
                         ) {
                             Text(tool, fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.weight(1f))
                             PermissionLevelChoice(
-                                label = "Allow",
+                                label = stringResource(R.string.settings_allow),
                                 selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ALLOW &&
                                     state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.ALLOW,
                                 onClick = {
@@ -481,7 +481,7 @@ fun SettingsScreen(
                             )
                             Spacer(Modifier.width(4.dp))
                             PermissionLevelChoice(
-                                label = "Ask",
+                                label = stringResource(R.string.settings_ask),
                                 selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ASK &&
                                     state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.ASK,
                                 onClick = {
@@ -498,7 +498,7 @@ fun SettingsScreen(
                             )
                             Spacer(Modifier.width(4.dp))
                             PermissionLevelChoice(
-                                label = "Forbid",
+                                label = stringResource(R.string.settings_forbid),
                                 selected = effective == com.jarves.mh.tools.ToolPermissionLevel.FORBID &&
                                     state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.FORBID,
                                 onClick = {
@@ -520,27 +520,27 @@ fun SettingsScreen(
 
             item {
                 SettingsAccordion(
-                    title = "Linux runtime",
+                    title = stringResource(R.string.settings_linux_runtime),
                     subtitle = "Ubuntu 20.04 PRoot · ARM64",
                     icon = Icons.Default.Terminal,
                     expanded = expanded == SettingsSection.RUNTIME,
                     onClick = { toggle(SettingsSection.RUNTIME) },
                 ) {
-                    RuntimeInfoRow("Architecture", "ARM64 (aarch64)")
-                    RuntimeInfoRow("Environment", "Ubuntu 20.04 PRoot")
+                    RuntimeInfoRow(stringResource(R.string.settings_architecture), "ARM64 (aarch64)")
+                    RuntimeInfoRow(stringResource(R.string.settings_environment), "Ubuntu 20.04 PRoot")
                     RuntimeInfoRow(
-                        "Active agent",
-                        state.agentKind.title + if (state.installedAgentVersions.containsKey(state.agentKind)) "" else " · Not installed",
+                        stringResource(R.string.settings_active_agent),
+                        state.agentKind.title + if (state.installedAgentVersions.containsKey(state.agentKind)) "" else stringResource(R.string.settings_not_installed_suffix),
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     Text(
-                        "Installed agents",
+                        stringResource(R.string.settings_installed_agents),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (state.installedAgentVersions.isEmpty()) {
-                        RuntimeInfoRow("Status", "No verified agent installation")
+                        RuntimeInfoRow(stringResource(R.string.settings_status), stringResource(R.string.settings_no_verified_install))
                     } else {
                         AgentKind.entries.forEach { agent ->
                             state.installedAgentVersions[agent]?.let { version ->
@@ -555,18 +555,18 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.DeleteSweep, null, Modifier.size(17.dp))
                         Spacer(Modifier.width(7.dp))
-                        Text(if (terminalCleared) "Terminal history cleared" else "Clear terminal history")
+                        Text(if (terminalCleared) stringResource(R.string.settings_terminal_cleared) else stringResource(R.string.settings_clear_terminal))
                     }
                     OutlinedButton(
                         onClick = { showReliabilityHelp = !showReliabilityHelp },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Advanced runtime reliability")
+                        Text(stringResource(R.string.settings_advanced_reliability))
                     }
                     AnimatedVisibility(showReliabilityHelp) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                "If large builds stop unexpectedly, Android Developer options may provide a child-process restriction toggle.",
+                                stringResource(R.string.settings_reliability_desc),
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -576,7 +576,7 @@ fun SettingsScreen(
                                         .onFailure { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Open Developer options") }
+                            ) { Text(stringResource(R.string.settings_open_dev_options)) }
                         }
                     }
                 }
@@ -602,7 +602,7 @@ fun SettingsScreen(
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Mobile Harness", fontWeight = FontWeight.SemiBold)
-                            Text("Local AI coding workspace", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.settings_tagline), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text("v${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -628,16 +628,16 @@ fun SettingsScreen(
                     )
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Privacy policy", fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.settings_privacy_policy), fontWeight = FontWeight.Medium)
                         Text(
-                            "How local data and AI provider requests are handled",
+                            stringResource(R.string.settings_privacy_desc),
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Icon(
                         Icons.AutoMirrored.Filled.OpenInNew,
-                        contentDescription = "Open privacy policy",
+                        contentDescription = stringResource(R.string.settings_open_privacy),
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -690,7 +690,7 @@ private fun SettingsAccordion(
                 }
                 Icon(
                     if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    if (expanded) "Collapse" else "Expand",
+                    if (expanded) stringResource(R.string.settings_collapse) else stringResource(R.string.settings_expand),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -723,17 +723,17 @@ private fun AntigravityConnectionSettings(
         shape = RoundedCornerShape(14.dp),
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Official Antigravity CLI", fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.settings_antigravity_official), fontWeight = FontWeight.SemiBold)
             Text(
                 auth.message ?: if (auth.status == AntigravityAuthStatus.SIGNED_IN) {
-                    auth.accountEmail?.let { "Connected as $it" } ?: "Google account connected"
-                } else "Sign in using Google's browser flow.",
+                    auth.accountEmail?.let { stringResource(R.string.settings_connected_as, it) } ?: stringResource(R.string.settings_google_connected)
+                } else stringResource(R.string.settings_signin_browser),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             when (auth.status) {
                 AntigravityAuthStatus.SIGNED_IN -> OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
-                    Text("Log out of Antigravity")
+                    Text(stringResource(R.string.settings_logout_antigravity))
                 }
                 AntigravityAuthStatus.STARTING, AntigravityAuthStatus.COMPLETING -> {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -743,33 +743,33 @@ private fun AntigravityConnectionSettings(
                         OutlinedButton(
                             onClick = { clipboard.setText(AnnotatedString(url)) },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Copy Google sign-in URL") }
+                        ) { Text(stringResource(R.string.settings_copy_signin_url)) }
                     }
                     OutlinedTextField(
                         value = code,
                         onValueChange = onCode,
-                        label = { Text("One-time authorization code") },
+                        label = { Text(stringResource(R.string.settings_auth_code)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Button(onClick = onSubmitCode, enabled = code.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-                        Text("Complete sign-in")
+                        Text(stringResource(R.string.settings_complete_signin))
                     }
                 }
                 AntigravityAuthStatus.SIGNED_OUT, AntigravityAuthStatus.ERROR -> Button(
                     onClick = onStartLogin,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (auth.status == AntigravityAuthStatus.ERROR) "Reconnect with Google" else "Sign in with Google") }
+                ) { Text(if (auth.status == AntigravityAuthStatus.ERROR) stringResource(R.string.settings_reconnect_google) else stringResource(R.string.settings_signin_google)) }
             }
         }
     }
 
     if (auth.status == AntigravityAuthStatus.SIGNED_IN) {
-        Text("Model", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.settings_model), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         OutlinedTextField(
             value = state.antigravityModel,
             onValueChange = onSetModel,
-            label = { Text("Antigravity model ID") },
+            label = { Text(stringResource(R.string.settings_antigravity_model_id)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -781,7 +781,7 @@ private fun AntigravityConnectionSettings(
             if (state.antigravityModelsLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             else Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
             Spacer(Modifier.width(7.dp))
-            Text("Refresh models")
+            Text(stringResource(R.string.settings_refresh_models))
         }
         state.antigravityModels.forEach { model ->
             Row(
@@ -792,11 +792,17 @@ private fun AntigravityConnectionSettings(
                 SelectionDot(state.antigravityModel == model)
             }
         }
-        Text("Reasoning effort", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.settings_reasoning_effort), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("low", "medium", "high").forEach { effort ->
                 OutlinedButton(onClick = { onSetEffort(effort) }, modifier = Modifier.weight(1f)) {
-                    Text(effort.replaceFirstChar(Char::uppercase))
+                    Text(
+                        when (effort) {
+                            "low" -> stringResource(R.string.settings_effort_low)
+                            "medium" -> stringResource(R.string.settings_effort_medium)
+                            else -> stringResource(R.string.settings_effort_high)
+                        },
+                    )
                 }
             }
         }
@@ -804,7 +810,7 @@ private fun AntigravityConnectionSettings(
 
     Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f), shape = RoundedCornerShape(12.dp)) {
         Text(
-            "Antigravity runs with automatic tool approval. It can edit files and execute commands inside the selected project. Review generated changes before keeping them.",
+            stringResource(R.string.settings_antigravity_autotool_desc),
             Modifier.fillMaxWidth().padding(12.dp),
             color = MaterialTheme.colorScheme.onErrorContainer,
             fontSize = 11.sp,
@@ -858,22 +864,22 @@ private fun ConnectionSettings(
             ))
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f)) {
-                Text("Active connection", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(state.provider.model.ifBlank { "Not configured" }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.settings_active_connection), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(state.provider.model.ifBlank { stringResource(R.string.settings_not_configured) }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 state.activeApiKeyName?.let { name ->
-                    Text("Key: $name", fontSize = 11.sp, color = PocketOrange, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.settings_key_label, name), fontSize = 11.sp, color = PocketOrange, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 state.apiPingMessage?.let {
                     Text(it, fontSize = 11.sp, color = if (state.apiPingStatus == ApiPingStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             OutlinedButton(onClick = onPing, enabled = state.apiPingStatus != ApiPingStatus.PINGING, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
-                Text(if (state.apiPingStatus == ApiPingStatus.PINGING) "Testing…" else "Test")
+                Text(if (state.apiPingStatus == ApiPingStatus.PINGING) stringResource(R.string.settings_testing) else stringResource(R.string.settings_test))
             }
         }
     }
 
-    Text("Provider", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(stringResource(R.string.settings_provider), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Surface(
         modifier = Modifier.fillMaxWidth().clickable { providerExpanded = !providerExpanded },
         shape = RoundedCornerShape(14.dp),
@@ -885,7 +891,7 @@ private fun ConnectionSettings(
                 Text(selectedKind.title, fontWeight = FontWeight.SemiBold)
                 Text(selectedKind.subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
-            Icon(if (providerExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, "Choose provider")
+            Icon(if (providerExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, stringResource(R.string.settings_choose_provider))
         }
     }
     AnimatedVisibility(providerExpanded) {
@@ -920,10 +926,10 @@ private fun ConnectionSettings(
             overflow = TextOverflow.Ellipsis,
         )
     } else {
-        OutlinedTextField(baseUrl, onBaseUrl, label = { Text("Base URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(baseUrl, onBaseUrl, label = { Text(stringResource(R.string.settings_base_url)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
     }
     if (state.agentKind == AgentKind.DEEPSEEK_HARNESS && selectedKind in DSH_PROTOCOL_PROVIDERS) {
-        Text("Gateway protocol", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.settings_gateway_protocol), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)) {
             Column {
                 listOf("anthropic-messages", "openai-completions", "openai-responses").forEach { option ->
@@ -938,25 +944,25 @@ private fun ConnectionSettings(
             }
         }
     }
-    Text("Model", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    OutlinedTextField(model, onModel, label = { Text("Model ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    Text(stringResource(R.string.settings_model), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    OutlinedTextField(model, onModel, label = { Text(stringResource(R.string.settings_model_id)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
     OutlinedButton(onClick = onModels, enabled = baseUrl.isNotBlank() && apiKey.isNotBlank() && !isDiscovering, modifier = Modifier.fillMaxWidth().height(50.dp)) {
         if (isDiscovering) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         else Icon(if (models.isEmpty()) Icons.Default.Search else Icons.Default.KeyboardArrowDown, null, Modifier.size(18.dp))
         Spacer(Modifier.width(7.dp))
-        Text(if (models.isEmpty()) "Find available models" else "Available models (${models.size})")
+        Text(if (models.isEmpty()) stringResource(R.string.settings_find_models) else stringResource(R.string.settings_available_models, models.size))
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text("API keys", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("${savedKeys.size} saved · automatic failover enabled", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.settings_api_keys), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.settings_keys_saved, savedKeys.size), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         OutlinedButton(onClick = { addKeyExpanded = !addKeyExpanded }) {
-            Text(if (addKeyExpanded) "Cancel" else "Add key")
+            Text(if (addKeyExpanded) stringResource(R.string.settings_cancel) else stringResource(R.string.settings_add_key))
         }
     }
     if (savedKeys.isNotEmpty()) {
-        Text("Saved API keys", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.settings_saved_api_keys), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)) {
             Column {
                 savedKeys.forEachIndexed { index, key ->
@@ -967,14 +973,14 @@ private fun ConnectionSettings(
                         Column(Modifier.weight(1f)) {
                             Text(key.name, fontWeight = FontWeight.Medium)
                             Text(
-                                if (key.isActive) "Active now · tap another key to switch" else "Tap to make active",
+                                if (key.isActive) stringResource(R.string.settings_key_active_now) else stringResource(R.string.settings_key_tap_activate),
                                 fontSize = 11.sp,
                                 color = if (key.isActive) PocketOrange else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         SelectionDot(key.isActive)
                         IconButton(onClick = { onRemoveKey(key.id) }) {
-                            Icon(Icons.Default.DeleteSweep, "Remove ${key.name}", Modifier.size(18.dp))
+                            Icon(Icons.Default.DeleteSweep, stringResource(R.string.settings_remove_key, key.name), Modifier.size(18.dp))
                         }
                     }
                     if (index != savedKeys.lastIndex) HorizontalDivider(Modifier.padding(start = 13.dp))
@@ -987,21 +993,21 @@ private fun ConnectionSettings(
             OutlinedTextField(
                 newKeyName,
                 onNewKeyName,
-                label = { Text("Key name") },
-                placeholder = { Text("Work, Personal, Backup…") },
+                label = { Text(stringResource(R.string.settings_key_name)) },
+                placeholder = { Text(stringResource(R.string.settings_key_name_placeholder)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 newApiKey,
                 onNewApiKey,
-                label = { Text("API key") },
+                label = { Text(stringResource(R.string.settings_api_key)) },
                 singleLine = true,
                 visualTransformation = if (newKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 trailingIcon = {
                     IconButton(onClick = onToggleNewKey) {
-                        Icon(if (newKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, "Show or hide new key")
+                        Icon(if (newKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(R.string.settings_show_hide_key))
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -1014,7 +1020,7 @@ private fun ConnectionSettings(
                 enabled = newKeyName.isNotBlank() && newApiKey.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(50.dp),
             ) {
-                Text("Save API key")
+                Text(stringResource(R.string.settings_save_api_key))
             }
         }
     }
@@ -1030,7 +1036,7 @@ private fun ConnectionSettings(
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(8.dp))
         }
-        Text(if (isValidating) "Checking connection" else "Test connection and save")
+        Text(if (isValidating) stringResource(R.string.settings_checking_connection) else stringResource(R.string.settings_test_and_save))
     }
 }
 
@@ -1102,14 +1108,14 @@ private fun DebugUpdateChannelSection(
     var url by rememberSaveable(initialUrl) { mutableStateOf(initialUrl) }
     val isOverridden = initialUrl.isNotBlank()
     SettingsAccordion(
-        title = "Update channel",
-        subtitle = if (isOverridden) "Overridden · debug only" else "Default GitHub release",
+        title = stringResource(R.string.settings_update_channel),
+        subtitle = if (isOverridden) stringResource(R.string.settings_update_overridden) else stringResource(R.string.settings_update_default),
         icon = Icons.Default.Tune,
         expanded = expanded,
         onClick = { expanded = !expanded },
     ) {
         Text(
-            "Debug builds only. Paste the temporary manifest URL from Cloudflare Tunnel, ngrok, or any HTTPS server hosting mobile-harness-update.json and a newer APK.",
+            stringResource(R.string.settings_update_desc),
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1117,7 +1123,7 @@ private fun DebugUpdateChannelSection(
         OutlinedTextField(
             value = url,
             onValueChange = { url = it },
-            label = { Text("Manifest URL") },
+            label = { Text(stringResource(R.string.settings_manifest_url)) },
             placeholder = { Text("https://your-tunnel.example/mobile-harness-update.json") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
@@ -1133,20 +1139,20 @@ private fun DebugUpdateChannelSection(
                 enabled = url.startsWith("https://"),
                 modifier = Modifier.weight(1f),
             ) {
-                Text(if (isOverridden) "Replace" else "Use & check")
+                Text(if (isOverridden) stringResource(R.string.settings_replace) else stringResource(R.string.settings_use_check))
             }
             OutlinedButton(
                 onClick = onClear,
                 enabled = isOverridden,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Reset")
+                Text(stringResource(R.string.settings_reset))
             }
         }
         if (isOverridden) {
             Spacer(Modifier.height(6.dp))
             Text(
-                "Current: $initialUrl",
+                stringResource(R.string.settings_current_url, initialUrl),
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
