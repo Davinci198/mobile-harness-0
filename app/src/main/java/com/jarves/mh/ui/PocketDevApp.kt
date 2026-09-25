@@ -879,7 +879,7 @@ private fun RuntimeSetupPromptScreen(
             if (currentStep == 0) {
                 // Step 0: Device Compatibility & Verification
                 Text(
-                    text = stringResource(R.string.onb_device_check)
+                    text = stringResource(R.string.onb_device_check),
                     color = MaterialTheme.colorScheme.primary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
@@ -887,7 +887,7 @@ private fun RuntimeSetupPromptScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = stringResource(R.string.onb_ready_title)
+                    text = stringResource(R.string.onb_ready_title),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground,
@@ -925,7 +925,7 @@ private fun RuntimeSetupPromptScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Column {
                                     Text(
-                                        stringResource(R.string.onb_sys_compat)
+                                        stringResource(R.string.onb_sys_compat),
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp,
                                         color = MaterialTheme.colorScheme.onSurface,
@@ -975,7 +975,7 @@ private fun RuntimeSetupPromptScreen(
                             statusOk = true,
                         )
                         Text(
-                            stringResource(R.string.onb_based_tools)
+                            stringResource(R.string.onb_based_tools),
                             modifier = Modifier.padding(start = 26.dp),
                             fontSize = 10.5.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1018,7 +1018,7 @@ private fun RuntimeSetupPromptScreen(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    stringResource(R.string.onb_change_later)
+                    stringResource(R.string.onb_change_later),
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
                     fontSize = 11.sp,
@@ -1026,7 +1026,7 @@ private fun RuntimeSetupPromptScreen(
                 )
             } else {
                 Text(
-                    stringResource(R.string.onb_toolchain_setup)
+                    stringResource(R.string.onb_toolchain_setup),
                     color = MaterialTheme.colorScheme.primary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
@@ -1034,7 +1034,7 @@ private fun RuntimeSetupPromptScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = stringResource(R.string.onb_choose_tools)
+                    text = stringResource(R.string.onb_choose_tools),
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground,
@@ -1074,7 +1074,7 @@ private fun RuntimeSetupPromptScreen(
                             )
                             Text("Ubuntu  ·  Node.js  ·  npm  ·  Git", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                         }
-                        Icon(Icons.Default.Check, stringResource(R.string.onb_included)), tint = PocketGreen, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Check, stringResource(R.string.onb_included), tint = PocketGreen, modifier = Modifier.size(20.dp))
                     }
                 }
 
@@ -1308,7 +1308,7 @@ private fun DevStackChoiceRow(
             contentAlignment = Alignment.Center,
         ) {
             if (selected) {
-                Icon(Icons.Default.Check, stringResource(R.string.onb_selected)), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(14.dp))
+                Icon(Icons.Default.Check, stringResource(R.string.onb_selected), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(14.dp))
             }
         }
     }
@@ -2829,8 +2829,8 @@ private fun ProviderCredentialsStep(
                                             )
                                         }
                                         Text(option.displayName, modifier = Modifier.weight(1f, fill = false), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        if (option.isFree) Text("  " + stringResource(R.string.agent_free) color = Color(0xFF58C99C), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        if (option.isBroken) Text("  " + stringResource(R.string.agent_broken) color = MaterialTheme.colorScheme.error, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        if (option.isFree) Text("  " + stringResource(R.string.agent_free), color = Color(0xFF58C99C), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        if (option.isBroken) Text("  " + stringResource(R.string.agent_broken), color = MaterialTheme.colorScheme.error, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                     if (option.displayName != option.id) {
                                         Text(option.id, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -3155,8 +3155,8 @@ private fun ProjectsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                Text(stringResource(R.string.home_build_title) style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(stringResource(R.string.home_build_desc) color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.home_build_title), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.home_build_desc), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(16.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -3221,7 +3221,7 @@ private fun ProjectsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(stringResource(R.string.home_bring_existing) fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                                Text(stringResource(R.string.home_bring_existing), fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
                                 Text(
                                     if (isImportExpanded) stringResource(R.string.home_import_files) else stringResource(R.string.home_zip_git),
                                     fontSize = 10.5.sp,
@@ -3310,14 +3310,14 @@ private fun ProjectsScreen(
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text("Mobile Harness ${update.versionName}", fontWeight = FontWeight.Bold)
-                                Text(stringResource(R.string.upd_ready) fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(R.string.upd_ready), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Text(stringResource(R.string.upd_update), color = PocketOrange, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
             }
-            item { Text(stringResource(R.string.home_your_projects) style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
+            item { Text(stringResource(R.string.home_your_projects), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
             if (projects.isEmpty()) {
                 item {
                     Card(
@@ -3562,7 +3562,7 @@ private fun ProjectsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    if (installing) Text(stringResource(R.string.upd_verified) color = PocketGreen, fontSize = 13.sp)
+                    if (installing) Text(stringResource(R.string.upd_verified), color = PocketGreen, fontSize = 13.sp)
                     state.appUpdateError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
                 }
             },
@@ -4596,9 +4596,9 @@ private fun ChatTab(
                         Text(stringResource(R.string.chat_readonly), fontWeight = FontWeight.SemiBold)
                         Text(
                             if (readOnlyBlocked) {
-                                stringResource(R.string.chat_other_blocked)
+                                stringResource(R.string.chat_other_blocked),
                             } else {
-                                stringResource(R.string.chat_other_done)
+                                stringResource(R.string.chat_other_done),
                             },
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -5262,7 +5262,7 @@ private fun ChangesTab(
             ) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
                     Text(stringResource(R.string.tab_changes), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(stringResource(R.string.ch_review_desc) color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.ch_review_desc), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
