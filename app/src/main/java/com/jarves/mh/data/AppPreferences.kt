@@ -1,6 +1,7 @@
 package com.jarves.mh.data
 
 import android.content.Context
+import com.jarves.mh.R
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ChatAttachment
@@ -471,7 +472,7 @@ class AppPreferences(private val context: Context) {
         val now = System.currentTimeMillis()
         val chat = ProjectChat(
             id = "main",
-            title = legacyMessages.firstOrNull { it.fromUser }?.text?.toChatTitle() ?: "Main chat",
+            title = legacyMessages.firstOrNull { it.fromUser }?.text?.toChatTitle() ?: context.getString(R.string.chat_main),
             createdAtMillis = now,
             updatedAtMillis = now,
         )

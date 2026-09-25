@@ -127,7 +127,7 @@ object RuntimeSetupController {
             context,
             current.copy(
                 status = RuntimeSetupStatus.COMPLETE,
-                message = "Mobile Harness is ready",
+                message = context.getString(R.string.setup_ready),
                 progress = 1f,
                 indeterminate = false,
                 downloadedBytes = null,
@@ -150,11 +150,11 @@ object RuntimeSetupController {
                 it.message.orEmpty().contains("dpkg --configure -a", true)
         }
         val friendly = when {
-            offline -> "Connect to Wi-Fi or mobile data, then resume setup."
-            interruptedDpkg -> "Android interrupted Linux setup. Mobile Harness will repair it when you try again."
+            offline -> context.getString(R.string.setup_need_internet_resume)
+            interruptedDpkg -> context.getString(R.string.setup_dpkg_interrupted)
             else -> error.message.orEmpty().lineSequence().lastOrNull { it.isNotBlank() }
                 ?.take(220)
-                ?: "Mobile Harness could not finish setup."
+                ?: context.getString(R.string.setup_finish_fail)
         }
         val current = mutableSnapshot.value
         set(
@@ -176,7 +176,7 @@ object RuntimeSetupController {
             context,
             current.copy(
                 status = RuntimeSetupStatus.CANCELLED,
-                message = "Setup paused",
+                message = context.getString(R.string.setup_paused),
                 indeterminate = false,
                 logs = (current.logs + "• Setup paused safely").takeLast(MAX_LOG_LINES),
             ),

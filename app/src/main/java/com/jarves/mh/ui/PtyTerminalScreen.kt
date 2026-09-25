@@ -380,7 +380,7 @@ private fun PtyExtraKeys(
                         menuOpen = false
                         pasteClipboard()
                     })
-                    DropdownMenuItem(text = { Text("→ vertical") }, onClick = {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.pty_vertical)) }, onClick = {
                         menuOpen = false
                         onVertical()
                     })

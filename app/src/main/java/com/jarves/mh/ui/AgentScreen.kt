@@ -1830,7 +1830,7 @@ private fun AgentProviderCard(
                     if (activeKey != null) append(stringResource(R.string.agent_active_suffix))
                     activeKeyStatus?.let {
                         append(" · ")
-                        append(when (it.successful) { true -> stringResource(R.string.agent_verified); false -> it.label; null -> stringResource(R.string.agent_checking) })
+                        append(when (it.successful) { true -> stringResource(R.string.agent_verified); false -> stringResource(R.string.agent_failed); null -> stringResource(R.string.agent_checking) })
                     }
                 },
                 positive = activeKeyStatus?.successful == true,
