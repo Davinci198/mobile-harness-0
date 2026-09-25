@@ -49,11 +49,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.jarves.mh.R
 import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.runtime.RuntimeInstaller
 import com.termux.terminal.TerminalSession
@@ -370,11 +372,11 @@ private fun PtyExtraKeys(
             Box(modifier = Modifier.weight(1f)) {
                 ExtraKeyButton("≡", modifier = Modifier.fillMaxWidth()) { menuOpen = true }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(text = { Text("New session") }, onClick = {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.pty_new_session)) }, onClick = {
                         menuOpen = false
                         onNewSession()
                     })
-                    DropdownMenuItem(text = { Text("Paste") }, onClick = {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.pty_paste)) }, onClick = {
                         menuOpen = false
                         pasteClipboard()
                     })
@@ -383,7 +385,7 @@ private fun PtyExtraKeys(
                         onVertical()
                     })
                     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-                    DropdownMenuItem(text = { Text(if (keyboardVisible) "Hide keyboard" else "Show keyboard") }, onClick = {
+                    DropdownMenuItem(text = { Text(if (keyboardVisible) stringResource(R.string.pty_hide_keyboard) else stringResource(R.string.pty_show_keyboard)) }, onClick = {
                         menuOpen = false
                         val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                         if (keyboardVisible) ime.hideSoftInputFromWindow(view?.windowToken, 0)
@@ -487,16 +489,16 @@ private fun PtyVerticalExtraKeys(
         Box(modifier = Modifier.fillMaxWidth()) {
             ExtraKeyButton("≡", compact = true, modifier = Modifier.fillMaxWidth()) { menuOpen = true }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(text = { Text("New session") }, onClick = {
+                DropdownMenuItem(text = { Text(stringResource(R.string.pty_new_session)) }, onClick = {
                     menuOpen = false
                     onNewSession()
                 })
-                DropdownMenuItem(text = { Text("Paste") }, onClick = {
+                DropdownMenuItem(text = { Text(stringResource(R.string.pty_paste)) }, onClick = {
                     menuOpen = false
                     pasteClipboard()
                 })
                 val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-                DropdownMenuItem(text = { Text(if (keyboardVisible) "Hide keyboard" else "Show keyboard") }, onClick = {
+                DropdownMenuItem(text = { Text(if (keyboardVisible) stringResource(R.string.pty_hide_keyboard) else stringResource(R.string.pty_show_keyboard)) }, onClick = {
                     menuOpen = false
                     val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                     if (keyboardVisible) ime.hideSoftInputFromWindow(view?.windowToken, 0)
