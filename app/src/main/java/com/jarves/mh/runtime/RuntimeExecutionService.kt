@@ -473,7 +473,7 @@ class RuntimeExecutionService : Service() {
         const val EXTRA_CAN_STOP = "can_stop"
         const val EXTRA_SESSION_ID = "session_id"
 
-        private const val RUNNING_CHANNEL_ID = "runtime"
+        internal const val RUNNING_CHANNEL_ID = "runtime"
         private const val RESULT_CHANNEL_ID = "task-results"
         private const val RUNNING_NOTIFICATION_ID = 41
         private const val RESULT_NOTIFICATION_ID = 42
