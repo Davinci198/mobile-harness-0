@@ -149,7 +149,7 @@ class RuntimeExecutionService : Service() {
                 studioKeepalive = false
                 thread(name = "studio-stop") {
                     runCatching {
-                        StudioServerManager(applicationContext, RuntimeInstaller(applicationContext)).stop()
+                        StudioServerManager(RuntimeInstaller(applicationContext)).stop()
                     }
                     if (!taskRunning()) teardown() else refreshNotification()
                 }
@@ -220,7 +220,7 @@ class RuntimeExecutionService : Service() {
             RuntimeTaskController.recoveryActive = false
             recoverySessionIds = emptyList()
         }
-        val studio = StudioServerManager(applicationContext, RuntimeInstaller(applicationContext))
+        val studio = StudioServerManager(RuntimeInstaller(applicationContext))
         if (studio.healthCheck()) {
             Log.d(TAG, "Recovery: Studio server survived; keeping it protected")
             studioKeepalive = true
@@ -374,7 +374,7 @@ class RuntimeExecutionService : Service() {
         if (studioWatchdog?.isAlive == true) return
         studioWatchdog = thread(name = "studio-keepalive") {
             while (studioKeepalive) {
-                val manager = StudioServerManager(applicationContext, RuntimeInstaller(applicationContext))
+                val manager = StudioServerManager(RuntimeInstaller(applicationContext))
                 val alive = runCatching { manager.healthCheck() }.getOrDefault(false)
                 val booting = runCatching { manager.isRunning() }.getOrDefault(false)
                 if (!alive && !booting) {
