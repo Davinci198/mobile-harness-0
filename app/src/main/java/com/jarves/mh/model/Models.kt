@@ -5,6 +5,8 @@ import java.text.Normalizer
 import java.util.Locale
 import java.util.UUID
 import kotlin.random.Random
+import org.json.JSONArray
+import org.json.JSONObject
 
 enum class ProviderProtocol { CLAUDE_LOGIN, ANTHROPIC, ANTHROPIC_GATEWAY, OPENROUTER, OPENAI_RESPONSES, OPENAI_CHAT }
 
@@ -174,6 +176,51 @@ data class ProviderProfile(
 ) {
     /** Effective base URL: fixed kinds always resolve to their constant, ignoring stored drift. */
     val resolvedBaseUrl: String get() = if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl
+}
+
+data class CustomEndpoint(
+    val id: String = UUID.randomUUID().toString(),
+    val label: String,
+    val baseUrl: String,
+    val model: String,
+    val dshApi: String,
+    val keyName: String = "",
+)
+
+fun encodeCustomEndpoints(endpoints: List<CustomEndpoint>): String {
+    val arr = JSONArray()
+    endpoints.forEach { ep ->
+        arr.put(
+            JSONObject()
+                .put("id", ep.id)
+                .put("label", ep.label)
+                .put("baseUrl", ep.baseUrl)
+                .put("model", ep.model)
+                .put("dshApi", ep.dshApi)
+                .put("keyName", ep.keyName),
+        )
+    }
+    return arr.toString()
+}
+
+fun decodeCustomEndpoints(raw: String?): List<CustomEndpoint> {
+    if (raw.isNullOrBlank()) return emptyList()
+    return runCatching {
+        val arr = JSONArray(raw)
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val label = o.optString("label")
+            if (label.isBlank()) return@mapNotNull null
+            CustomEndpoint(
+                id = o.optString("id").ifBlank { UUID.randomUUID().toString() },
+                label = label,
+                baseUrl = o.optString("baseUrl"),
+                model = o.optString("model"),
+                dshApi = o.optString("dshApi"),
+                keyName = o.optString("keyName"),
+            )
+        }
+    }.getOrDefault(emptyList())
 }
 
 enum class ProjectKind { PROJECT, QUICK_PROJECT }

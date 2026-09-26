@@ -156,6 +156,16 @@
     <string name="agent_endpoint_protocol">Endpoint &amp; protocol</string>
     <string name="agent_base_url_required">Base URL required</string>
     <string name="agent_provider_hint">Enter the provider endpoint, then add its API key under Credentials.</string>
+    <string name="agent_endpoints">Saved endpoints</string>
+    <string name="agent_endpoint_title">Custom endpoint</string>
+    <string name="agent_endpoint_name">Endpoint name</string>
+    <string name="agent_endpoint_new">New endpoint</string>
+    <string name="agent_endpoint_empty">No saved endpoints yet</string>
+    <string name="agent_endpoint_delete">Delete endpoint</string>
+    <string name="agent_endpoint_delete_ask">Delete %1$s?</string>
+    <string name="agent_endpoint_saved">Endpoint saved</string>
+    <string name="agent_endpoint_applied">%1$s applied</string>
+    <string name="agent_endpoint_current_key">Current key</string>
     <string name="agent_model_access">Model &amp; access</string>
     <string name="agent_discovering">Discovering…</string>
     <string name="agent_discover_models">Discover models</string>

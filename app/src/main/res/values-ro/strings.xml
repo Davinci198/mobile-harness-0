@@ -156,6 +156,16 @@
     <string name="agent_endpoint_protocol">Protocol endpoint</string>
     <string name="agent_base_url_required">URL de bază necesar</string>
     <string name="agent_provider_hint">Introdu endpoint-ul furnizorului, apoi adaugă cheia lui API în secțiunea Acreditări.</string>
+    <string name="agent_endpoints">Endpointuri salvate</string>
+    <string name="agent_endpoint_title">Endpoint personalizat</string>
+    <string name="agent_endpoint_name">Nume endpoint</string>
+    <string name="agent_endpoint_new">Endpoint nou</string>
+    <string name="agent_endpoint_empty">Niciun endpoint salvat încă</string>
+    <string name="agent_endpoint_delete">Șterge endpointul</string>
+    <string name="agent_endpoint_delete_ask">Ștergi %1$s?</string>
+    <string name="agent_endpoint_saved">Endpoint salvat</string>
+    <string name="agent_endpoint_applied">%1$s aplicat</string>
+    <string name="agent_endpoint_current_key">Cheia curentă</string>
     <string name="agent_model_access">Model și acces</string>
     <string name="agent_discovering">Se descoperă…</string>
     <string name="agent_discover_models">Descoperă modele</string>

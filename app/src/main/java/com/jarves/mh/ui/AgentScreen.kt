@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -56,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -71,6 +73,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -102,6 +105,7 @@ import androidx.compose.ui.unit.sp
 import com.jarves.mh.R
 import com.jarves.mh.data.ApiKeyInfo
 import com.jarves.mh.model.AgentKind
+import com.jarves.mh.model.CustomEndpoint
 import com.jarves.mh.model.DSH_PROTOCOL_PROVIDERS
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
@@ -183,6 +187,8 @@ fun AgentScreen(
     onAddApiKey: (ProviderKind, String, String) -> List<ApiKeyInfo>,
     onActivateApiKey: (ProviderKind, String) -> List<ApiKeyInfo>,
     onRemoveApiKey: (ProviderKind, String) -> List<ApiKeyInfo>,
+    onUpsertCustomEndpoint: (CustomEndpoint) -> Unit = {},
+    onDeleteCustomEndpoint: (String) -> Unit = {},
     onSelectAgent: (AgentKind) -> Unit = {},
     onInstallAgent: (AgentKind) -> Unit = {},
     onCheckAgentUpdates: () -> Unit = {},
@@ -232,6 +238,15 @@ fun AgentScreen(
     var antigravitySearch by rememberSaveable { mutableStateOf("") }
     var antigravityCode by rememberSaveable { mutableStateOf("") }
     var viewedAgent by rememberSaveable { mutableStateOf(state.agentKind) }
+
+    var showEndpointEditor by rememberSaveable { mutableStateOf(false) }
+    var editingEndpointId by rememberSaveable { mutableStateOf("") }
+    var endpointLabel by rememberSaveable { mutableStateOf("") }
+    var endpointUrl by rememberSaveable { mutableStateOf("") }
+    var endpointModel by rememberSaveable { mutableStateOf("") }
+    var endpointDsh by rememberSaveable { mutableStateOf("") }
+    var endpointKeyName by rememberSaveable { mutableStateOf("") }
+    var pendingDeleteEndpointId by rememberSaveable { mutableStateOf("") }
 
     val orderedAgents = remember(state.primaryAgentKind) {
         listOf(state.primaryAgentKind) + AgentKind.entries.filterNot { it == state.primaryAgentKind }
@@ -463,6 +478,152 @@ fun AgentScreen(
                 }
             }
         }
+    }
+
+    if (showEndpointEditor) {
+        AlertDialog(
+            onDismissRequest = { showEndpointEditor = false },
+            title = { Text(stringResource(R.string.agent_endpoint_title)) },
+            text = {
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedTextField(
+                        value = endpointLabel,
+                        onValueChange = { endpointLabel = it },
+                        label = { Text(stringResource(R.string.agent_endpoint_name)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    OutlinedTextField(
+                        value = endpointUrl,
+                        onValueChange = { endpointUrl = it },
+                        label = { Text(stringResource(R.string.settings_base_url)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    OutlinedTextField(
+                        value = endpointModel,
+                        onValueChange = { endpointModel = it },
+                        label = { Text(stringResource(R.string.settings_model)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    Text(
+                        stringResource(R.string.settings_gateway_protocol),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)) {
+                        Column {
+                            listOf("anthropic-messages", "openai-completions", "openai-responses").forEach { option ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { endpointDsh = option }.padding(horizontal = 12.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(option, Modifier.weight(1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                    AgentSelectionDot(endpointDsh == option)
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.settings_api_key),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)) {
+                        Column {
+                            Row(
+                                Modifier.fillMaxWidth().clickable { endpointKeyName = "" }.padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    stringResource(R.string.agent_endpoint_current_key),
+                                    Modifier.weight(1f),
+                                    fontSize = 12.sp,
+                                )
+                                AgentSelectionDot(endpointKeyName == "")
+                            }
+                            savedKeys.forEach { key ->
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { endpointKeyName = key.name }.padding(horizontal = 12.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(key.name, Modifier.weight(1f), fontSize = 12.sp)
+                                    AgentSelectionDot(endpointKeyName == key.name)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val endpoint = if (editingEndpointId.isBlank()) {
+                            CustomEndpoint(
+                                label = endpointLabel.trim(),
+                                baseUrl = endpointUrl.trim(),
+                                model = endpointModel.trim(),
+                                dshApi = endpointDsh,
+                                keyName = endpointKeyName,
+                            )
+                        } else {
+                            CustomEndpoint(
+                                id = editingEndpointId,
+                                label = endpointLabel.trim(),
+                                baseUrl = endpointUrl.trim(),
+                                model = endpointModel.trim(),
+                                dshApi = endpointDsh,
+                                keyName = endpointKeyName,
+                            )
+                        }
+                        onUpsertCustomEndpoint(endpoint)
+                        showEndpointEditor = false
+                        status = context.getString(R.string.agent_endpoint_saved)
+                        statusOk = true
+                    },
+                    enabled = endpointLabel.isNotBlank() && endpointUrl.isNotBlank(),
+                ) {
+                    Text(stringResource(R.string.proj_save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEndpointEditor = false }) {
+                    Text(stringResource(R.string.settings_cancel))
+                }
+            },
+        )
+    }
+
+    if (pendingDeleteEndpointId.isNotEmpty()) {
+        val target = state.customEndpoints.firstOrNull { it.id == pendingDeleteEndpointId }
+        AlertDialog(
+            onDismissRequest = { pendingDeleteEndpointId = "" },
+            title = { Text(stringResource(R.string.agent_endpoint_delete)) },
+            text = { Text(stringResource(R.string.agent_endpoint_delete_ask, target?.label.orEmpty())) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteCustomEndpoint(pendingDeleteEndpointId)
+                    pendingDeleteEndpointId = ""
+                }) {
+                    Text(stringResource(R.string.agent_endpoint_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteEndpointId = "" }) {
+                    Text(stringResource(R.string.settings_cancel))
+                }
+            },
+        )
     }
 
     // ── Provider Models Modal Bottom Sheet ──
@@ -1197,6 +1358,40 @@ fun AgentScreen(
                             status = context.getString(R.string.agent_key_removed, selectedKind.title)
                             statusOk = true
                         },
+                        customEndpoints = state.customEndpoints,
+                        onApplyEndpoint = { ep ->
+                            baseUrl = ep.baseUrl
+                            model = ep.model
+                            dshApi = ep.dshApi
+                            val keyId = savedKeys.firstOrNull { it.name == ep.keyName }?.id
+                            if (keyId != null) savedKeys = onActivateApiKey(selectedKind, keyId)
+                            apiKey = getSavedApiKey(selectedKind)
+                            onSaveProvider(
+                                ProviderProfile(selectedKind, ep.baseUrl, ep.model, dshApi = ep.dshApi),
+                                apiKey.trim(),
+                            )
+                            status = context.getString(R.string.agent_endpoint_applied, ep.label)
+                            statusOk = true
+                        },
+                        onCreateEndpoint = {
+                            editingEndpointId = ""
+                            endpointLabel = ""
+                            endpointUrl = baseUrl
+                            endpointModel = model
+                            endpointDsh = dshApi
+                            endpointKeyName = savedKeys.firstOrNull { it.isActive }?.name ?: ""
+                            showEndpointEditor = true
+                        },
+                        onEditEndpoint = { ep ->
+                            editingEndpointId = ep.id
+                            endpointLabel = ep.label
+                            endpointUrl = ep.baseUrl
+                            endpointModel = ep.model
+                            endpointDsh = ep.dshApi
+                            endpointKeyName = ep.keyName
+                            showEndpointEditor = true
+                        },
+                        onDeleteEndpoint = { pendingDeleteEndpointId = it },
                         onOpenModelSheet = {
                             showModels = true
                         },
@@ -1640,6 +1835,11 @@ private fun AgentProviderCard(
     onAddKey: () -> Unit,
     onActivateKey: (String) -> Unit,
     onRemoveKey: (String) -> Unit,
+    customEndpoints: List<CustomEndpoint>,
+    onApplyEndpoint: (CustomEndpoint) -> Unit,
+    onCreateEndpoint: () -> Unit,
+    onEditEndpoint: (CustomEndpoint) -> Unit,
+    onDeleteEndpoint: (String) -> Unit,
     onOpenModelSheet: () -> Unit,
     onDiscover: () -> Unit,
     onValidate: () -> Unit,
@@ -1742,6 +1942,84 @@ private fun AgentProviderCard(
                                 lineHeight = 15.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                            ) {
+                                Column(Modifier.fillMaxWidth()) {
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            stringResource(R.string.agent_endpoints),
+                                            Modifier.weight(1f),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        Text(
+                                            stringResource(R.string.agent_endpoint_new),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = PocketOrange,
+                                            modifier = Modifier.clickable(onClick = onCreateEndpoint).padding(4.dp),
+                                        )
+                                    }
+                                    if (customEndpoints.isEmpty()) {
+                                        Text(
+                                            stringResource(R.string.agent_endpoint_empty),
+                                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    customEndpoints.forEach { ep ->
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Column(
+                                                Modifier
+                                                    .weight(1f)
+                                                    .clickable { onApplyEndpoint(ep) }
+                                                    .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                                            ) {
+                                                Text(
+                                                    ep.label,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                Text(
+                                                    listOf(ep.baseUrl, ep.model).filter(String::isNotBlank).joinToString(" · "),
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                            IconButton(onClick = { onEditEndpoint(ep) }) {
+                                                Icon(
+                                                    Icons.Default.Edit,
+                                                    stringResource(R.string.agent_endpoint_title),
+                                                    modifier = Modifier.size(17.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                            IconButton(onClick = { onDeleteEndpoint(ep.id) }) {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    stringResource(R.string.agent_endpoint_delete),
+                                                    modifier = Modifier.size(17.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                         OutlinedTextField(
                             value = baseUrl,
