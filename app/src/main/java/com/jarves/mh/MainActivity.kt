@@ -1,10 +1,14 @@
 package com.jarves.mh
 
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.core.app.RemoteInput
 import androidx.lifecycle.ViewModelProvider
@@ -26,6 +30,17 @@ class MainActivity : ComponentActivity() {
         handleAsk(intent)
         setContent {
             val state by viewModel.state.collectAsStateWithLifecycle()
+            val screenShareLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.StartActivityForResult(),
+            ) { result ->
+                viewModel.onScreenShareConsent(result.resultCode, result.data)
+            }
+            LaunchedEffect(state.screenShareConsentRequest) {
+                if (state.screenShareConsentRequest != null) {
+                    val mpm = getSystemService(MediaProjectionManager::class.java)
+                    screenShareLauncher.launch(mpm.createScreenCaptureIntent())
+                }
+            }
             PocketTheme(themeMode = state.themeMode) {
                 PocketDevApp(viewModel)
             }

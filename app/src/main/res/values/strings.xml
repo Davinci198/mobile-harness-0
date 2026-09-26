@@ -719,4 +719,8 @@
     <string name="keepalive_text">Running in the background — sessions stay alive.</string>
     <string name="widget_ask_hint">Tap to open the chat</string>
     <string name="notif_ask_input">Type a message</string>
+    <string name="chat_screen_share">Share screen</string>
+    <string name="notif_screen_share_title">Screen sharing</string>
+    <string name="screen_share_stop">Stop sharing</string>
+    <string name="notif_screen_share_text">The agent can see your screen.</string>
 </resources>
