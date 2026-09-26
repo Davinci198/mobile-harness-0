@@ -110,6 +110,7 @@ import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Preview
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
@@ -380,6 +381,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onOpenAttachment = viewModel::openChatAttachment,
             onBuildAndRunAndroid = viewModel::buildAndRunAndroidApp,
             onConsumeAskPrefill = viewModel::consumeAskPrefill,
+            onToggleScreenShare = viewModel::toggleScreenShare,
         )
         else -> RootScreenHost(state, viewModel, projectsListState)
     }
@@ -3886,6 +3888,7 @@ private fun WorkspaceScreen(
     onOpenAttachment: (ChatAttachment) -> Unit,
     onBuildAndRunAndroid: () -> Unit,
     onConsumeAskPrefill: () -> Unit,
+    onToggleScreenShare: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
@@ -4120,6 +4123,8 @@ private fun WorkspaceScreen(
                     },
                     askPrefill = state.askPrefill,
                     onAskPrefillConsumed = onConsumeAskPrefill,
+                    screenShareActive = state.screenShareActive,
+                    onToggleScreenShare = onToggleScreenShare,
                 )
                 WorkspaceTab.FILES -> FilesTab(
                     files = state.workspaceFiles,
@@ -4514,6 +4519,8 @@ private fun ChatTab(
     onContinueHere: () -> Unit = {},
     askPrefill: String? = null,
     onAskPrefillConsumed: () -> Unit = {},
+    screenShareActive: Boolean = false,
+    onToggleScreenShare: () -> Unit = {},
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -4713,6 +4720,18 @@ private fun ChatTab(
                                 },
                                 onListeningChange = { micListening = it },
                                 modifier = Modifier.size(40.dp),
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onToggleScreenShare,
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ScreenShare,
+                                contentDescription = stringResource(R.string.chat_screen_share),
+                                modifier = Modifier.size(20.dp),
+                                tint = if (screenShareActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
 

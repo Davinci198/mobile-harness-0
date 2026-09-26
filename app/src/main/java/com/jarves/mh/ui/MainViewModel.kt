@@ -1,5 +1,6 @@
 package com.jarves.mh.ui
 
+import android.app.Activity
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
@@ -63,6 +64,7 @@ import com.jarves.mh.runtime.RuntimeSetupController
 import com.jarves.mh.runtime.RuntimeSetupService
 import com.jarves.mh.runtime.RuntimeSetupSnapshot
 import com.jarves.mh.runtime.RuntimeSetupStatus
+import com.jarves.mh.runtime.ScreenShareService
 import com.jarves.mh.runtime.supportsArm64Runtime
 import com.jarves.mh.runtime.AndroidAppInstaller
 import com.jarves.mh.update.AppUpdateInfo
@@ -213,6 +215,10 @@ data class AppUiState(
     val toastMessage: String? = null,
     /** One-shot "ask" request for the chat input: non-null focuses it (text pre-fills when not blank). */
     val askPrefill: String? = null,
+    /** Bumped to ask MainActivity to launch the system screen-capture consent dialog. */
+    val screenShareConsentRequest: Long? = null,
+    /** Live screen feed is being captured into the active workspace. */
+    val screenShareActive: Boolean = false,
     val projectTerminalLines: List<TerminalOutputLine> = emptyList(),
     val projectTerminalLiveOutput: String = "",
     val projectTerminalRunning: Boolean = false,
@@ -369,6 +375,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
         reloadModelScanPrefs()
+        viewModelScope.launch {
+            ScreenShareService.running.collect { on ->
+                _state.update { it.copy(screenShareActive = on) }
+            }
+        }
         viewModelScope.launch { refreshGitHubConnection() }
         RuntimeSetupController.restore(application)
         viewModelScope.launch(Dispatchers.IO) {
@@ -2103,6 +2114,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun consumeAskPrefill() = _state.update { it.copy(askPrefill = null) }
 
+    fun toggleScreenShare() {
+        if (_state.value.screenShareActive) {
+            ScreenShareService.stop(getApplication<Application>())
+        } else {
+            _state.update { it.copy(screenShareConsentRequest = (it.screenShareConsentRequest ?: 0L) + 1) }
+        }
+    }
+
+    fun onScreenShareConsent(resultCode: Int, data: Intent?) {
+        _state.update { it.copy(screenShareConsentRequest = null) }
+        if (resultCode != Activity.RESULT_OK || data == null) return
+        val project = _state.value.activeProject
+        if (project == null) {
+            _state.update { it.copy(toastMessage = s(R.string.project_pend_open)) }
+            return
+        }
+        val dir = File(getApplication<Application>().filesDir, "workspaces/${project.id}/${ScreenShareService.OUTPUT_SUBDIR}")
+        ScreenShareService.start(getApplication<Application>(), data, dir.absolutePath)
+    }
+
     fun openProject(project: Project) {
         val current = _state.value
         if (current.activeProject?.id == project.id) {
@@ -3316,7 +3347,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(toastMessage = s(R.string.dsh_no_subscription)) }
             return false
         }
-        val attachments = state.value.pendingAttachments
+        val attachments = buildList {
+            addAll(state.value.pendingAttachments)
+            if (_state.value.screenShareActive) {
+                val live = File(getApplication<Application>().filesDir, "workspaces/${project.id}/${ScreenShareService.OUTPUT_SUBDIR}/${ScreenShareService.OUTPUT_FILE}")
+                if (live.isFile && live.length() > 0) {
+                    add(
+                        ChatAttachment(
+                            displayName = ScreenShareService.OUTPUT_FILE,
+                            relativePath = "${ScreenShareService.OUTPUT_SUBDIR}/${ScreenShareService.OUTPUT_FILE}",
+                            mimeType = "image/jpeg",
+                            sizeBytes = live.length(),
+                        )
+                    )
+                }
+            }
+        }
         if ((prompt.isBlank() && attachments.isEmpty()) || state.value.isRunning) return false
         val requestText = prompt.trim().ifBlank { "Please review the attached files." }
         updateActiveChatTitle(requestText)

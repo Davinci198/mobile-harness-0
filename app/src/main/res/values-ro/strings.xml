@@ -719,4 +719,8 @@
     <string name="keepalive_text">Rulează în fundal — sesiunile rămân active.</string>
     <string name="widget_ask_hint">Apasă pentru a deschide chatul</string>
     <string name="notif_ask_input">Scrie un mesaj</string>
+    <string name="chat_screen_share">Partajează ecranul</string>
+    <string name="notif_screen_share_title">Partajare ecran</string>
+    <string name="screen_share_stop">Oprește partajarea</string>
+    <string name="notif_screen_share_text">Agentul îți poate vedea ecranul.</string>
 </resources>
