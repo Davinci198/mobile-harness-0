@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="ask"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/ask_short"
+        android:shortcutLongLabel="@string/ask_anything">
+        <intent
+            android:action="com.jarves.mh.ASK"
+            android:targetPackage="com.jarves.mh"
+            android:targetClass="com.jarves.mh.MainActivity" />
+    </shortcut>
+</shortcuts>

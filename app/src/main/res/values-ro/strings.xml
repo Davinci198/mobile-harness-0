@@ -714,4 +714,7 @@
     <string name="voice_listening_hint">Se ascultă…</string>
     <string name="voice_permission_needed">Permisiunea microfonului este necesară pentru intrarea vocală.</string>
     <string name="voice_recognizer_unavailable">Intrarea vocală nu este disponibilă pe acest dispozitiv.</string>
+    <string name="ask_anything">Întreabă orice</string>
+    <string name="ask_short">Întreabă</string>
+    <string name="keepalive_text">Rulează în fundal — sesiunile rămân active.</string>
 </resources>
