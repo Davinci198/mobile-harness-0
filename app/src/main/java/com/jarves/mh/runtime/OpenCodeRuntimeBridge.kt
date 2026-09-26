@@ -37,9 +37,6 @@ internal class OpenCodeRuntimeBridge(
         add("--auto")
         // Emit reasoning parts; without this the JSONL stream has no thinking blocks.
         add("--thinking")
-        // NVIDIA's catalog id already embeds `openai/…`; force the `nvidia`
-        // namespace so gateway sessions resolve `nvidia/openai/gpt-oss-20b`
-        // instead of the non-existent `openai/gpt-oss-20b` route.
         val prefix = when {
             provider.kind == ProviderKind.NVIDIA_NIM -> "nvidia"
             gatewayUrl != null -> "openai"
@@ -50,10 +47,11 @@ internal class OpenCodeRuntimeBridge(
             add("--model")
             if (provider.kind == ProviderKind.NVIDIA_NIM) {
                 // `--model` is `provider/modelKey` where modelKey must match the
-                // OPENCODE_CONFIG_CONTENT models map. NVIDIA's chat API rejects
-                // bare ids (HTTP 404) and requires the full `nvidia/…` body id,
-                // so the models map key keeps that prefix and the CLI gets
-                // `nvidia/<key>` (e.g. nvidia/nvidia/nemotron-…).
+                // OPENCODE_CONFIG_CONTENT models map; modelKey doubles as the chat
+                // body id, so it must be the exact /v1/models catalog id (see
+                // nvidiaApiModelId). The CLI gets `nvidia/<key>` — e.g.
+                // nvidia/nvidia/nemotron-… for an nvidia/… key, or
+                // nvidia/google/gemma-4-31b-it for a google/… key.
                 add("nvidia/${nvidiaApiModelId(model)}")
             } else {
                 add(if (prefix != null && !model.startsWith("$prefix/")) "$prefix/$model" else model)
@@ -87,8 +85,8 @@ internal class OpenCodeRuntimeBridge(
                     // baseURL, env-resolved key, the one model for this turn, and
                     // disable workspace snapshots. Catalog fetch is already off above,
                     // so the explicit `models` map is what `--model nvidia/…` resolves.
-                    // The key must be the full NVIDIA body id (`nvidia/…`); stripping
-                    // the prefix makes chat/completions answer HTTP 404.
+                    // The key must be the exact /v1/models catalog id — bare ids and
+                    // synthetic `nvidia/<vendor>/…` prefixes answer HTTP 404.
                     val modelId = nvidiaApiModelId(provider.model.ifBlank { provider.kind.defaultModel })
                     environment["OPENCODE_CONFIG_CONTENT"] = buildString {
                         append("""{"${'$'}schema":"https://opencode.ai/config.json","snapshot":false,""")
@@ -124,7 +122,8 @@ internal class OpenCodeRuntimeBridge(
                 environment["NVIDIA_API_KEY"] = secret
                 // Direct (no proxy): still pin the model + baseURL offline so a
                 // disabled catalog fetch cannot leave `--model nvidia/…` unresolved.
-                // Keep the full `nvidia/…` body id — bare ids 404 on NVIDIA's API.
+                // Key = exact /v1/models catalog id — bare ids and synthetic
+                // `nvidia/<vendor>/…` prefixes answer HTTP 404.
                 val modelId = nvidiaApiModelId(provider.model.ifBlank { provider.kind.defaultModel })
                 val base = provider.resolvedBaseUrl.ifBlank { "https://integrate.api.nvidia.com/v1" }
                 environment["OPENCODE_CONFIG_CONTENT"] = buildString {
@@ -166,6 +165,10 @@ internal class OpenCodeRuntimeBridge(
     }
 }
 
-/** Full id NVIDIA's `/v1/chat/completions` accepts (prefix required). */
+/** Id accepted by NVIDIA's `/v1/chat/completions`: the exact `/v1/models` catalog id. */
 internal fun nvidiaApiModelId(model: String): String =
-    if (model.startsWith("nvidia/")) model else "nvidia/$model"
+    // chat/completions must receive the exact /v1/models catalog id:
+    // `nvidia/nemotron-3-super-120b-a12b` and `google/gemma-4-31b-it` are both
+    // valid as-is, while bare keys (`nemotron-3-super-120b-a12b`) 404 without
+    // the nvidia/ namespace and synthetic prefixes (`nvidia/google/…`) 404 too.
+    if ("/" in model) model else "nvidia/$model"
