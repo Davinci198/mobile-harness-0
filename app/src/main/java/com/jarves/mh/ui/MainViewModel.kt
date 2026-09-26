@@ -3305,19 +3305,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return clean.ifBlank { "attachment-${UUID.randomUUID().toString().take(8)}" }
     }
 
-    fun sendPrompt(prompt: String) {
-        val project = state.value.activeProject ?: return
+    fun sendPrompt(prompt: String): Boolean {
+        val project = state.value.activeProject ?: return false
         if (_state.value.agentKind == AgentKind.ANTIGRAVITY &&
             _state.value.antigravityAuth.status != AntigravityAuthStatus.SIGNED_IN) {
             _state.update { it.copy(toastMessage = s(R.string.ag_settings_first)) }
-            return
+            return false
         }
         if (_state.value.agentKind == AgentKind.DEEPSEEK_HARNESS && _state.value.provider.kind == ProviderKind.CLAUDE) {
             _state.update { it.copy(toastMessage = s(R.string.dsh_no_subscription)) }
-            return
+            return false
         }
         val attachments = state.value.pendingAttachments
-        if ((prompt.isBlank() && attachments.isEmpty()) || state.value.isRunning) return
+        if ((prompt.isBlank() && attachments.isEmpty()) || state.value.isRunning) return false
         val requestText = prompt.trim().ifBlank { "Please review the attached files." }
         updateActiveChatTitle(requestText)
         _state.update {
@@ -3370,6 +3370,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         }
+        return true
     }
 
     fun answerApproval(approved: Boolean) {
