@@ -18,8 +18,8 @@ class ReplySpeechTest {
         assertFalse(prepared.contains("kotlin"))
         assertFalse(prepared.contains("val x"))
         assertFalse(prepared.contains("`"))
-        assertTrue(prepared.contains("Run npm test first."))
-        assertTrue(prepared.contains("Then commit."))
+        assertFalse(prepared.contains("npm test"))
+        assertEquals("Run first. Then commit.", prepared)
     }
 
     @Test
