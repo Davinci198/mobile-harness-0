@@ -703,4 +703,15 @@
     <string name="connected_as_at">Connected as @%1$s</string>
     <string name="mvm_browser_copy_signin">Could not open the browser. Copy the sign-in URL instead.</string>
     <string name="mvm_browser_copy">Could not open the browser. Copy the URL instead.</string>
+    <string name="settings_voice_title">Voice</string>
+    <string name="settings_voice_subtitle">Microphone and spoken replies</string>
+    <string name="voice_mic_title">Microphone button</string>
+    <string name="voice_mic_desc">Show a microphone in the chat input. It listens only while you tap it, and it never listens in the background.</string>
+    <string name="voice_speak_title">Speak replies</string>
+    <string name="voice_speak_desc">Read the assistant\'s reply aloud when a task finishes.</string>
+    <string name="voice_mic_cd">Voice input</string>
+    <string name="voice_mic_listening">Stop voice input</string>
+    <string name="voice_listening_hint">Listening…</string>
+    <string name="voice_permission_needed">Microphone permission is required for voice input.</string>
+    <string name="voice_recognizer_unavailable">Voice input is not available on this device.</string>
 </resources>

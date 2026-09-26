@@ -159,6 +159,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -184,6 +185,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.model.ActivityItem
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChangeItem
@@ -4510,6 +4512,18 @@ private fun ChatTab(
     }
     var prompt by rememberSaveable { mutableStateOf("") }
     val chatScope = rememberCoroutineScope()
+    val voiceContext = LocalContext.current
+    val voicePrefs = remember { AppPreferences(voiceContext) }
+    val replySpeaker = rememberReplySpeaker()
+    var micListening by remember { mutableStateOf(false) }
+    val latestMessages by rememberUpdatedState(messages)
+    var wasTaskRunning by remember { mutableStateOf(isRunning) }
+    LaunchedEffect(isRunning) {
+        if (wasTaskRunning && !isRunning && voicePrefs.voiceSpeakEnabled) {
+            latestMessages.lastOrNull { !it.fromUser }?.let { replySpeaker.speak(it.text) }
+        }
+        wasTaskRunning = isRunning
+    }
     // True while the newest item (message, live panel, or approval card) is on screen.
     val readerAtBottom by remember {
         derivedStateOf {
@@ -4666,6 +4680,16 @@ private fun ChatTab(
                             )
                         }
 
+                        if (voicePrefs.voiceMicEnabled) {
+                            VoiceMicButton(
+                                onResult = { heard ->
+                                    prompt = if (prompt.isEmpty()) heard else "$prompt $heard"
+                                },
+                                onListeningChange = { micListening = it },
+                                modifier = Modifier.size(40.dp),
+                            )
+                        }
+
                         BasicTextField(
                             value = prompt,
                             onValueChange = { prompt = it },
@@ -4684,8 +4708,8 @@ private fun ChatTab(
                                 Box(contentAlignment = Alignment.CenterStart) {
                                     if (prompt.isEmpty()) {
                                         Text(
-                                            text = stringResource(R.string.chat_message_hint, agentKind.title),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            text = if (micListening) stringResource(R.string.voice_listening_hint) else stringResource(R.string.chat_message_hint, agentKind.title),
+                                            color = if (micListening) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                             fontSize = 15.sp,
                                         )
                                     }

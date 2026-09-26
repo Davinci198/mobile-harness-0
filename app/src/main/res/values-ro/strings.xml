@@ -703,4 +703,15 @@
     <string name="connected_as_at">Conectat ca @%1$s</string>
     <string name="mvm_browser_copy_signin">Nu s-a putut deschide browserul. Copiază în schimb URL-ul de autentificare.</string>
     <string name="mvm_browser_copy">Nu s-a putut deschide browserul. Copiază în schimb URL-ul.</string>
+    <string name="settings_voice_title">Voce</string>
+    <string name="settings_voice_subtitle">Microfon și răspunsuri rostite</string>
+    <string name="voice_mic_title">Buton de microfon</string>
+    <string name="voice_mic_desc">Afișează un microfon în caseta de chat. Ascultă doar cât apeși pe el și nu ascultă niciodată în fundal.</string>
+    <string name="voice_speak_title">Răspunsuri rostite</string>
+    <string name="voice_speak_desc">Citește cu voce tare răspunsul asistentului când se termină o sarcină.</string>
+    <string name="voice_mic_cd">Intrare vocală</string>
+    <string name="voice_mic_listening">Oprește intrarea vocală</string>
+    <string name="voice_listening_hint">Se ascultă…</string>
+    <string name="voice_permission_needed">Permisiunea microfonului este necesară pentru intrarea vocală.</string>
+    <string name="voice_recognizer_unavailable">Intrarea vocală nu este disponibilă pe acest dispozitiv.</string>
 </resources>
