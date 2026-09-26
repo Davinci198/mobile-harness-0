@@ -21,10 +21,20 @@ class OpenCodeNvidiaModelIdTest {
     }
 
     @Test
-    fun `preserves other vendor prefixes for full body id`() {
+    fun `keeps namespaced catalog ids verbatim`() {
+        // Live-verified 2026-09-26: chat/completions answers 200 for the exact
+        // /v1/models id and 404 for a synthetic nvidia/ prefix.
         assertEquals(
-            "nvidia/meta/muse-glimmer-30b",
+            "meta/muse-glimmer-30b",
             nvidiaApiModelId("meta/muse-glimmer-30b"),
+        )
+        assertEquals(
+            "google/gemma-4-31b-it",
+            nvidiaApiModelId("google/gemma-4-31b-it"),
+        )
+        assertEquals(
+            "openai/gpt-oss-20b",
+            nvidiaApiModelId("openai/gpt-oss-20b"),
         )
     }
 
