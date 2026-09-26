@@ -77,5 +77,16 @@
         <receiver
             android:name=".runtime.AndroidAppInstallReceiver"
             android:exported="false" />
+        <receiver
+            android:name=".widget.AskWidgetProvider"
+            android:exported="false"
+            android:label="@string/ask_anything">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_ask_info" />
+        </receiver>
     </application>
 </manifest>
