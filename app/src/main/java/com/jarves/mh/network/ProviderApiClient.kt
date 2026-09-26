@@ -1,6 +1,7 @@
 package com.jarves.mh.network
 
 import com.jarves.mh.model.ProviderProtocol
+import com.jarves.mh.model.dshApiForProtocol
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -89,6 +90,16 @@ sealed interface ConnectionValidation {
     ) : ConnectionValidation
 }
 
+/**
+ * Result of probing a custom endpoint: the detected wire protocol
+ * (null when detection failed) plus the model list found on the way.
+ */
+data class EndpointDetection(
+    val dshApi: String?,
+    val models: List<DiscoveredModel>,
+    val failure: String? = null,
+)
+
 class ProviderApiClient {
     suspend fun discoverModels(
         baseUrl: String,
@@ -133,6 +144,65 @@ class ProviderApiClient {
             lastProviderMessage,
         )
     }
+
+    /**
+     * Detect a custom gateway's wire protocol and model list without user input.
+     * Fetches the catalog first, then pings the first model against each
+     * candidate chat endpoint; the first path that answers (anything but
+     * 404/405) proves which wire format the gateway speaks.
+     */
+    suspend fun detectEndpoint(baseUrl: String, apiKey: String): EndpointDetection = withContext(Dispatchers.IO) {
+        val cleanBaseUrl = normalizeBaseUrl(baseUrl)
+        if (cleanBaseUrl.isBlank()) {
+            return@withContext EndpointDetection(null, emptyList(), "Enter a base URL first.")
+        }
+        val cleanKey = sanitizeApiKey(apiKey)
+        var failure: String? = null
+        var models: List<DiscoveredModel> = emptyList()
+        for (protocol in listOf(ProviderProtocol.OPENAI_CHAT, ProviderProtocol.ANTHROPIC_GATEWAY)) {
+            when (val found = discoverModels(cleanBaseUrl, cleanKey, protocol)) {
+                is ModelDiscoveryResult.Success -> {
+                    models = found.models
+                    failure = null
+                    break
+                }
+                is ModelDiscoveryResult.Failure -> if (failure == null) failure = found.message
+            }
+        }
+        val modelId = models.firstOrNull()?.id
+            ?: return@withContext EndpointDetection(
+                null,
+                models,
+                failure ?: "This provider did not expose a model list. You can enter a custom model name.",
+            )
+        for (protocol in listOf(
+            ProviderProtocol.OPENAI_CHAT,
+            ProviderProtocol.OPENAI_RESPONSES,
+            ProviderProtocol.ANTHROPIC_GATEWAY,
+        )) {
+            for (endpoint in messagesEndpointCandidates(cleanBaseUrl, protocol)) {
+                val response = request(
+                    endpoint,
+                    "POST",
+                    cleanKey,
+                    validationBody(modelId, protocol),
+                    protocol,
+                    connectTimeoutMs = 6_000,
+                    readTimeoutMs = 12_000,
+                )
+                if (probeIndicatesProtocol(response.code)) {
+                    return@withContext EndpointDetection(dshApiForProtocol(protocol), models)
+                }
+            }
+        }
+        EndpointDetection(null, models, "No gateway endpoint answered. Check the base URL, or pick the protocol manually.")
+    }
+
+    /**
+     * A live path answers with anything but 404/405; code 0 means the request
+     * never reached a server, so the probe proves nothing.
+     */
+    internal fun probeIndicatesProtocol(code: Int): Boolean = code > 0 && code !in 404..405
 
     /**
      * Probe each model with a tiny completion (same idea as the external

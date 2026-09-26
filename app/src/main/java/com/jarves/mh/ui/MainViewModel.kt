@@ -37,6 +37,7 @@ import com.jarves.mh.model.generateQuickChatIdentity
 import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
+import com.jarves.mh.network.EndpointDetection
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.network.ModelHealth
 import com.jarves.mh.network.ModelHealthStatus
@@ -1008,6 +1009,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun getSavedApiKey(kind: ProviderKind): String = vault.get(kind.name).orEmpty()
 
     fun getSavedApiKeys(kind: ProviderKind): List<ApiKeyInfo> = vault.list(kind.name)
+
+    /**
+     * Probes a custom endpoint URL with the key the endpoint names (or the
+     * active one) to detect its wire protocol and model list automatically.
+     */
+    suspend fun detectCustomEndpoint(baseUrl: String, keyName: String): EndpointDetection {
+        val scopeId = ProviderKind.CUSTOM.name
+        val secret = if (keyName.isBlank()) {
+            vault.get(scopeId)
+        } else {
+            vault.credentials(scopeId).firstOrNull { it.name == keyName }?.secret ?: vault.get(scopeId)
+        }
+        return providerApi.detectEndpoint(baseUrl, secret.orEmpty())
+    }
 
     fun addApiKey(kind: ProviderKind, name: String, secret: String): List<ApiKeyInfo> {
         vault.add(kind.name, name, secret)

@@ -166,6 +166,9 @@
     <string name="agent_endpoint_saved">Endpoint salvat</string>
     <string name="agent_endpoint_applied">%1$s aplicat</string>
     <string name="agent_endpoint_current_key">Cheia curentă</string>
+    <string name="agent_endpoint_detecting">Detectez protocolul gateway și modelele…</string>
+    <string name="agent_endpoint_detect_fail">Detecția automată a eșuat. Alege protocolul gateway mai jos, apoi salvează.</string>
+    <string name="agent_endpoint_saved_detected">Salvat · detectat %1$s · %2$d modele</string>
     <string name="agent_model_access">Model și acces</string>
     <string name="agent_discovering">Se descoperă…</string>
     <string name="agent_discover_models">Descoperă modele</string>

@@ -114,6 +114,7 @@ import com.jarves.mh.model.inferredDshApiForUrl
 import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
+import com.jarves.mh.network.EndpointDetection
 import com.jarves.mh.network.EndpointModelCatalog
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.runtime.AntigravityAuthStatus
@@ -189,6 +190,9 @@ fun AgentScreen(
     onRemoveApiKey: (ProviderKind, String) -> List<ApiKeyInfo>,
     onUpsertCustomEndpoint: (CustomEndpoint) -> Unit = {},
     onDeleteCustomEndpoint: (String) -> Unit = {},
+    onDetectEndpoint: suspend (String, String) -> EndpointDetection = { _, _ ->
+        EndpointDetection(null, emptyList(), null)
+    },
     onSelectAgent: (AgentKind) -> Unit = {},
     onInstallAgent: (AgentKind) -> Unit = {},
     onCheckAgentUpdates: () -> Unit = {},
@@ -246,6 +250,9 @@ fun AgentScreen(
     var endpointModel by rememberSaveable { mutableStateOf("") }
     var endpointDsh by rememberSaveable { mutableStateOf("") }
     var endpointKeyName by rememberSaveable { mutableStateOf("") }
+    var endpointDetecting by remember { mutableStateOf(false) }
+    var endpointDetectFailed by rememberSaveable { mutableStateOf(false) }
+    var endpointDetectNote by rememberSaveable { mutableStateOf("") }
     var pendingDeleteEndpointId by rememberSaveable { mutableStateOf("") }
 
     val orderedAgents = remember(state.primaryAgentKind) {
@@ -480,9 +487,38 @@ fun AgentScreen(
         }
     }
 
+    fun persistEndpoint(statusRes: Int, vararg args: Any) {
+        val endpoint = if (editingEndpointId.isBlank()) {
+            CustomEndpoint(
+                label = endpointLabel.trim(),
+                baseUrl = endpointUrl.trim(),
+                model = endpointModel.trim(),
+                dshApi = endpointDsh,
+                keyName = endpointKeyName,
+            )
+        } else {
+            CustomEndpoint(
+                id = editingEndpointId,
+                label = endpointLabel.trim(),
+                baseUrl = endpointUrl.trim(),
+                model = endpointModel.trim(),
+                dshApi = endpointDsh,
+                keyName = endpointKeyName,
+            )
+        }
+        onUpsertCustomEndpoint(endpoint)
+        showEndpointEditor = false
+        status = if (args.isEmpty()) {
+            context.getString(statusRes)
+        } else {
+            context.getString(statusRes, *args)
+        }
+        statusOk = true
+    }
+
     if (showEndpointEditor) {
         AlertDialog(
-            onDismissRequest = { showEndpointEditor = false },
+            onDismissRequest = { if (!endpointDetecting) showEndpointEditor = false },
             title = { Text(stringResource(R.string.agent_endpoint_title)) },
             text = {
                 Column(
@@ -499,7 +535,15 @@ fun AgentScreen(
                     )
                     OutlinedTextField(
                         value = endpointUrl,
-                        onValueChange = { endpointUrl = it },
+                        onValueChange = {
+                            endpointUrl = it
+                            // A new URL invalidates the previous probe result and any
+                            // model/protocol inherited from the old endpoint.
+                            endpointDetectFailed = false
+                            endpointDetectNote = ""
+                            endpointModel = ""
+                            endpointDsh = ""
+                        },
                         label = { Text(stringResource(R.string.settings_base_url)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
@@ -513,21 +557,43 @@ fun AgentScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                     )
-                    Text(
-                        stringResource(R.string.settings_gateway_protocol),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)) {
-                        Column {
-                            listOf("anthropic-messages", "openai-completions", "openai-responses").forEach { option ->
-                                Row(
-                                    Modifier.fillMaxWidth().clickable { endpointDsh = option }.padding(horizontal = 12.dp, vertical = 9.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(option, Modifier.weight(1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                                    AgentSelectionDot(endpointDsh == option)
+                    if (endpointDetecting) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text(
+                            stringResource(R.string.agent_endpoint_detecting),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (endpointDetectFailed) {
+                        Text(
+                            stringResource(R.string.agent_endpoint_detect_fail),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        if (endpointDetectNote.isNotBlank()) {
+                            Text(
+                                endpointDetectNote,
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            stringResource(R.string.settings_gateway_protocol),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)) {
+                            Column {
+                                listOf("anthropic-messages", "openai-completions", "openai-responses").forEach { option ->
+                                    Row(
+                                        Modifier.fillMaxWidth().clickable { endpointDsh = option }.padding(horizontal = 12.dp, vertical = 9.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(option, Modifier.weight(1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                        AgentSelectionDot(endpointDsh == option)
+                                    }
                                 }
                             }
                         }
@@ -568,36 +634,44 @@ fun AgentScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val endpoint = if (editingEndpointId.isBlank()) {
-                            CustomEndpoint(
-                                label = endpointLabel.trim(),
-                                baseUrl = endpointUrl.trim(),
-                                model = endpointModel.trim(),
-                                dshApi = endpointDsh,
-                                keyName = endpointKeyName,
-                            )
-                        } else {
-                            CustomEndpoint(
-                                id = editingEndpointId,
-                                label = endpointLabel.trim(),
-                                baseUrl = endpointUrl.trim(),
-                                model = endpointModel.trim(),
-                                dshApi = endpointDsh,
-                                keyName = endpointKeyName,
-                            )
+                        if (endpointDetectFailed) {
+                            persistEndpoint(R.string.agent_endpoint_saved)
+                        } else if (!endpointDetecting) {
+                            endpointDetecting = true
+                            scope.launch {
+                                val detected = onDetectEndpoint(endpointUrl.trim(), endpointKeyName)
+                                endpointDetecting = false
+                                if (detected.dshApi != null) {
+                                    endpointDsh = detected.dshApi
+                                    if (endpointModel.isBlank()) {
+                                        endpointModel = detected.models.firstOrNull()?.id.orEmpty()
+                                    }
+                                    persistEndpoint(
+                                        R.string.agent_endpoint_saved_detected,
+                                        detected.dshApi,
+                                        detected.models.size,
+                                    )
+                                } else {
+                                    endpointDetectFailed = true
+                                    endpointDetectNote = detected.failure.orEmpty()
+                                    if (endpointDsh.isBlank()) endpointDsh = inferredDshApiForUrl(endpointUrl)
+                                    if (endpointModel.isBlank()) {
+                                        endpointModel = detected.models.firstOrNull()?.id.orEmpty()
+                                    }
+                                }
+                            }
                         }
-                        onUpsertCustomEndpoint(endpoint)
-                        showEndpointEditor = false
-                        status = context.getString(R.string.agent_endpoint_saved)
-                        statusOk = true
                     },
-                    enabled = endpointLabel.isNotBlank() && endpointUrl.isNotBlank(),
+                    enabled = endpointLabel.isNotBlank() && endpointUrl.isNotBlank() && !endpointDetecting,
                 ) {
                     Text(stringResource(R.string.proj_save))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showEndpointEditor = false }) {
+                TextButton(
+                    onClick = { showEndpointEditor = false },
+                    enabled = !endpointDetecting,
+                ) {
                     Text(stringResource(R.string.settings_cancel))
                 }
             },
@@ -1380,6 +1454,8 @@ fun AgentScreen(
                             endpointModel = model
                             endpointDsh = dshApi
                             endpointKeyName = savedKeys.firstOrNull { it.isActive }?.name ?: ""
+                            endpointDetectFailed = false
+                            endpointDetectNote = ""
                             showEndpointEditor = true
                         },
                         onEditEndpoint = { ep ->
@@ -1389,6 +1465,8 @@ fun AgentScreen(
                             endpointModel = ep.model
                             endpointDsh = ep.dshApi
                             endpointKeyName = ep.keyName
+                            endpointDetectFailed = false
+                            endpointDetectNote = ""
                             showEndpointEditor = true
                         },
                         onDeleteEndpoint = { pendingDeleteEndpointId = it },
