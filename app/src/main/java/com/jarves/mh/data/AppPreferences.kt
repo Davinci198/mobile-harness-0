@@ -5,6 +5,9 @@ import com.jarves.mh.R
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ChatAttachment
+import com.jarves.mh.model.CustomEndpoint
+import com.jarves.mh.model.decodeCustomEndpoints
+import com.jarves.mh.model.encodeCustomEndpoints
 import com.jarves.mh.model.Project
 import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProjectChat
@@ -99,6 +102,13 @@ class AppPreferences(private val context: Context) {
 
     fun loadAgentConversation(agent: AgentKind, projectId: String, chatId: String): String? =
         preferences.getString(agentConversationKey(agent, projectId, chatId), null)
+
+    fun loadCustomEndpoints(): List<CustomEndpoint> =
+        decodeCustomEndpoints(preferences.getString("custom_endpoints", null))
+
+    fun saveCustomEndpoints(endpoints: List<CustomEndpoint>) {
+        preferences.edit().putString("custom_endpoints", encodeCustomEndpoints(endpoints)).apply()
+    }
 
     fun clearAgentConversations(agent: AgentKind) {
         val stable = agent.stableId

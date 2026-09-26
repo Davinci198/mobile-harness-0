@@ -22,6 +22,7 @@ import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChangeItem
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ChatAttachment
+import com.jarves.mh.model.CustomEndpoint
 import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.Project
 import com.jarves.mh.model.ProjectKind
@@ -163,6 +164,7 @@ data class AppUiState(
     val backgroundSetupComplete: Boolean = false,
     val provider: ProviderProfile = ProviderProfile(ProviderKind.ANTHROPIC),
     val activeApiKeyName: String? = null,
+    val customEndpoints: List<CustomEndpoint> = emptyList(),
     val themeMode: com.jarves.mh.ui.theme.AppThemeMode = com.jarves.mh.ui.theme.AppThemeMode.DARK,
     val apiPingStatus: ApiPingStatus = ApiPingStatus.IDLE,
     val apiPingMessage: String? = null,
@@ -348,6 +350,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             provider = preferences.loadProvider(vault, initialAgentKind),
             activeApiKeyName = vault.list(preferences.loadProvider(vault, initialAgentKind).kind.name)
                 .firstOrNull(ApiKeyInfo::isActive)?.name,
+            customEndpoints = preferences.loadCustomEndpoints(),
             antigravityAuth = AntigravityAuthState(
                 status = if (preferences.antigravitySignedIn) AntigravityAuthStatus.SIGNED_IN else AntigravityAuthStatus.SIGNED_OUT,
                 message = preferences.antigravityAccountEmail.takeIf(String::isNotBlank)?.let { s(R.string.connected_as, it) },
@@ -1023,6 +1026,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         vault.remove(kind.name, keyId)
         refreshActiveApiKey(kind)
         return vault.list(kind.name)
+    }
+
+    fun upsertCustomEndpoint(endpoint: CustomEndpoint) {
+        val current = preferences.loadCustomEndpoints()
+        val next = if (current.any { it.id == endpoint.id }) {
+            current.map { if (it.id == endpoint.id) endpoint else it }
+        } else {
+            current + endpoint
+        }
+        preferences.saveCustomEndpoints(next)
+        _state.update { it.copy(customEndpoints = next) }
+    }
+
+    fun deleteCustomEndpoint(id: String) {
+        val next = preferences.loadCustomEndpoints().filterNot { it.id == id }
+        preferences.saveCustomEndpoints(next)
+        _state.update { it.copy(customEndpoints = next) }
     }
 
     private fun refreshActiveApiKey(kind: ProviderKind) {
