@@ -549,6 +549,14 @@ fun AgentScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                     )
+                    OutlinedTextField(
+                        value = endpointModel,
+                        onValueChange = { endpointModel = it },
+                        label = { Text(stringResource(R.string.settings_model)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    )
                     if (endpointDetecting) {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                         Text(
