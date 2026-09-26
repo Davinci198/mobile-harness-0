@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.RemoteInput
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.jarves.mh.MainActivity
@@ -95,6 +96,7 @@ class SessionKeepAliveService : Service() {
             .setContentText(getString(R.string.keepalive_text))
             .setContentIntent(openAppIntent())
             .addAction(0, getString(R.string.ask_anything), askIntent())
+            .addAction(replyAction())
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
@@ -154,6 +156,30 @@ class SessionKeepAliveService : Service() {
         },
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
+
+    /**
+     * Inline-reply action: type a prompt straight from the notification shade.
+     * The PI must be mutable so the system can fill in the typed text.
+     */
+    private fun replyAction(): NotificationCompat.Action {
+        val label = getString(R.string.notif_ask_input)
+        val remoteInput = RemoteInput.Builder(MainActivity.EXTRA_ASK_TEXT)
+            .setLabel(label)
+            .build()
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = MainActivity.ACTION_ASK
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val replyIntent = PendingIntent.getActivity(
+            this,
+            7,
+            intent,
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return NotificationCompat.Action.Builder(0, label, replyIntent)
+            .addRemoteInput(remoteInput)
+            .build()
+    }
 
     companion object {
         private const val KEEP_ALIVE_NOTIFICATION_ID = 43

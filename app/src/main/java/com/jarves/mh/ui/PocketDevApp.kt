@@ -164,6 +164,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -377,6 +379,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onRemoveAttachment = viewModel::removePendingAttachment,
             onOpenAttachment = viewModel::openChatAttachment,
             onBuildAndRunAndroid = viewModel::buildAndRunAndroidApp,
+            onConsumeAskPrefill = viewModel::consumeAskPrefill,
         )
         else -> RootScreenHost(state, viewModel, projectsListState)
     }
@@ -3882,6 +3885,7 @@ private fun WorkspaceScreen(
     onRemoveAttachment: (String) -> Unit,
     onOpenAttachment: (ChatAttachment) -> Unit,
     onBuildAndRunAndroid: () -> Unit,
+    onConsumeAskPrefill: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
@@ -3946,6 +3950,10 @@ private fun WorkspaceScreen(
     }
 
     var selectedTab by rememberSaveable { mutableStateOf(WorkspaceTab.CHAT) }
+    // An ask request must land on the chat tab, wherever the user was.
+    LaunchedEffect(state.askPrefill) {
+        if (state.askPrefill != null) selectedTab = WorkspaceTab.CHAT
+    }
     var showChats by rememberSaveable { mutableStateOf(false) }
     val activeChat = state.projectChats.firstOrNull { it.id == state.activeChatId }
 
@@ -4110,6 +4118,8 @@ private fun WorkspaceScreen(
                         onTerminalOpened()
                         onTerminalPrepare(command)
                     },
+                    askPrefill = state.askPrefill,
+                    onAskPrefillConsumed = onConsumeAskPrefill,
                 )
                 WorkspaceTab.FILES -> FilesTab(
                     files = state.workspaceFiles,
@@ -4502,6 +4512,8 @@ private fun ChatTab(
     readOnly: Boolean = false,
     readOnlyBlocked: Boolean = false,
     onContinueHere: () -> Unit = {},
+    askPrefill: String? = null,
+    onAskPrefillConsumed: () -> Unit = {},
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -4511,6 +4523,13 @@ private fun ChatTab(
         onDispose { view.keepScreenOn = false }
     }
     var prompt by rememberSaveable { mutableStateOf("") }
+    val promptFocus = remember { FocusRequester() }
+    LaunchedEffect(askPrefill) {
+        if (askPrefill == null) return@LaunchedEffect
+        if (askPrefill.isNotBlank()) prompt = askPrefill
+        runCatching { promptFocus.requestFocus() }
+        onAskPrefillConsumed()
+    }
     val chatScope = rememberCoroutineScope()
     val voiceContext = LocalContext.current
     val voicePrefs = remember { AppPreferences(voiceContext) }
@@ -4696,7 +4715,8 @@ private fun ChatTab(
                             modifier = Modifier
                                 .weight(1f)
                                 .padding(horizontal = 4.dp, vertical = 10.dp)
-                                .heightIn(min = 20.dp, max = 130.dp),
+                                .heightIn(min = 20.dp, max = 130.dp)
+                                .focusRequester(promptFocus),
                             textStyle = TextStyle(
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 15.sp,

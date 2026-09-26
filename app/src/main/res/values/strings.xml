@@ -718,4 +718,5 @@
     <string name="ask_short">Ask</string>
     <string name="keepalive_text">Running in the background — sessions stay alive.</string>
     <string name="widget_ask_hint">Tap to open the chat</string>
+    <string name="notif_ask_input">Type a message</string>
 </resources>
