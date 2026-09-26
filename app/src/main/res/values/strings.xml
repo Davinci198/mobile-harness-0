@@ -714,4 +714,7 @@
     <string name="voice_listening_hint">Listening…</string>
     <string name="voice_permission_needed">Microphone permission is required for voice input.</string>
     <string name="voice_recognizer_unavailable">Voice input is not available on this device.</string>
+    <string name="ask_anything">Ask anything</string>
+    <string name="ask_short">Ask</string>
+    <string name="keepalive_text">Running in the background — sessions stay alive.</string>
 </resources>

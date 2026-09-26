@@ -91,9 +91,10 @@ class SessionKeepAliveService : Service() {
     private fun promote() {
         val notification = NotificationCompat.Builder(this, RuntimeExecutionService.RUNNING_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Mobile Harness")
-            .setContentText("Running in the background — sessions stay alive.")
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.keepalive_text))
             .setContentIntent(openAppIntent())
+            .addAction(0, getString(R.string.ask_anything), askIntent())
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOnlyAlertOnce(true)
             .setOngoing(true)
@@ -139,6 +140,16 @@ class SessionKeepAliveService : Service() {
         this,
         2,
         Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        },
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    private fun askIntent(): PendingIntent = PendingIntent.getActivity(
+        this,
+        5,
+        Intent(this, MainActivity::class.java).apply {
+            action = MainActivity.ACTION_ASK
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         },
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,

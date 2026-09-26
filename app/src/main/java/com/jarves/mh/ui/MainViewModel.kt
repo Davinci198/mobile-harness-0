@@ -308,6 +308,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var projectTerminalProjectId: String? = null
     @Volatile private var projectTerminalStopRequested: Boolean = false
     @Volatile private var setupCompletionHandled: Boolean = false
+    @Volatile private var pendingAsk: Boolean = false
     @Volatile private var githubAuthProcess: Process? = null
     private var githubAuthJob: kotlinx.coroutines.Job? = null
     @Volatile private var lastOpenedAntigravityAuthUrl: String? = null
@@ -379,6 +380,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     is AgentWorkEvent.Execution -> onRuntimeEvent(event.event)
                 }
             }
+        }
+        viewModelScope.launch {
+            // A pending "Ask anything" request waits for startup to finish.
+            _state.collect { drainPendingAsk() }
         }
         viewModelScope.launch {
             antigravityAuthController.state.collect { auth ->
@@ -2062,6 +2067,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             value.contains("did not answer", true) -> s(R.string.ag_no_answer)
             value.isBlank() -> s(R.string.ag_no_answer)
             else -> value.take(200)
+        }
+    }
+
+    /** "Ask anything" entry point: assist gesture, launcher shortcut, notification action. */
+    fun handleAsk() {
+        pendingAsk = true
+        drainPendingAsk()
+    }
+
+    /**
+     * Opens the chat for a pending ask request. Before startup finishes the
+     * request stays pending; the state collector in `init` retries on every
+     * change until the app is ready to show the workspace.
+     */
+    private fun drainPendingAsk() {
+        if (!pendingAsk) return
+        val current = _state.value
+        if (current.startupStage != StartupStage.READY || !current.backgroundSetupComplete) return
+        pendingAsk = false
+        if (current.readOnlyProject != null) closeReadOnlyProject()
+        val project = _state.value.activeProject
+        when {
+            project != null -> openProject(project)
+            !current.isRunning && !current.projectTerminalRunning -> createQuickProject()
         }
     }
 
