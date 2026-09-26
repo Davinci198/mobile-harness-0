@@ -3,6 +3,8 @@ package com.jarves.mh.network
 import com.jarves.mh.model.ProviderProtocol
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProviderApiClientTest {
@@ -46,6 +48,20 @@ class ProviderApiClientTest {
         )
 
         assertEquals(16, body.getInt("max_tokens"))
+    }
+
+    @Test
+    fun probeIndicatesProtocolAcceptsAnyLivePath() {
+        val client = ProviderApiClient()
+
+        assertTrue(client.probeIndicatesProtocol(200))
+        assertTrue(client.probeIndicatesProtocol(400))
+        assertTrue(client.probeIndicatesProtocol(401))
+        assertTrue(client.probeIndicatesProtocol(429))
+        assertTrue(client.probeIndicatesProtocol(500))
+        assertFalse(client.probeIndicatesProtocol(404))
+        assertFalse(client.probeIndicatesProtocol(405))
+        assertFalse(client.probeIndicatesProtocol(0))
     }
 
     @Test

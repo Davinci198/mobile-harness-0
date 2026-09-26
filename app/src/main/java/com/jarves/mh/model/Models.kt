@@ -154,6 +154,13 @@ fun providerProtocolForAgent(profile: ProviderProfile, agent: AgentKind): Provid
     }
 }
 
+/** Inverse of [providerProtocolForAgent]: the dshApi wire string for a detected protocol. */
+fun dshApiForProtocol(protocol: ProviderProtocol): String = when (protocol) {
+    ProviderProtocol.OPENAI_CHAT -> "openai-completions"
+    ProviderProtocol.OPENAI_RESPONSES -> "openai-responses"
+    else -> "anthropic-messages"
+}
+
 /** Providers usable with OpenCode and Hermes: the same keyed set as DeepSeek Harness plus a key-free option. */
 val OPENCODE_PROVIDERS: Set<ProviderKind> = DEEPSEEK_HARNESS_PROVIDERS + ProviderKind.FREE
 
