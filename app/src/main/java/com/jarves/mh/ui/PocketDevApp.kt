@@ -3831,7 +3831,7 @@ private fun ReadOnlyProjectScreen(
                 liveProcess = emptyList(),
                 isRunning = false,
                 isSending = false,
-                onSend = {},
+                onSend = { false },
                 onStop = {},
                 onApproval = {},
                 listState = listState,
@@ -3857,7 +3857,7 @@ private fun ReadOnlyProjectScreen(
 private fun WorkspaceScreen(
     state: AppUiState,
     onBack: () -> Unit,
-    onSend: (String) -> Unit,
+    onSend: (String) -> Boolean,
     onStop: () -> Unit,
     onApproval: (Boolean) -> Unit,
     onRefreshFiles: () -> Unit,
@@ -4496,7 +4496,7 @@ private fun ChatTab(
     liveProcess: List<ActivityItem>,
     isRunning: Boolean,
     isSending: Boolean,
-    onSend: (String) -> Unit,
+    onSend: (String) -> Boolean,
     onStop: () -> Unit,
     onApproval: (Boolean) -> Unit,
     listState: LazyListState,
@@ -4525,10 +4525,17 @@ private fun ChatTab(
     var prompt by rememberSaveable { mutableStateOf("") }
     val promptFocus = remember { FocusRequester() }
     LaunchedEffect(askPrefill) {
-        if (askPrefill == null) return@LaunchedEffect
-        if (askPrefill.isNotBlank()) prompt = askPrefill
-        runCatching { promptFocus.requestFocus() }
+        val ask = askPrefill ?: return@LaunchedEffect
         onAskPrefillConsumed()
+        if (ask.isBlank()) {
+            runCatching { promptFocus.requestFocus() }
+            return@LaunchedEffect
+        }
+        // Notification replies go straight to the agent; prefill only as fallback
+        // (agent busy, auth missing, no project) so the text is never lost.
+        if (onSend(ask)) return@LaunchedEffect
+        prompt = ask
+        runCatching { promptFocus.requestFocus() }
     }
     val chatScope = rememberCoroutineScope()
     val voiceContext = LocalContext.current
@@ -4786,8 +4793,7 @@ private fun ChatTab(
                                     .clickable(
                                         enabled = canSend,
                                         onClick = {
-                                            if (canSend) {
-                                                onSend(prompt)
+                                            if (canSend && onSend(prompt)) {
                                                 prompt = ""
                                             }
                                         },
