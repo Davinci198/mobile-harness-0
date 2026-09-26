@@ -717,4 +717,5 @@
     <string name="ask_anything">Întreabă orice</string>
     <string name="ask_short">Întreabă</string>
     <string name="keepalive_text">Rulează în fundal — sesiunile rămân active.</string>
+    <string name="widget_ask_hint">Apasă pentru a deschide chatul</string>
 </resources>
