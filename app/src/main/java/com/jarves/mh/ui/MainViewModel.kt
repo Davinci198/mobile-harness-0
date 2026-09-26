@@ -211,6 +211,8 @@ data class AppUiState(
     val isSending: Boolean = false,
     val activeSessionId: String? = null,
     val toastMessage: String? = null,
+    /** One-shot "ask" request for the chat input: non-null focuses it (text pre-fills when not blank). */
+    val askPrefill: String? = null,
     val projectTerminalLines: List<TerminalOutputLine> = emptyList(),
     val projectTerminalLiveOutput: String = "",
     val projectTerminalRunning: Boolean = false,
@@ -308,7 +310,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var projectTerminalProjectId: String? = null
     @Volatile private var projectTerminalStopRequested: Boolean = false
     @Volatile private var setupCompletionHandled: Boolean = false
-    @Volatile private var pendingAsk: Boolean = false
+    @Volatile private var pendingAsk: String? = null
     @Volatile private var githubAuthProcess: Process? = null
     private var githubAuthJob: kotlinx.coroutines.Job? = null
     @Volatile private var lastOpenedAntigravityAuthUrl: String? = null
@@ -2070,9 +2072,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** "Ask anything" entry point: assist gesture, launcher shortcut, notification action. */
-    fun handleAsk() {
-        pendingAsk = true
+    /**
+     * "Ask anything" entry point: assist gesture, launcher shortcut, widget and
+     * notification actions. A non-empty [text] is pre-filled into the chat
+     * input; an empty request only focuses it.
+     */
+    fun handleAsk(text: String = "") {
+        pendingAsk = text
         drainPendingAsk()
     }
 
@@ -2082,17 +2088,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * change until the app is ready to show the workspace.
      */
     private fun drainPendingAsk() {
-        if (!pendingAsk) return
+        val ask = pendingAsk ?: return
         val current = _state.value
         if (current.startupStage != StartupStage.READY || !current.backgroundSetupComplete) return
-        pendingAsk = false
+        pendingAsk = null
         if (current.readOnlyProject != null) closeReadOnlyProject()
         val project = _state.value.activeProject
         when {
             project != null -> openProject(project)
             !current.isRunning && !current.projectTerminalRunning -> createQuickProject()
         }
+        _state.update { it.copy(askPrefill = ask) }
     }
+
+    fun consumeAskPrefill() = _state.update { it.copy(askPrefill = null) }
 
     fun openProject(project: Project) {
         val current = _state.value

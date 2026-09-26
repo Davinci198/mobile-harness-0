@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
+import androidx.core.app.RemoteInput
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jarves.mh.data.AppPreferences
@@ -40,13 +41,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleAsk(intent: Intent?) {
-        if (intent?.action == ACTION_ASK || intent?.action == Intent.ACTION_ASSIST) {
-            viewModel.handleAsk()
+        if (intent == null) return
+        if (intent.action == ACTION_ASK || intent.action == Intent.ACTION_ASSIST) {
+            val reply = RemoteInput.getResultsFromIntent(intent)
+                ?.getCharSequence(EXTRA_ASK_TEXT)
+                ?.toString()
+                .orEmpty()
+            viewModel.handleAsk(reply)
         }
     }
 
     companion object {
         /** "Ask anything" entry point: assist gesture, launcher shortcut, notification action. */
         const val ACTION_ASK = "com.jarves.mh.ASK"
+
+        /** Result key of the keep-alive notification's inline reply action. */
+        const val EXTRA_ASK_TEXT = "com.jarves.mh.ASK_TEXT"
     }
 }
