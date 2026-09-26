@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Psychology
@@ -119,7 +120,7 @@ import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketOrange
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { APPEARANCE, TOOLS, PERMISSIONS, BACKGROUND, RUNTIME, UPDATE_CHANNEL }
+private enum class SettingsSection { APPEARANCE, VOICE, TOOLS, PERMISSIONS, BACKGROUND, RUNTIME, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -164,6 +165,9 @@ fun SettingsScreen(
     }
     val keepAlivePrefs = remember { AppPreferences(context) }
     var keepAliveEnabled by remember { mutableStateOf(keepAlivePrefs.keepAliveEnabled) }
+    val voicePrefs = remember { AppPreferences(context) }
+    var voiceMicEnabled by remember { mutableStateOf(voicePrefs.voiceMicEnabled) }
+    var voiceSpeakEnabled by remember { mutableStateOf(voicePrefs.voiceSpeakEnabled) }
     val backgroundSettingsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) {
@@ -276,6 +280,54 @@ fun SettingsScreen(
                             ModernThemeChoice(stringResource(R.string.settings_language_english), Icons.Default.Language, langTag == AppLocale.TAG_ENGLISH, { AppLocale.set(context, AppLocale.TAG_ENGLISH) }, Modifier.weight(1f))
                             ModernThemeChoice(stringResource(R.string.settings_language_romanian), Icons.Default.Language, langTag == AppLocale.TAG_ROMANIAN, { AppLocale.set(context, AppLocale.TAG_ROMANIAN) }, Modifier.weight(1f))
                         }
+                    }
+                }
+            }
+
+            item {
+                SettingsAccordion(
+                    title = stringResource(R.string.settings_voice_title),
+                    subtitle = stringResource(R.string.settings_voice_subtitle),
+                    icon = Icons.Default.Mic,
+                    expanded = expanded == SettingsSection.VOICE,
+                    onClick = { toggle(SettingsSection.VOICE) },
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.voice_mic_title), fontWeight = FontWeight.SemiBold)
+                            Text(
+                                stringResource(R.string.voice_mic_desc),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = voiceMicEnabled,
+                            onCheckedChange = { value ->
+                                voiceMicEnabled = value
+                                voicePrefs.voiceMicEnabled = value
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.voice_speak_title), fontWeight = FontWeight.SemiBold)
+                            Text(
+                                stringResource(R.string.voice_speak_desc),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = voiceSpeakEnabled,
+                            onCheckedChange = { value ->
+                                voiceSpeakEnabled = value
+                                voicePrefs.voiceSpeakEnabled = value
+                            },
+                        )
                     }
                 }
             }

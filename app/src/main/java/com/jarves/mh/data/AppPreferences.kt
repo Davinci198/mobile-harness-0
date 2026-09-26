@@ -46,6 +46,20 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getBoolean("keep_alive_enabled", true)
         set(value) { preferences.edit().putBoolean("keep_alive_enabled", value).apply() }
 
+    /**
+     * Privacy switch for voice input: it only controls whether the microphone
+     * button is shown in the chat input. The microphone itself only ever
+     * listens after an explicit tap, never in the background.
+     */
+    var voiceMicEnabled: Boolean
+        get() = preferences.getBoolean("voice_mic_enabled", true)
+        set(value) { preferences.edit().putBoolean("voice_mic_enabled", value).apply() }
+
+    /** Read the Agent's reply aloud with on-device TTS when an Agent Execution finishes. */
+    var voiceSpeakEnabled: Boolean
+        get() = preferences.getBoolean("voice_speak_enabled", true)
+        set(value) { preferences.edit().putBoolean("voice_speak_enabled", value).apply() }
+
     /** Coding agent engine the user picked during setup. Absent = pre-agent-choice install → Claude. */
     var agentKind: String
         get() = preferences.getString("agent_kind", AgentKind.CLAUDE_CODE.stableId) ?: AgentKind.CLAUDE_CODE.stableId
