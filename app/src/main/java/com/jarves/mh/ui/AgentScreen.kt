@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -66,10 +67,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -135,6 +138,12 @@ private data class KeyConnectionStatus(
     val label: String = if (successful == true) "Verified" else "Failed",
 )
 
+/** Status filter ids used by the model list chips (mirrors the mock's pill row). */
+private const val FILTER_ALL = "all"
+private const val FILTER_WORKING = "working"
+private const val FILTER_BROKEN = "broken"
+private const val FILTER_FREE = "free"
+
 /**
  * Collapses "https://inference.example.com/v1/chat/completions" to "inference.example.com".
  * Full base URLs wrap and drown the row; the host plus the already-shown model count is enough.
@@ -149,11 +158,11 @@ internal fun hostOnly(rawUrl: String): String {
 
 /** Latency badge color: green under 2s, yellow under 5s, red when broken or slower. */
 internal fun latencyColor(model: DiscoveredModel): Color = when {
-    model.isBroken -> Color(0xFFE53935)
-    model.latencyMs == null -> Color(0xFF9E9E9E)
-    model.latencyMs!! < 2_000 -> Color(0xFF58C99C)
-    model.latencyMs!! < 5_000 -> Color(0xFFF0B429)
-    else -> Color(0xFFE53935)
+    model.isBroken -> Color(0xFFFCA5A5)
+    model.latencyMs == null -> Color(0xFF7A7A86)
+    model.latencyMs!! < 2_000 -> Color(0xFF6EE7B7)
+    model.latencyMs!! < 5_000 -> Color(0xFFFCD34D)
+    else -> Color(0xFFFCA5A5)
 }
 
 /** Formats Antigravity model identifiers into clean, human-friendly names. */
@@ -287,10 +296,13 @@ fun AgentScreen(
         val fromModels = models.filter(DiscoveredModel::isBroken).map(DiscoveredModel::id).toSet()
         if (fromModels.isNotEmpty()) fromModels else state.brokenModelIds
     }
-    val filteredModels = remember(models, modelSearch, state.hideBrokenModels, activeBrokenIds) {
-        var list = models
-        if (state.hideBrokenModels && activeBrokenIds.isNotEmpty()) {
-            list = list.filterNot { it.id in activeBrokenIds }
+    var statusFilter by rememberSaveable { mutableStateOf(if (state.hideBrokenModels) FILTER_WORKING else FILTER_ALL) }
+    val filteredModels = remember(models, modelSearch, statusFilter, activeBrokenIds) {
+        val list = when (statusFilter) {
+            FILTER_WORKING -> models.filterNot { it.id in activeBrokenIds }
+            FILTER_BROKEN -> models.filter { it.id in activeBrokenIds }
+            FILTER_FREE -> models.filter(DiscoveredModel::isFree)
+            else -> models
         }
         val q = modelSearch.trim()
         if (q.isBlank()) list else list.filter {
@@ -303,6 +315,9 @@ fun AgentScreen(
     }
     val statsAvgLatencyMs = remember(models) {
         models.mapNotNull(DiscoveredModel::latencyMs).takeIf { it.isNotEmpty() }?.average()
+    }
+    val statsAvgLatencyLabel = remember(statsAvgLatencyMs) {
+        statsAvgLatencyMs?.let { String.format(java.util.Locale.ROOT, "%.1fs", it / 1000.0) } ?: "—"
     }
 
     val antigravityModelList = remember(state.antigravityModels) {
@@ -378,6 +393,19 @@ fun AgentScreen(
             }
             isDiscovering = false
         }
+    }
+
+    /** Header pill action: discover when the list is still empty, otherwise re-run the health scan. */
+    fun runDiscoverOrTest() {
+        if (models.isEmpty()) {
+            discoverModels()
+            return
+        }
+        val kind = selectedKind
+        val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl.trim()
+        val profile = ProviderProfile(kind, url, model.trim(), dshApi = dshApi)
+        val key = apiKey.trim().ifBlank { newApiKey.trim() }
+        onScanModels(profile, key, models)
     }
 
     // ── Live connection status calculations ──
@@ -744,23 +772,82 @@ fun AgentScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.agent_available_models), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text(
-                            if (models.isEmpty()) selectedKind.title else stringResource(R.string.agent_models_of, filteredModels.size, models.size),
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            stringResource(R.string.agent_available_models),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.3f).sp,
+                        )
+                        Text(
+                            if (models.isEmpty()) {
+                                selectedKind.title
+                            } else {
+                                stringResource(
+                                    R.string.agent_verified_avg,
+                                    models.size - statsBroken,
+                                    models.size,
+                                    statsAvgLatencyLabel,
+                                )
+                            },
+                            fontSize = 13.sp,
+                            color = PocketMuted,
                         )
                     }
-                    IconButton(onClick = ::discoverModels, enabled = !isDiscovering) {
-                        if (isDiscovering) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = PocketAccent)
-                        } else {
-                            Icon(Icons.Default.Refresh, stringResource(R.string.settings_refresh_models))
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFF1F1F28),
+                        border = BorderStroke(1.dp, Color(0xFF2A2A32)),
+                        enabled = !isDiscovering && !state.isModelScanning,
+                        onClick = ::runDiscoverOrTest,
+                        modifier = Modifier.padding(start = 12.dp),
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (isDiscovering || state.isModelScanning) {
+                                CircularProgressIndicator(
+                                    Modifier.size(14.dp),
+                                    strokeWidth = 1.6.dp,
+                                    color = PocketMuted,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                stringResource(
+                                    if (models.isEmpty()) R.string.agent_discover_models else R.string.agent_test_short,
+                                ),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White,
+                            )
                         }
                     }
                 }
                 if (models.isNotEmpty()) {
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(14.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(Color(0xFF1F1F28)),
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth((models.size - statsBroken).toFloat() / models.size)
+                                .fillMaxHeight()
+                                .background(PocketAccent),
+                        )
+                    }
+                    Spacer(Modifier.height(14.dp))
                     ModelStatsGrid(
                         working = models.size - statsBroken,
                         broken = statsBroken,
@@ -772,53 +859,89 @@ fun AgentScreen(
                 OutlinedTextField(
                     value = modelSearch,
                     onValueChange = { modelSearch = it },
-                    leadingIcon = { Icon(Icons.Default.Search, null) },
-                    placeholder = { Text(stringResource(R.string.agent_search_custom)) },
+                    leadingIcon = { Icon(Icons.Default.Search, null, tint = PocketMuted) },
+                    placeholder = { Text(stringResource(R.string.agent_search_custom), color = Color(0xFF6B6B76)) },
                     singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = PocketAccent.copy(alpha = 0.5f),
+                        unfocusedBorderColor = Color(0xFF262631),
+                        focusedContainerColor = Color(0xFF1C1C22),
+                        unfocusedContainerColor = Color(0xFF1C1C22),
+                    ),
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(12.dp))
 
-                Row(
+                // Status filter pills (mock: all / working / broken / free) + autoscan toggle.
+                val statusChips = listOf(
+                    FILTER_ALL to stringResource(R.string.agent_filter_all),
+                    FILTER_WORKING to stringResource(R.string.agent_filter_working),
+                    FILTER_BROKEN to stringResource(R.string.agent_filter_broken),
+                    FILTER_FREE to stringResource(R.string.agent_filter_free),
+                )
+                LazyRow(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    PillToggleChip(
-                        text = stringResource(R.string.agent_hide_broken),
-                        active = state.hideBrokenModels,
-                        onClick = { onHideBrokenChange(!state.hideBrokenModels) },
-                    )
-                    PillToggleChip(
-                        text = stringResource(R.string.agent_autoscan),
-                        active = state.autoScanEnabled,
-                        onClick = { onAutoScanChange(!state.autoScanEnabled) },
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-
-                SecondaryActionButton(
-                    onClick = {
-                        val kind = selectedKind
-                        val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl.trim()
-                        val profile = ProviderProfile(kind, url, model.trim(), dshApi = dshApi)
-                        val key = apiKey.trim().ifBlank { newApiKey.trim() }
-                        onScanModels(profile, key, models)
-                    },
-                    enabled = !state.isModelScanning && !isDiscovering,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (state.isModelScanning) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = PocketMuted)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.agent_scanning))
-                    } else {
-                        Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (models.isEmpty()) stringResource(R.string.agent_discover_all) else stringResource(R.string.agent_test_all))
+                    statusChips.forEach { (id, label) ->
+                        item(key = id) {
+                            PillToggleChip(
+                                text = label,
+                                active = statusFilter == id,
+                                onClick = {
+                                    statusFilter = id
+                                    onHideBrokenChange(id == FILTER_WORKING)
+                                },
+                            )
+                        }
+                    }
+                    item(key = "autoscan") {
+                        PillToggleChip(
+                            text = stringResource(R.string.agent_autoscan),
+                            active = state.autoScanEnabled,
+                            onClick = { onAutoScanChange(!state.autoScanEnabled) },
+                        )
                     }
                 }
+
+                if (models.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF1C1C22),
+                        border = BorderStroke(1.dp, PocketCardBorder),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(24.dp)
+                                    .background(Color(0xFF23232E), CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.Info,
+                                    null,
+                                    tint = PocketMuted,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                stringResource(R.string.agent_discover_hint, models.size, state.modelCatalogs.size),
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                                color = Color(0xFFB8B8C2),
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
 
                 // Keep the log open while a scan runs so progress stays visible.
                 LaunchedEffect(state.isModelScanning) {
@@ -884,52 +1007,6 @@ fun AgentScreen(
                     Spacer(Modifier.height(10.dp))
                 }
 
-                if (state.modelCatalogs.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        stringResource(R.string.agent_saved_lists).uppercase(java.util.Locale.ROOT),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 1.sp,
-                        color = PocketMuted,
-                    )
-                    state.modelCatalogs.forEach { catalog ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    stringResource(R.string.agent_catalog_line, catalog.kindName, catalog.models.size),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                )
-                                Text(
-                                    hostOnly(catalog.baseUrl),
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            IconButton(
-                                onClick = { onDeleteModelCatalog(catalog.key) },
-                                modifier = Modifier.size(36.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = stringResource(R.string.agent_delete_list),
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
-                        }
-                    }
-                }
-
                 if (status != null) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -944,28 +1021,28 @@ fun AgentScreen(
                     ) {
                         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (isDiscovering) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(15.dp),
-                                    strokeWidth = 1.6.dp,
-                                    color = PocketAccent,
+                                if (isDiscovering) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(15.dp),
+                                        strokeWidth = 1.6.dp,
+                                        color = PocketAccent,
+                                    )
+                                } else {
+                                    Icon(
+                                        if (statusOk) Icons.Default.Info else Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = if (statusOk) PocketAccent else MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    status.orEmpty(),
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    color = if (statusOk) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.weight(1f),
                                 )
-                            } else {
-                                Icon(
-                                    if (statusOk) Icons.Default.Info else Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = if (statusOk) PocketAccent else MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(15.dp),
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                status.orEmpty(),
-                                fontSize = 11.sp,
-                                lineHeight = 15.sp,
-                                color = if (statusOk) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.weight(1f),
-                            )
                             }
                             statusProviderMessage?.let { providerMessage ->
                                 Text(
@@ -979,6 +1056,17 @@ fun AgentScreen(
                         }
                     }
                     Spacer(Modifier.height(12.dp))
+                }
+
+                if (!isDiscovering) {
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        "${stringResource(R.string.agent_models_list)} · ${filteredModels.size}".uppercase(java.util.Locale.ROOT),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 1.sp,
+                        color = Color(0xFF6B6B76),
+                    )
                 }
 
                 if (isDiscovering) {
@@ -1129,12 +1217,13 @@ fun AgentScreen(
                         }
                         items(filteredModels, key = { it.id }) { option ->
                             val isSelected = model == option.id
+                            val isBrokenModel = option.isBroken || option.id in activeBrokenIds
                             Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = if (isSelected) PocketAccent.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isSelected) Color(0xFF20202A) else Color(0xFF1A1A20),
                                 border = BorderStroke(
                                     1.dp,
-                                    if (isSelected) PocketAccent.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                    if (isSelected) PocketAccent.copy(alpha = 0.4f) else PocketCardBorder,
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1143,52 +1232,162 @@ fun AgentScreen(
                                         modelSearch = ""
                                         showModels = false
                                     },
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 ) {
-                                    Row(
-                                        Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Column(Modifier.weight(1f)) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                option.latencyLabel?.let { label ->
+                                    option.latencyLabel?.let { label ->
+                                        val badge = latencyColor(option)
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = badge.copy(alpha = 0.13f),
+                                            border = BorderStroke(1.dp, badge.copy(alpha = 0.22f)),
+                                        ) {
+                                            Text(
+                                                label,
+                                                Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = badge,
+                                                maxLines = 1,
+                                            )
+                                        }
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                option.displayName,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            if (option.isFree) {
+                                                Spacer(Modifier.width(6.dp))
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = Color(0x1F34D399),
+                                                    border = BorderStroke(1.dp, Color(0x3334D399)),
+                                                ) {
                                                     Text(
-                                                        label,
-                                                        fontSize = 11.sp,
+                                                        stringResource(R.string.agent_free),
+                                                        Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                                                        fontSize = 9.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        fontFamily = FontFamily.Monospace,
-                                                        color = latencyColor(option),
-                                                        modifier = Modifier.padding(end = 6.dp),
+                                                        letterSpacing = 0.5.sp,
+                                                        color = Color(0xFF6EE7B7),
+                                                        maxLines = 1,
                                                     )
                                                 }
-                                                Text(
-                                                    option.displayName,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    fontSize = 14.sp,
-                                                    color = if (isSelected) PocketAccent else MaterialTheme.colorScheme.onSurface,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                                if (option.isFree) {
-                                                    Spacer(Modifier.width(6.dp))
-                                                    Text(stringResource(R.string.agent_free), color = Color(0xFF58C99C), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                                }
-                                                if (option.isBroken || option.id in activeBrokenIds) {
-                                                    Spacer(Modifier.width(6.dp))
-                                                    Text(stringResource(R.string.agent_broken), color = MaterialTheme.colorScheme.error, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                                }
-                                            }
-                                            if (option.displayName != option.id) {
-                                                Text(
-                                                    option.id,
-                                                    fontSize = 11.sp,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
                                             }
                                         }
-                                        AgentSelectionDot(selected = isSelected)
+                                        if (option.displayName != option.id) {
+                                            Text(
+                                                option.id,
+                                                fontSize = 11.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = Color(0xFF7A7A86),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                    Box(
+                                        Modifier
+                                            .size(6.dp)
+                                            .background(
+                                                if (isBrokenModel) Color(0xFFF87171) else Color(0xFF34D399),
+                                                CircleShape,
+                                            ),
+                                    )
+                                    AgentSelectionDot(selected = isSelected)
+                                }
+                            }
+                        }
+
+                        if (state.modelCatalogs.isNotEmpty()) {
+                            item(key = "saved-endpoints") {
+                                Column(Modifier.padding(top = 16.dp)) {
+                                    Text(
+                                        stringResource(R.string.agent_endpoints).uppercase(java.util.Locale.ROOT),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 1.sp,
+                                        color = Color(0xFF6B6B76),
+                                    )
+                                    Spacer(Modifier.height(12.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = PocketSurfaceVariant,
+                                        border = BorderStroke(1.dp, PocketCardBorder),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Column {
+                                            state.modelCatalogs.forEachIndexed { index, catalog ->
+                                                if (index > 0) {
+                                                    HorizontalDivider(color = Color(0xFF22222B))
+                                                }
+                                                Row(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                ) {
+                                                    Box(
+                                                        Modifier
+                                                            .size(32.dp)
+                                                            .background(Color(0xFF1F1F28), RoundedCornerShape(10.dp))
+                                                            .border(1.dp, Color(0xFF2A2A32), RoundedCornerShape(10.dp)),
+                                                        contentAlignment = Alignment.Center,
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Link,
+                                                            null,
+                                                            tint = PocketMuted,
+                                                            modifier = Modifier.size(16.dp),
+                                                        )
+                                                    }
+                                                    Column(Modifier.weight(1f)) {
+                                                        Text(
+                                                            hostOnly(catalog.baseUrl),
+                                                            fontSize = 13.sp,
+                                                            fontWeight = FontWeight.Medium,
+                                                            color = Color.White,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                        )
+                                                        Text(
+                                                            stringResource(
+                                                                R.string.agent_catalog_line,
+                                                                catalog.kindName,
+                                                                catalog.models.size,
+                                                            ),
+                                                            fontSize = 11.sp,
+                                                            color = Color(0xFF7A7A86),
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                        )
+                                                    }
+                                                    IconButton(
+                                                        onClick = { onDeleteModelCatalog(catalog.key) },
+                                                        modifier = Modifier.size(28.dp),
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.Delete,
+                                                            contentDescription = stringResource(R.string.agent_delete_list),
+                                                            tint = PocketMuted,
+                                                            modifier = Modifier.size(14.dp),
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1197,6 +1396,7 @@ fun AgentScreen(
                 }
             }
         }
+    }
 
     Scaffold(
         topBar = {
@@ -2029,10 +2229,16 @@ private fun AgentProviderCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
+            Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
         ) {
-            Text(stringResource(R.string.agent_ai_provider), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(12.dp))
+            Text(
+                stringResource(R.string.agent_ai_provider).uppercase(java.util.Locale.ROOT),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 1.5.sp,
+                color = PocketMuted,
+            )
+            Spacer(Modifier.height(2.dp))
 
             PremiumSummaryRow(
                 icon = Icons.Default.Link,
@@ -2221,22 +2427,52 @@ private fun AgentProviderCard(
                         }
                     }
                 }
+            }
+        }
+    }
 
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+    Spacer(Modifier.height(16.dp))
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, PocketCardBorder),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.agent_model_access).uppercase(java.util.Locale.ROOT),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 1.5.sp,
+                    color = PocketMuted,
+                    modifier = Modifier.weight(1f),
+                )
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFF262631),
+                    border = BorderStroke(1.dp, Color(0xFF2E2E3A)),
+                    modifier = Modifier.clickable(enabled = !isDiscovering, onClick = onDiscover),
                 ) {
-                    Text(stringResource(R.string.agent_model_access), fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     Text(
-                        if (isDiscovering) stringResource(R.string.agent_discovering) else if (models.isEmpty()) stringResource(R.string.agent_discover_models) else stringResource(R.string.agent_models_count, models.size),
+                        if (isDiscovering) stringResource(R.string.agent_discovering)
+                        else if (models.isEmpty()) stringResource(R.string.agent_discover_models)
+                        else stringResource(R.string.agent_models_count, models.size),
+                        Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = PocketAccent,
-                        modifier = Modifier.clickable(enabled = !isDiscovering, onClick = onDiscover).padding(6.dp),
+                        color = Color(0xFFC7C7CF),
+                        maxLines = 1,
                     )
                 }
+            }
 
+            if (selectedKind != ProviderKind.CLAUDE) {
                 PremiumSummaryRow(
                     icon = Icons.Default.AutoAwesome,
                     title = stringResource(R.string.agent_ai_model),
@@ -2397,32 +2633,51 @@ private fun AgentProviderCard(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
-            SecondaryActionButton(
-                onClick = onValidate,
-                enabled = apiKey.isNotBlank() && !isDiscovering && !isValidating &&
-                    (selectedKind == ProviderKind.CLAUDE || (baseUrl.isNotBlank() && model.isNotBlank())),
-                modifier = Modifier.fillMaxWidth().height(46.dp),
-            ) {
-                if (isValidating) {
-                    CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 1.8.dp, color = PocketMuted)
-                    Spacer(Modifier.width(8.dp))
-                } else {
-                    Icon(if (selectedKind == ProviderKind.CLAUDE) Icons.Default.Check else Icons.Default.Refresh, null, Modifier.size(16.dp), tint = PocketMuted)
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(
-                    when {
-                        isValidating && selectedKind == ProviderKind.CLAUDE -> stringResource(R.string.agent_saving_token)
-                        isValidating -> stringResource(R.string.agent_testing_connection)
-                        selectedKind == ProviderKind.CLAUDE -> stringResource(R.string.agent_save_sub_token)
-                        else -> stringResource(R.string.agent_test_connection)
-                    },
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
+            Spacer(Modifier.height(16.dp))
         }
     }
+
+    Spacer(Modifier.height(16.dp))
+    SecondaryActionButton(
+        onClick = onValidate,
+        enabled = apiKey.isNotBlank() && !isDiscovering && !isValidating &&
+            (selectedKind == ProviderKind.CLAUDE || (baseUrl.isNotBlank() && model.isNotBlank())),
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+    ) {
+        if (isValidating) {
+            CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 1.8.dp, color = PocketMuted)
+            Spacer(Modifier.width(8.dp))
+        } else {
+            Icon(if (selectedKind == ProviderKind.CLAUDE) Icons.Default.Check else Icons.Default.Refresh, null, Modifier.size(16.dp), tint = PocketMuted)
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(
+            when {
+                isValidating && selectedKind == ProviderKind.CLAUDE -> stringResource(R.string.agent_saving_token)
+                isValidating -> stringResource(R.string.agent_testing_connection)
+                selectedKind == ProviderKind.CLAUDE -> stringResource(R.string.agent_save_sub_token)
+                else -> stringResource(R.string.agent_test_connection)
+            },
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+    Text(
+        stringResource(
+            R.string.agent_last_check,
+            when (state.apiPingStatus) {
+                ApiPingStatus.OK -> stringResource(R.string.agent_online)
+                ApiPingStatus.PINGING -> stringResource(R.string.agent_testing)
+                ApiPingStatus.FAILED -> stringResource(R.string.agent_attention)
+                ApiPingStatus.IDLE -> stringResource(R.string.agent_not_tested)
+            },
+        ),
+        fontSize = 11.sp,
+        textAlign = TextAlign.Center,
+        color = Color(0xFF6B6B76),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+    )
 }
 
 @Composable
@@ -2436,34 +2691,37 @@ private fun PremiumSummaryRow(
     onClick: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 13.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            modifier = Modifier.size(38.dp).background(PocketAccent.copy(alpha = 0.10f), RoundedCornerShape(11.dp)),
+            modifier = Modifier
+                .size(36.dp)
+                .background(Color(0xFF1F1F28), RoundedCornerShape(12.dp))
+                .border(1.dp, Color(0xFF2A2A32), RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, null, tint = PocketAccent, modifier = Modifier.size(19.dp))
+            Icon(icon, null, tint = Color(0xFFC9C9D1), modifier = Modifier.size(18.dp))
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(title, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = Color.White)
             Text(
                 subtitle,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 color = when {
                     error -> MaterialTheme.colorScheme.error
-                    positive -> Color(0xFF2E9D72)
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    positive -> Color(0xFF6EE7B7)
+                    else -> PocketMuted
                 },
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
         Icon(
             if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
             contentDescription = if (expanded) stringResource(R.string.settings_collapse) else stringResource(R.string.settings_expand),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = Color(0xFF4B4B55),
         )
     }
 }
@@ -2586,10 +2844,20 @@ private fun AgentTypingDots(
 @Composable
 private fun AgentSelectionDot(selected: Boolean) {
     Box(
-        Modifier.size(22.dp).border(if (selected) 2.dp else 1.5.dp, if (selected) PocketAccent else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), CircleShape),
+        Modifier
+            .size(20.dp)
+            .background(if (selected) Color.White else Color.Transparent, CircleShape)
+            .border(1.5.dp, if (selected) Color.White else Color(0xFF2A2A32), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        if (selected) Box(Modifier.size(10.dp).background(PocketAccent, CircleShape))
+        if (selected) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = null,
+                tint = Color.Black,
+                modifier = Modifier.size(12.dp),
+            )
+        }
     }
 }
 
@@ -2631,27 +2899,32 @@ private fun StatCell(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = PocketSurfaceVariant,
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF17171C),
         border = BorderStroke(1.dp, PocketCardBorder),
         modifier = modifier,
     ) {
         Column(
-            Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.Start,
         ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).background(accent, CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    label,
+                    fontSize = 11.sp,
+                    color = PocketMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
             Text(
                 value,
-                fontSize = 17.sp,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = accent,
-                maxLines = 1,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                label,
-                fontSize = 10.sp,
-                color = PocketMuted,
+                color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

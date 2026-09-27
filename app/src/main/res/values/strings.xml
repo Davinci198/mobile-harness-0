@@ -131,6 +131,15 @@
     <string name="agent_stat_working">Working</string>
     <string name="agent_stat_broken">Broken</string>
     <string name="agent_stat_avg_latency">Avg latency</string>
+    <string name="agent_verified_avg">%1$d of %2$d verified · %3$s avg</string>
+    <string name="agent_filter_all">All</string>
+    <string name="agent_filter_working">Working</string>
+    <string name="agent_filter_broken">Broken</string>
+    <string name="agent_filter_free">Free</string>
+    <string name="agent_models_list">Models</string>
+    <string name="agent_discover_hint">Discovered %1$d models across %2$d endpoints. Verification sends a short prompt and measures real latency.</string>
+    <string name="agent_test_short">Test</string>
+    <string name="agent_last_check">Last check · %1$s</string>
     <string name="agent_saved_lists">Saved model lists</string>
     <string name="agent_delete_list">Delete saved model list</string>
     <string name="agent_use_custom_id">Use custom model ID:</string>
