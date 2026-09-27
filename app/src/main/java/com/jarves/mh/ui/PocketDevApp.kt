@@ -2381,7 +2381,7 @@ private fun ProviderSetupScreen(
                     modelCatalogs = modelCatalogs,
                     onBaseUrl = {
                         baseUrl = it
-                        if (agentKind == AgentKind.DEEPSEEK_HARNESS && selected == ProviderKind.CUSTOM) {
+                        if (selected == ProviderKind.CUSTOM) {
                             dshApi = inferredDshApiForUrl(it)
                         }
                     },
@@ -2943,7 +2943,7 @@ private fun ProviderCredentialsStep(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    if (agentKind == AgentKind.DEEPSEEK_HARNESS && provider in DSH_PROTOCOL_PROVIDERS && !provider.fixedProtocol) {
+                    if (provider in DSH_PROTOCOL_PROVIDERS && !provider.fixedProtocol) {
                         DshApiProtocolPicker(selected = dshApi, onSelected = { onDshApi(it); status = null })
                     }
                     OutlinedTextField(

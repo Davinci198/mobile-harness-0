@@ -1867,7 +1867,7 @@ fun AgentScreen(
                         },
                         onBaseUrl = {
                             baseUrl = it
-                            if (state.agentKind == AgentKind.DEEPSEEK_HARNESS && selectedKind == ProviderKind.CUSTOM) {
+                            if (selectedKind == ProviderKind.CUSTOM) {
                                 dshApi = inferredDshApiForUrl(it)
                             }
                             status = null
@@ -2524,7 +2524,7 @@ private fun AgentProviderCard(
                     title = if (selectedKind == ProviderKind.CUSTOM) stringResource(R.string.agent_custom_settings) else stringResource(R.string.agent_endpoint_protocol),
                     subtitle = buildString {
                         append(baseUrl.ifBlank { stringResource(R.string.agent_base_url_required) })
-                        if (state.agentKind == AgentKind.DEEPSEEK_HARNESS && selectedKind in DSH_PROTOCOL_PROVIDERS) {
+                        if (selectedKind in DSH_PROTOCOL_PROVIDERS) {
                             append(" · ")
                             append(if (selectedKind.fixedProtocol) defaultDshApiForProvider(selectedKind) else dshApi)
                         }
@@ -2699,7 +2699,7 @@ private fun AgentProviderCard(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                         )
-                        if (state.agentKind == AgentKind.DEEPSEEK_HARNESS && selectedKind in DSH_PROTOCOL_PROVIDERS && !selectedKind.fixedProtocol) {
+                        if (selectedKind in DSH_PROTOCOL_PROVIDERS && !selectedKind.fixedProtocol) {
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 Text(stringResource(R.string.settings_gateway_protocol), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.height(5.dp))
