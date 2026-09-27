@@ -334,7 +334,7 @@ internal abstract class HeadlessCliBridge(
             guestWorkspacePath,
             environment.toString(),
         ).joinToString("|")
-        val process = warmSession.ensureStarted(signature) { _ ->
+        val start = warmSession.ensureStarted(signature) { _ ->
             installer.process(
                 installed.proot,
                 installed.rootfs,
@@ -348,10 +348,16 @@ internal abstract class HeadlessCliBridge(
                 ptyColumns = 120,
             )
         } ?: return null
-        activeProcess = process
-        if (userStopRequested) process.destroy()
-        Log.d("HeadlessBridge", "${kind.title} warm session turn starting")
-        val turn = warmSession.runTurn(contextPrompt, sessionId) { event -> eventBus.emit(event) }
+        activeProcess = start.process
+        if (userStopRequested) start.process.destroy()
+        Log.d(
+            "HeadlessBridge",
+            "${kind.title} warm turn starting (seeded=${start.seeded}, pid=${start.process.spawnPid()})",
+        )
+        // A seeded session already carries this turn's prompt through `-q`.
+        val turn = warmSession.runTurn(contextPrompt, sessionId, submitPrompt = !start.seeded) { event ->
+            eventBus.emit(event)
+        }
         Log.d(
             "HeadlessBridge",
             "${kind.title} warm turn done: failed=${turn.failed != null}, " +
