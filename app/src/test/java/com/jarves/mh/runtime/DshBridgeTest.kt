@@ -226,15 +226,23 @@ class AgentProviderPresetTest {
     }
 
     @Test
-    fun deepSeekHarnessValidationUsesSelectedCustomProtocol() {
+    fun selectedCustomProtocolIsUsedByEveryAgent() {
         val profile = ProviderProfile(
             ProviderKind.CUSTOM,
             baseUrl = "https://api.example.com/v1",
             model = "model",
             dshApi = "openai-completions",
         )
+        // The picker belongs to the provider, not to DeepSeek Harness: the
+        // OpenCode and Hermes bridges read dshApi directly, and Claude Code
+        // resolves it too so an OpenAI gateway gets the local format gateway.
         assertEquals(ProviderProtocol.OPENAI_CHAT, providerProtocolForAgent(profile, AgentKind.DEEPSEEK_HARNESS))
-        assertEquals(ProviderProtocol.ANTHROPIC_GATEWAY, providerProtocolForAgent(profile, AgentKind.CLAUDE_CODE))
+        assertEquals(ProviderProtocol.OPENAI_CHAT, providerProtocolForAgent(profile, AgentKind.CLAUDE_CODE))
+        assertEquals(ProviderProtocol.OPENAI_CHAT, providerProtocolForAgent(profile, AgentKind.HERMES))
+        assertEquals(
+            ProviderProtocol.ANTHROPIC_GATEWAY,
+            providerProtocolForAgent(profile.copy(dshApi = "anthropic-messages"), AgentKind.CLAUDE_CODE),
+        )
     }
 
     @Test

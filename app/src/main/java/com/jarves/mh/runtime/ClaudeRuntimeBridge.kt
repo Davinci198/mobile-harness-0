@@ -12,6 +12,7 @@ import com.jarves.mh.model.RiskLevel
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.isLoopbackBaseUrl
+import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.tools.ToolPermissionGate
 import com.jarves.mh.tools.ToolPermissionGateDecision
 import com.jarves.mh.tools.ToolPermissionLevel
@@ -150,7 +151,7 @@ class ClaudeRuntimeBridge(
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
-            formatGateway = if (provider.kind.protocol in setOf(
+            formatGateway = if (providerProtocolForAgent(provider, AgentKind.CLAUDE_CODE) in setOf(
                     com.jarves.mh.model.ProviderProtocol.OPENAI_CHAT,
                     com.jarves.mh.model.ProviderProtocol.OPENAI_RESPONSES,
                 )) LocalFormatGateway(provider, credential).start() else null

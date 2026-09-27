@@ -44,7 +44,14 @@ object RuntimeLaunchConfigBuilder {
 
     fun build(profile: ProviderProfile, authToken: String? = null, localGatewayUrl: String? = null): RuntimeLaunchConfig {
         val environment = linkedMapOf("DISABLE_AUTOUPDATER" to "1")
-        when (profile.kind.protocol) {
+        // Claude Code always speaks Anthropic, so the protocol is resolved for
+        // its own agent: a custom gateway set to openai-completions needs the
+        // local format gateway, exactly like NVIDIA NIM does.
+        val protocol = com.jarves.mh.model.providerProtocolForAgent(
+            profile,
+            com.jarves.mh.model.AgentKind.CLAUDE_CODE,
+        )
+        when (protocol) {
             com.jarves.mh.model.ProviderProtocol.CLAUDE_LOGIN -> {
                 require(!authToken.isNullOrBlank()) { "Enter a Claude subscription token first" }
                 environment["CLAUDE_CODE_OAUTH_TOKEN"] = authToken
@@ -69,7 +76,7 @@ object RuntimeLaunchConfigBuilder {
             }
         }
         val runtimeModel = environment["ANTHROPIC_MODEL"] ?: profile.model
-        if (profile.kind.protocol != com.jarves.mh.model.ProviderProtocol.CLAUDE_LOGIN) {
+        if (protocol != com.jarves.mh.model.ProviderProtocol.CLAUDE_LOGIN) {
             environment["ANTHROPIC_DEFAULT_OPUS_MODEL"] = runtimeModel
             environment["ANTHROPIC_DEFAULT_SONNET_MODEL"] = runtimeModel
             environment["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = runtimeModel

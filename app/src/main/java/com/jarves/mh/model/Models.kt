@@ -141,12 +141,27 @@ fun inferredDshApiForUrl(baseUrl: String): String {
     }
 }
 
-/** Resolves the protocol DeepSeek Harness will actually use for this saved profile. */
+/**
+ * Wire protocol for a provider profile.
+ *
+ * Providers that expose a protocol picker (Kimi, OpenCode Zen, NVIDIA NIM and
+ * custom endpoints) resolve it from [ProviderProfile.dshApi] for every agent,
+ * not just DeepSeek Harness: the OpenCode and Hermes bridges already read that
+ * field when they build their launch environment, so gating it on the agent
+ * made the Base URL preview and the connection test speak Anthropic while the
+ * session itself spoke OpenAI (404 on `/v1/messages`). Providers without a
+ * picker keep their built-in protocol; [agent] is kept for its call sites and
+ * no longer changes the result.
+ */
 fun providerProtocolForAgent(profile: ProviderProfile, agent: AgentKind): ProviderProtocol {
-    if (agent != AgentKind.DEEPSEEK_HARNESS || profile.kind !in DSH_PROTOCOL_PROVIDERS) {
+    if (profile.kind !in DSH_PROTOCOL_PROVIDERS) {
         return profile.kind.protocol
     }
-    val api = if (profile.kind.fixedProtocol) defaultDshApiForProvider(profile.kind) else profile.dshApi
+    val api = if (profile.kind.fixedProtocol) {
+        defaultDshApiForProvider(profile.kind)
+    } else {
+        profile.dshApi.ifBlank { defaultDshApiForProvider(profile.kind) }
+    }
     return when (api) {
         "openai-completions" -> ProviderProtocol.OPENAI_CHAT
         "openai-responses" -> ProviderProtocol.OPENAI_RESPONSES
