@@ -253,6 +253,10 @@
     <string name="agent_key_added">Cheie API adăugată pentru %1$s.</string>
     <string name="agent_key_activated">Cheia API activă a fost schimbată pentru %1$s.</string>
     <string name="agent_key_removed">Cheie API eliminată din %1$s.</string>
+    <string name="agent_key_add_new">Adaugă cheie nouă</string>
+    <string name="agent_key_back_saved">Înapoi la cheile salvate</string>
+    <string name="agent_key_copy">Copiază cheia</string>
+    <string name="agent_key_copied">Cheie copiată</string>
     <string name="agent_fixed_by">Corectat de %1$s</string>
     <string name="agent_models_count">%1$d modele</string>
     <string name="agent_saved_tokens">Tokenuri salvate (%1$d)</string>

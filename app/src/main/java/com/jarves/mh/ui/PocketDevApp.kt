@@ -2132,6 +2132,7 @@ private fun RootScreenHost(
                     onAddApiKey = viewModel::addApiKey,
                     onActivateApiKey = viewModel::activateApiKey,
                     onRemoveApiKey = viewModel::removeApiKey,
+                    onListKeySecrets = viewModel::keyCredentials,
                     onUpsertCustomEndpoint = viewModel::upsertCustomEndpoint,
                     onDeleteCustomEndpoint = viewModel::deleteCustomEndpoint,
                     onDetectEndpoint = viewModel::detectCustomEndpoint,

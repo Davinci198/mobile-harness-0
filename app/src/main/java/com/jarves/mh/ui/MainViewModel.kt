@@ -16,6 +16,7 @@ import com.jarves.mh.BuildConfig
 import com.jarves.mh.R
 import com.jarves.mh.data.ApiKeyVault
 import com.jarves.mh.data.ApiKeyInfo
+import com.jarves.mh.data.ApiKeyCredential
 import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.model.ActivityItem
 import com.jarves.mh.model.AgentKind
@@ -1010,6 +1011,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun getSavedApiKey(kind: ProviderKind): String = vault.get(kind.name).orEmpty()
 
     fun getSavedApiKeys(kind: ProviderKind): List<ApiKeyInfo> = vault.list(kind.name)
+
+    /** Decrypted secrets behind the pool, for screens that show a key or copy it. */
+    suspend fun keyCredentials(kind: ProviderKind): List<ApiKeyCredential> =
+        withContext(Dispatchers.IO) { vault.credentials(kind.name) }
 
     /**
      * Probes a custom endpoint URL with the key the endpoint names (or the

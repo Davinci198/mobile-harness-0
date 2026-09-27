@@ -253,6 +253,10 @@
     <string name="agent_key_added">API key added for %1$s.</string>
     <string name="agent_key_activated">Active API key changed for %1$s.</string>
     <string name="agent_key_removed">API key removed from %1$s.</string>
+    <string name="agent_key_add_new">Add new key</string>
+    <string name="agent_key_back_saved">Back to saved keys</string>
+    <string name="agent_key_copy">Copy key</string>
+    <string name="agent_key_copied">Key copied</string>
     <string name="agent_fixed_by">Fixed by %1$s</string>
     <string name="agent_models_count">%1$d models</string>
     <string name="agent_saved_tokens">Saved tokens (%1$d)</string>
