@@ -38,9 +38,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
@@ -110,6 +112,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarves.mh.R
+import com.jarves.mh.data.ApiKeyCredential
 import com.jarves.mh.data.ApiKeyInfo
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.CustomEndpoint
@@ -138,6 +141,7 @@ import com.jarves.mh.ui.theme.PocketCardBorder
 import com.jarves.mh.ui.theme.PocketMuted
 import com.jarves.mh.ui.theme.PocketOutline
 import com.jarves.mh.ui.theme.PocketSurfaceVariant
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private data class KeyConnectionStatus(
@@ -248,6 +252,7 @@ fun AgentScreen(
     onAddApiKey: (ProviderKind, String, String) -> List<ApiKeyInfo>,
     onActivateApiKey: (ProviderKind, String) -> List<ApiKeyInfo>,
     onRemoveApiKey: (ProviderKind, String) -> List<ApiKeyInfo>,
+    onListKeySecrets: suspend (ProviderKind) -> List<ApiKeyCredential> = { emptyList() },
     onUpsertCustomEndpoint: (CustomEndpoint) -> Unit = {},
     onDeleteCustomEndpoint: (String) -> Unit = {},
     onDetectEndpoint: suspend (String, String) -> EndpointDetection = { _, _ ->
@@ -315,6 +320,24 @@ fun AgentScreen(
     var endpointDetectFailed by rememberSaveable { mutableStateOf(false) }
     var endpointDetectNote by rememberSaveable { mutableStateOf("") }
     var pendingDeleteEndpointId by rememberSaveable { mutableStateOf("") }
+    // Inline key entry inside the endpoint dialog, so a key can be added
+    // without leaving the endpoint being created.
+    var endpointKeyNew by rememberSaveable { mutableStateOf(false) }
+    var endpointNewKeyName by rememberSaveable { mutableStateOf("") }
+    var endpointNewKeySecret by rememberSaveable { mutableStateOf("") }
+    var endpointNewKeyVisible by rememberSaveable { mutableStateOf(false) }
+    var endpointKeySecrets by remember { mutableStateOf<List<ApiKeyCredential>>(emptyList()) }
+    var copiedKeyId by rememberSaveable { mutableStateOf("") }
+
+    LaunchedEffect(showEndpointEditor, selectedKind) {
+        endpointKeySecrets = if (showEndpointEditor) onListKeySecrets(selectedKind) else emptyList()
+    }
+    LaunchedEffect(copiedKeyId) {
+        if (copiedKeyId.isNotEmpty()) {
+            delay(1_500)
+            copiedKeyId = ""
+        }
+    }
 
     val orderedAgents = remember(state.primaryAgentKind) {
         listOf(state.primaryAgentKind) + AgentKind.entries.filterNot { it == state.primaryAgentKind }
@@ -609,6 +632,7 @@ fun AgentScreen(
     }
 
     if (showEndpointEditor) {
+        val dialogClipboard = LocalClipboardManager.current
         AlertDialog(
             onDismissRequest = { if (!endpointDetecting) showEndpointEditor = false },
             title = { Text(stringResource(R.string.agent_endpoint_title)) },
@@ -711,27 +735,113 @@ fun AgentScreen(
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)) {
-                        Column {
-                            Row(
-                                Modifier.fillMaxWidth().clickable { endpointKeyName = "" }.padding(horizontal = 12.dp, vertical = 9.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    stringResource(R.string.agent_endpoint_current_key),
-                                    Modifier.weight(1f),
-                                    fontSize = 12.sp,
-                                )
-                                AgentSelectionDot(endpointKeyName == "")
-                            }
-                            savedKeys.forEach { key ->
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    if (endpointKeyNew) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = endpointNewKeyName,
+                                onValueChange = { endpointNewKeyName = it },
+                                label = { Text(stringResource(R.string.settings_key_name)) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                            )
+                            OutlinedTextField(
+                                value = endpointNewKeySecret,
+                                onValueChange = { endpointNewKeySecret = it },
+                                label = { Text(stringResource(R.string.settings_api_key)) },
+                                singleLine = true,
+                                visualTransformation = if (endpointNewKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                trailingIcon = {
+                                    IconButton(onClick = { endpointNewKeyVisible = !endpointNewKeyVisible }) {
+                                        Icon(
+                                            if (endpointNewKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            stringResource(R.string.agent_toggle_visibility),
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                            )
+                            Text(
+                                stringResource(R.string.agent_key_back_saved),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = PocketAccent,
+                                modifier = Modifier
+                                    .clickable { endpointKeyNew = false }
+                                    .align(Alignment.Start)
+                                    .padding(vertical = 2.dp),
+                            )
+                        }
+                    } else {
+                        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)) {
+                            Column {
                                 Row(
-                                    Modifier.fillMaxWidth().clickable { endpointKeyName = key.name }.padding(horizontal = 12.dp, vertical = 9.dp),
+                                    Modifier.fillMaxWidth().clickable { endpointKeyName = "" }.padding(horizontal = 12.dp, vertical = 9.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(key.name, Modifier.weight(1f), fontSize = 12.sp)
-                                    AgentSelectionDot(endpointKeyName == key.name)
+                                    Text(
+                                        stringResource(R.string.agent_endpoint_current_key),
+                                        Modifier.weight(1f),
+                                        fontSize = 12.sp,
+                                    )
+                                    AgentSelectionDot(endpointKeyName == "")
+                                }
+                                savedKeys.forEach { key ->
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                    Column(
+                                        Modifier.fillMaxWidth().clickable { endpointKeyName = key.name }.padding(horizontal = 12.dp, vertical = 7.dp),
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(key.name, Modifier.weight(1f), fontSize = 12.sp)
+                                            AgentSelectionDot(endpointKeyName == key.name)
+                                        }
+                                        endpointKeySecrets.firstOrNull { it.id == key.id }?.let { credential ->
+                                            Row(
+                                                Modifier.padding(top = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    credential.secret,
+                                                    Modifier.weight(1f),
+                                                    fontSize = 11.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        dialogClipboard.setText(AnnotatedString(credential.secret))
+                                                        copiedKeyId = key.id
+                                                    },
+                                                    modifier = Modifier.size(28.dp),
+                                                ) {
+                                                    Icon(
+                                                        if (copiedKeyId == key.id) Icons.Default.Check else Icons.Default.ContentCopy,
+                                                        stringResource(R.string.agent_key_copy),
+                                                        Modifier.size(15.dp),
+                                                        tint = if (copiedKeyId == key.id) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { endpointKeyNew = true }.padding(horizontal = 12.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        stringResource(R.string.agent_key_add_new),
+                                        Modifier.weight(1f),
+                                        fontSize = 12.sp,
+                                        color = PocketAccent,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Icon(Icons.Default.Add, null, Modifier.size(15.dp), tint = PocketAccent)
                                 }
                             }
                         }
@@ -741,11 +851,25 @@ fun AgentScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        if (endpointDetectFailed) {
-                            persistEndpoint(R.string.agent_endpoint_saved)
-                        } else if (!endpointDetecting) {
-                            endpointDetecting = true
-                            scope.launch {
+                        scope.launch {
+                            // A key typed in the dialog joins the pool first, so the
+                            // endpoint can reference it by name like any other key.
+                            if (endpointKeyNew && endpointNewKeySecret.isNotBlank()) {
+                                val name = endpointNewKeyName.trim().ifBlank {
+                                    context.getString(R.string.agent_key_for, selectedKind.title)
+                                }
+                                savedKeys = onAddApiKey(selectedKind, name, endpointNewKeySecret.trim())
+                                endpointKeyName = name
+                                endpointKeySecrets = onListKeySecrets(selectedKind)
+                                endpointKeyNew = false
+                                endpointNewKeyName = ""
+                                endpointNewKeySecret = ""
+                                endpointNewKeyVisible = false
+                            }
+                            if (endpointDetectFailed) {
+                                persistEndpoint(R.string.agent_endpoint_saved)
+                            } else if (!endpointDetecting) {
+                                endpointDetecting = true
                                 val detected = onDetectEndpoint(withDefaultScheme(endpointUrl), endpointKeyName)
                                 endpointDetecting = false
                                 if (detected.dshApi != null) {
@@ -769,7 +893,8 @@ fun AgentScreen(
                             }
                         }
                     },
-                    enabled = endpointLabel.isNotBlank() && endpointUrl.isNotBlank() && !endpointDetecting,
+                    enabled = endpointLabel.isNotBlank() && endpointUrl.isNotBlank() && !endpointDetecting &&
+                        (!endpointKeyNew || endpointNewKeySecret.isNotBlank()),
                 ) {
                     Text(stringResource(R.string.proj_save))
                 }
@@ -1724,6 +1849,7 @@ fun AgentScreen(
                         statusProviderMessage = statusProviderMessage,
                         keyConnectionStatuses = keyConnectionStatuses,
                         savedKeys = savedKeys,
+                        onListKeySecrets = onListKeySecrets,
                         newKeyName = newKeyName,
                         newApiKey = newApiKey,
                         newKeyVisible = newKeyVisible,
@@ -1798,6 +1924,10 @@ fun AgentScreen(
                             endpointKeyName = savedKeys.firstOrNull { it.isActive }?.name ?: ""
                             endpointDetectFailed = false
                             endpointDetectNote = ""
+                            endpointKeyNew = false
+                            endpointNewKeyName = ""
+                            endpointNewKeySecret = ""
+                            endpointNewKeyVisible = false
                             showEndpointEditor = true
                         },
                         onEditEndpoint = { ep ->
@@ -1809,6 +1939,10 @@ fun AgentScreen(
                             endpointKeyName = ep.keyName
                             endpointDetectFailed = false
                             endpointDetectNote = ""
+                            endpointKeyNew = false
+                            endpointNewKeyName = ""
+                            endpointNewKeySecret = ""
+                            endpointNewKeyVisible = false
                             showEndpointEditor = true
                         },
                         onDeleteEndpoint = { pendingDeleteEndpointId = it },
@@ -2239,6 +2373,7 @@ private fun AgentProviderCard(
     statusProviderMessage: String?,
     keyConnectionStatuses: Map<String, KeyConnectionStatus>,
     savedKeys: List<ApiKeyInfo>,
+    onListKeySecrets: suspend (ProviderKind) -> List<ApiKeyCredential>,
     newKeyName: String,
     newApiKey: String,
     newKeyVisible: Boolean,
@@ -2273,6 +2408,20 @@ private fun AgentProviderCard(
     var addKeyExpanded by rememberSaveable(savedKeys.isEmpty()) { mutableStateOf(savedKeys.isEmpty()) }
     val activeKey = savedKeys.firstOrNull { it.isActive }
     val activeKeyStatus = activeKey?.let { keyConnectionStatuses[it.id] }
+    // Secrets are revealed only while the credentials card is open, so a collapsed
+    // card never keeps decrypted keys in composition state.
+    val keyClipboard = LocalClipboardManager.current
+    var keySecrets by remember { mutableStateOf<List<ApiKeyCredential>>(emptyList()) }
+    var keyCopiedId by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(keysExpanded, selectedKind, savedKeys.size) {
+        keySecrets = if (keysExpanded) onListKeySecrets(selectedKind) else emptyList()
+    }
+    LaunchedEffect(keyCopiedId) {
+        if (keyCopiedId.isNotEmpty()) {
+            delay(1_500)
+            keyCopiedId = ""
+        }
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -2717,6 +2866,36 @@ private fun AgentProviderCard(
                                     Column(Modifier.weight(1f)) {
                                         Text(key.name, fontWeight = FontWeight.Medium, fontSize = 13.sp)
                                         Text(if (key.isActive) stringResource(R.string.settings_active) else stringResource(R.string.settings_key_tap_activate), fontSize = 10.sp, color = if (key.isActive) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant)
+                                        keySecrets.firstOrNull { it.id == key.id }?.let { credential ->
+                                            Row(
+                                                Modifier.padding(top = 3.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    credential.secret,
+                                                    Modifier.weight(1f),
+                                                    fontSize = 11.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    maxLines = 3,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        keyClipboard.setText(AnnotatedString(credential.secret))
+                                                        keyCopiedId = key.id
+                                                    },
+                                                    modifier = Modifier.size(30.dp).padding(start = 4.dp),
+                                                ) {
+                                                    Icon(
+                                                        if (keyCopiedId == key.id) Icons.Default.Check else Icons.Default.ContentCopy,
+                                                        stringResource(if (keyCopiedId == key.id) R.string.agent_key_copied else R.string.agent_key_copy),
+                                                        Modifier.size(15.dp),
+                                                        tint = if (keyCopiedId == key.id) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                     AgentSelectionDot(key.isActive)
                                     IconButton(onClick = { onRemoveKey(key.id) }) {
