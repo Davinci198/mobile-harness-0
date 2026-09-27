@@ -1,5 +1,6 @@
 package com.jarves.mh.runtime
 
+import android.util.Log
 import com.jarves.mh.model.RuntimeEvent
 import java.io.File
 import java.io.RandomAccessFile
@@ -34,6 +35,9 @@ internal class HermesWarmSession(
     private val lineBuffer = StringBuilder()
     private val pendingHooks = LinkedBlockingQueue<org.json.JSONObject>()
 
+    /** True while a spawned session is still running. */
+    val isActive: Boolean get() = process?.isAlive == true
+
     /**
      * Returns a running session matching [signature], spawning one (and waiting
      * for its interactive prompt) when needed; null means "fall back to cold".
@@ -43,7 +47,11 @@ internal class HermesWarmSession(
         spawn: (hookUrl: String) -> Process,
     ): Process? {
         val current = process
-        if (current != null && current.isAlive && this.signature == signature) return current
+        if (current != null && current.isAlive && this.signature == signature) {
+            Log.d("HermesWarmSession", "reusing warm session pid=${current.spawnPid()}")
+            return current
+        }
+        if (current != null) Log.i("HermesWarmSession", "warm session unusable, respawning")
         close()
         val listener = HermesHookServer { payload -> pendingHooks.offer(payload) }.start()
         val spawned = runCatching {
@@ -247,10 +255,15 @@ internal class HermesWarmSession(
         lineBuffer.setLength(0)
         pendingHooks.clear()
         if (target != null) {
+            // proot ignores the polite signal often enough that the wrapper has
+            // to be killed outright; the guest children it leaves behind are
+            // swept by the caller.
             Thread {
                 runCatching { target.destroy() }
+                runCatching { target.destroyForcibly() }
                 Thread.sleep(500)
                 if (target.isAlive) runCatching { target.destroyForcibly() }
+                Log.i("HermesWarmSession", "close: pid=${target.spawnPid()} stillAlive=${target.isAlive}")
             }.apply { isDaemon = true; start() }
         }
         runCatching { server?.close() }
@@ -272,3 +285,6 @@ internal class HermesWarmSession(
             "The Hermes session exited unexpectedly; the phone may have suspended it. Retry with the app in the foreground."
     }
 }
+
+/** `Process.pid()` does not exist on Android; the native spawn does expose it. */
+private fun Process.spawnPid(): Int = (this as? NativeSpawnProcess)?.pid ?: -1

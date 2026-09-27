@@ -9,7 +9,7 @@ import java.io.InputStream
 import java.io.OutputStream
 
 internal class NativeSpawnProcess private constructor(
-    private val pid: Int,
+    internal val pid: Int,
     internal val outputFile: File,
     private val stdin: OutputStream,
     private val outputPump: Thread? = null,

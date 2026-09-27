@@ -100,6 +100,10 @@ internal abstract class HeadlessCliBridge(
         HermesWarmSession { url -> installer.ensureHermesHookConfig(url) }
     }
 
+    /** Kept alive between turns so a warm session keeps a reachable gateway. */
+    private var warmProxy: LocalOpenAiProxy? = null
+    private var warmProxySignature: String? = null
+
     override suspend fun startSession(
         projectId: String,
         projectSlug: String,
@@ -166,11 +170,7 @@ internal abstract class HeadlessCliBridge(
             // OpenAI-compatible providers are reached through a loopback proxy so
             // the TLS call to the provider lives in the app process and survives
             // guest network suspension when the app loses focus.
-            openAiProxy = if (secret.isNotBlank() && provider.routesThroughOpenAiProxy()) {
-                runCatching { LocalOpenAiProxy(provider, secret).start() }
-                    .onFailure { Log.w("HeadlessBridge", "Could not start local OpenAI proxy", it) }
-                    .getOrNull()
-            } else null
+            openAiProxy = openAiProxyFor(provider, secret)
             val gatewayUrl = openAiProxy?.url
             Log.d("HeadlessBridge", "Local OpenAI proxy: ${gatewayUrl ?: "disabled"}")
             val workspace = checkpoints.ensureWorkspace(projectId)
@@ -195,7 +195,7 @@ internal abstract class HeadlessCliBridge(
                 result = CliRunResult(failed = warmTurn.failed, sawAnyOutput = warmTurn.sawAnyOutput)
                 // A failed turn leaves the session in an unknown state: drop it
                 // so the next Agent Execution respawns (or goes cold) cleanly.
-                if (warmTurn.failed != null) runCatching { warmSession.close() }
+                if (warmTurn.failed != null) closeWarmSession()
             } else {
                 val command = commandFor(contextPrompt, provider, secret, guestWorkspacePath, gatewayUrl)
                 Log.d("HeadlessBridge", "${kind.title} command: $command")
@@ -259,11 +259,51 @@ internal abstract class HeadlessCliBridge(
                 finishForegroundRuntime(completed = false, projectName = projectSlug, detail = message)
             }
         }
-        runCatching { openAiProxy?.close() }
+        // A live warm session still points at this proxy; closing it would strand
+        // the reused process on a dead gateway.
+        if (!warmSession.isActive) runCatching { openAiProxy?.close() }
         activeProcess = null
         activeSessionId = null
         RuntimeTaskController.stopAction = null
         sessionId
+    }
+
+    /**
+     * The loopback proxy an OpenAI-compatible provider is reached through.
+     *
+     * A warm session bakes `OPENAI_BASE_URL` into its guest environment at spawn
+     * and the session signature carries the gateway URL, so a fresh ephemeral
+     * port on every Agent Execution would both force a respawn and leave the
+     * reused process pointing at a closed proxy. Warm agents therefore keep one
+     * proxy per provider signature; every other agent still gets a per-turn
+     * proxy that is closed with the turn.
+     */
+    private fun openAiProxyFor(provider: ProviderProfile, secret: String): LocalOpenAiProxy? {
+        if (secret.isBlank() || !provider.routesThroughOpenAiProxy()) return null
+        val warm = supportsWarmSession()
+        val signature = listOf(
+            provider.kind.name,
+            provider.model,
+            provider.resolvedBaseUrl,
+            provider.dshApi,
+            secret,
+        ).joinToString("|")
+        if (warm) warmProxy?.takeIf { warmProxySignature == signature }?.let { return it }
+        val proxy = runCatching { LocalOpenAiProxy(provider, secret).start() }
+            .onFailure { Log.w("HeadlessBridge", "Could not start local OpenAI proxy", it) }
+            .getOrNull() ?: return null
+        if (warm) {
+            runCatching { warmProxy?.close() }
+            warmProxy = proxy
+            warmProxySignature = signature
+        }
+        return proxy
+    }
+
+    /** Drops the warm session and the guest children it left behind. */
+    private fun closeWarmSession() {
+        runCatching { warmSession.close() }
+        runCatching { installer.killGuestOrphans() }
     }
 
     /**
