@@ -123,9 +123,14 @@
     <string name="agent_no_models">Nu s-au găsit modele potrivite</string>
     <string name="agent_available_models">Modele disponibile</string>
     <string name="agent_search_custom">Caută model sau scrie un ID personalizat</string>
-    <string name="agent_hide_broken">Ascunde modelele defecte</string>
-    <string name="agent_autoscan">Scanare automată la prima conectare</string>
+    <string name="agent_hide_broken">Ascunde defecte</string>
+    <string name="agent_autoscan">Scanare auto</string>
     <string name="agent_scanning">Se scanează modelele…</string>
+    <string name="agent_log_details">Detalii testare</string>
+    <string name="agent_log_latest">ultimele log-uri</string>
+    <string name="agent_stat_working">Funcționale</string>
+    <string name="agent_stat_broken">Defecte</string>
+    <string name="agent_stat_avg_latency">Timp mediu</string>
     <string name="agent_saved_lists">Liste de modele salvate</string>
     <string name="agent_delete_list">Șterge lista de modele salvată</string>
     <string name="agent_use_custom_id">Folosește ID model personalizat:</string>

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -54,11 +55,11 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -71,7 +72,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -87,6 +87,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -118,8 +119,13 @@ import com.jarves.mh.network.EndpointDetection
 import com.jarves.mh.network.EndpointModelCatalog
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.runtime.AntigravityAuthStatus
+import com.jarves.mh.ui.theme.PocketAccent
+import com.jarves.mh.ui.theme.PocketAccentTeal
 import com.jarves.mh.ui.theme.PocketBlue
-import com.jarves.mh.ui.theme.PocketOrange
+import com.jarves.mh.ui.theme.PocketCardBorder
+import com.jarves.mh.ui.theme.PocketMuted
+import com.jarves.mh.ui.theme.PocketOutline
+import com.jarves.mh.ui.theme.PocketSurfaceVariant
 import kotlinx.coroutines.launch
 
 private data class KeyConnectionStatus(
@@ -128,6 +134,18 @@ private data class KeyConnectionStatus(
     val providerMessage: String? = null,
     val label: String = if (successful == true) "Verified" else "Failed",
 )
+
+/**
+ * Collapses "https://inference.example.com/v1/chat/completions" to "inference.example.com".
+ * Full base URLs wrap and drown the row; the host plus the already-shown model count is enough.
+ */
+internal fun hostOnly(rawUrl: String): String {
+    val stripped = rawUrl
+        .removePrefix("https://")
+        .removePrefix("http://")
+        .substringBefore('/')
+    return stripped.ifBlank { rawUrl }
+}
 
 /** Latency badge color: green under 2s, yellow under 5s, red when broken or slower. */
 internal fun latencyColor(model: DiscoveredModel): Color = when {
@@ -229,6 +247,7 @@ fun AgentScreen(
     }
     var modelSearch by rememberSaveable(selectedKind) { mutableStateOf("") }
     var showModels by rememberSaveable { mutableStateOf(false) }
+    var showScanLog by rememberSaveable { mutableStateOf(false) }
     var isDiscovering by remember { mutableStateOf(false) }
     var isValidating by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -277,6 +296,13 @@ fun AgentScreen(
         if (q.isBlank()) list else list.filter {
             it.id.contains(q, true) || it.displayName.contains(q, true)
         }
+    }
+
+    val statsBroken = remember(models, activeBrokenIds) {
+        models.count { it.id in activeBrokenIds }
+    }
+    val statsAvgLatencyMs = remember(models) {
+        models.mapNotNull(DiscoveredModel::latencyMs).takeIf { it.isNotEmpty() }?.average()
     }
 
     val antigravityModelList = remember(state.antigravityModels) {
@@ -360,19 +386,22 @@ fun AgentScreen(
     val antigravityHelloFailed = isAntigravity && state.apiPingStatus == ApiPingStatus.FAILED
     val pillLoading = antigravityTesting || (!isAntigravity && state.apiPingStatus == ApiPingStatus.PINGING)
 
+    val onlinePill = Color(0xFF34D399)
+    val warnPill = Color(0xFFFBBF24)
+    val idlePill = Color(0xFF6B7280)
     val (dot, label, pillBg) = if (isAntigravity) {
         when {
-            antigravityTesting -> Triple(PocketOrange, stringResource(R.string.agent_testing), PocketOrange.copy(alpha = 0.13f))
+            antigravityTesting -> Triple(PocketAccent, stringResource(R.string.agent_testing), PocketAccent.copy(alpha = 0.10f))
             state.antigravityAuth.status != AntigravityAuthStatus.SIGNED_IN || antigravityHelloFailed ->
-                Triple(MaterialTheme.colorScheme.error, stringResource(R.string.agent_attention), MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
-            else -> Triple(Color(0xFF58C9A3), stringResource(R.string.agent_online), Color(0xFF58C9A3).copy(alpha = 0.13f))
+                Triple(warnPill, stringResource(R.string.agent_attention), warnPill.copy(alpha = 0.08f))
+            else -> Triple(onlinePill, stringResource(R.string.agent_online), onlinePill.copy(alpha = 0.10f))
         }
     } else {
         when (state.apiPingStatus) {
-            ApiPingStatus.OK -> Triple(Color(0xFF58C9A3), stringResource(R.string.agent_online), Color(0xFF58C9A3).copy(alpha = 0.13f))
-            ApiPingStatus.FAILED -> Triple(MaterialTheme.colorScheme.error, stringResource(R.string.agent_attention), MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
-            ApiPingStatus.PINGING -> Triple(PocketOrange, stringResource(R.string.agent_testing), PocketOrange.copy(alpha = 0.13f))
-            ApiPingStatus.IDLE -> Triple(MaterialTheme.colorScheme.onSurfaceVariant, stringResource(R.string.agent_not_tested), MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+            ApiPingStatus.OK -> Triple(onlinePill, stringResource(R.string.agent_online), onlinePill.copy(alpha = 0.10f))
+            ApiPingStatus.FAILED -> Triple(warnPill, stringResource(R.string.agent_attention), warnPill.copy(alpha = 0.08f))
+            ApiPingStatus.PINGING -> Triple(PocketAccent, stringResource(R.string.agent_testing), PocketAccent.copy(alpha = 0.10f))
+            ApiPingStatus.IDLE -> Triple(idlePill, stringResource(R.string.agent_not_tested), idlePill.copy(alpha = 0.18f))
         }
     }
 
@@ -429,10 +458,10 @@ fun AgentScreen(
                             val isSelected = state.antigravityModel == modelId
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
-                                color = if (isSelected) PocketOrange.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                                color = if (isSelected) PocketAccent.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
                                 border = BorderStroke(
                                     1.dp,
-                                    if (isSelected) PocketOrange.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                    if (isSelected) PocketAccent.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -451,20 +480,20 @@ fun AgentScreen(
                                                 formatAntigravityModelName(modelId),
                                                 fontWeight = FontWeight.SemiBold,
                                                 fontSize = 14.sp,
-                                                color = if (isSelected) PocketOrange else MaterialTheme.colorScheme.onSurface,
+                                                color = if (isSelected) PocketAccent else MaterialTheme.colorScheme.onSurface,
                                             )
                                             val tier = formatAntigravityModelTier(modelId)
                                             if (tier != null) {
                                                 Spacer(Modifier.width(8.dp))
                                                 Surface(
-                                                    color = if (isSelected) PocketOrange.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant,
+                                                    color = if (isSelected) PocketAccent.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant,
                                                     shape = RoundedCornerShape(4.dp),
                                                 ) {
                                                     Text(
                                                         stringResource(tier),
                                                         fontSize = 9.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = if (isSelected) PocketOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        color = if (isSelected) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                                                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
                                                     )
                                                 }
@@ -724,11 +753,20 @@ fun AgentScreen(
                     }
                     IconButton(onClick = ::discoverModels, enabled = !isDiscovering) {
                         if (isDiscovering) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = PocketOrange)
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = PocketAccent)
                         } else {
                             Icon(Icons.Default.Refresh, stringResource(R.string.settings_refresh_models))
                         }
                     }
+                }
+                if (models.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    ModelStatsGrid(
+                        working = models.size - statsBroken,
+                        broken = statsBroken,
+                        avgLatencyMs = statsAvgLatencyMs,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
@@ -744,31 +782,23 @@ fun AgentScreen(
 
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Switch(
-                            checked = state.hideBrokenModels,
-                            onCheckedChange = onHideBrokenChange,
-                            modifier = Modifier.scale(0.75f),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.agent_hide_broken), fontSize = 12.sp, maxLines = 2)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Switch(
-                            checked = state.autoScanEnabled,
-                            onCheckedChange = onAutoScanChange,
-                            modifier = Modifier.scale(0.75f),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.agent_autoscan), fontSize = 12.sp, maxLines = 2)
-                    }
+                    PillToggleChip(
+                        text = stringResource(R.string.agent_hide_broken),
+                        active = state.hideBrokenModels,
+                        onClick = { onHideBrokenChange(!state.hideBrokenModels) },
+                    )
+                    PillToggleChip(
+                        text = stringResource(R.string.agent_autoscan),
+                        active = state.autoScanEnabled,
+                        onClick = { onAutoScanChange(!state.autoScanEnabled) },
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
 
-                Button(
+                SecondaryActionButton(
                     onClick = {
                         val kind = selectedKind
                         val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl.trim()
@@ -778,10 +808,9 @@ fun AgentScreen(
                     },
                     enabled = !state.isModelScanning && !isDiscovering,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
                 ) {
                     if (state.isModelScanning) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = PocketMuted)
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.agent_scanning))
                     } else {
@@ -791,23 +820,78 @@ fun AgentScreen(
                     }
                 }
 
+                // Keep the log open while a scan runs so progress stays visible.
+                LaunchedEffect(state.isModelScanning) {
+                    if (state.isModelScanning) showScanLog = true
+                }
                 if (state.modelScanLines.isNotEmpty() || state.isModelScanning) {
                     Spacer(Modifier.height(10.dp))
-                    ModelScanTerminal(
-                        lines = state.modelScanLines,
-                        scanning = state.isModelScanning,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF111113),
+                        border = BorderStroke(1.dp, Color(0xFF222222)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showScanLog = !showScanLog },
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                Modifier.size(20.dp).background(Color(0xFF1F1F28), CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "_",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = PocketMuted,
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                stringResource(R.string.agent_log_details),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFFC9C9D1),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                stringResource(R.string.agent_log_latest),
+                                fontSize = 11.sp,
+                                color = Color(0xFF6B6B76),
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Icon(
+                                if (showScanLog) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = stringResource(
+                                    if (showScanLog) R.string.settings_collapse else R.string.settings_expand,
+                                ),
+                                tint = Color(0xFF4B4B55),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                    if (showScanLog) {
+                        Spacer(Modifier.height(8.dp))
+                        ModelScanTerminal(
+                            lines = state.modelScanLines,
+                            scanning = state.isModelScanning,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     Spacer(Modifier.height(10.dp))
                 }
 
                 if (state.modelCatalogs.isNotEmpty()) {
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        stringResource(R.string.agent_saved_lists),
-                        fontSize = 12.sp,
+                        stringResource(R.string.agent_saved_lists).uppercase(java.util.Locale.ROOT),
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.sp,
+                        color = PocketMuted,
                     )
                     state.modelCatalogs.forEach { catalog ->
                         Row(
@@ -823,7 +907,7 @@ fun AgentScreen(
                                     fontWeight = FontWeight.Medium,
                                 )
                                 Text(
-                                    catalog.baseUrl,
+                                    hostOnly(catalog.baseUrl),
                                     fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -849,11 +933,11 @@ fun AgentScreen(
                 if (status != null) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = if (statusOk) PocketOrange.copy(alpha = 0.09f)
+                        color = if (statusOk) PocketAccent.copy(alpha = 0.09f)
                         else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f),
                         border = BorderStroke(
                             1.dp,
-                            if (statusOk) PocketOrange.copy(alpha = 0.28f)
+                            if (statusOk) PocketAccent.copy(alpha = 0.28f)
                             else MaterialTheme.colorScheme.error.copy(alpha = 0.35f),
                         ),
                         modifier = Modifier.fillMaxWidth(),
@@ -864,13 +948,13 @@ fun AgentScreen(
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(15.dp),
                                     strokeWidth = 1.6.dp,
-                                    color = PocketOrange,
+                                    color = PocketAccent,
                                 )
                             } else {
                                 Icon(
                                     if (statusOk) Icons.Default.Info else Icons.Default.Warning,
                                     contentDescription = null,
-                                    tint = if (statusOk) PocketOrange else MaterialTheme.colorScheme.error,
+                                    tint = if (statusOk) PocketAccent else MaterialTheme.colorScheme.error,
                                     modifier = Modifier.size(15.dp),
                                 )
                             }
@@ -905,7 +989,7 @@ fun AgentScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(Modifier.size(32.dp), color = PocketOrange, strokeWidth = 3.dp)
+                            CircularProgressIndicator(Modifier.size(32.dp), color = PocketAccent, strokeWidth = 3.dp)
                             Spacer(Modifier.height(14.dp))
                             Text(
                                 stringResource(R.string.agent_discovering_from, selectedKind.title),
@@ -924,8 +1008,8 @@ fun AgentScreen(
                         if (modelSearch.isNotBlank()) {
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
-                                color = PocketOrange.copy(alpha = 0.12f),
-                                border = BorderStroke(1.dp, PocketOrange.copy(alpha = 0.5f)),
+                                color = PocketAccent.copy(alpha = 0.12f),
+                                border = BorderStroke(1.dp, PocketAccent.copy(alpha = 0.5f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
@@ -938,21 +1022,20 @@ fun AgentScreen(
                                     Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Icon(Icons.Default.Check, null, tint = PocketOrange, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Check, null, tint = PocketAccent, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(10.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(stringResource(R.string.agent_use_custom_id), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text(modelSearch.trim(), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = PocketOrange)
+                                        Text(modelSearch.trim(), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = PocketAccent)
                                     }
                                 }
                             }
                         }
 
 
-                        Button(
+                        SecondaryActionButton(
                             onClick = ::discoverModels,
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
                         ) {
                             Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(8.dp))
@@ -962,20 +1045,21 @@ fun AgentScreen(
                         val recommended = remember(selectedKind) { defaultModelsForProvider(selectedKind) }
                         if (recommended.isNotEmpty()) {
                             Text(
-                                stringResource(R.string.agent_recommended_models),
-                                fontSize = 12.sp,
+                                stringResource(R.string.agent_recommended_models).uppercase(java.util.Locale.ROOT),
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                letterSpacing = 1.sp,
+                                color = PocketMuted,
                                 modifier = Modifier.padding(top = 4.dp),
                             )
                             recommended.forEach { opt ->
                                 val isSelected = model == opt.id
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
-                                    color = if (isSelected) PocketOrange.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                                    color = if (isSelected) PocketAccent.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isSelected) PocketOrange.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                        if (isSelected) PocketAccent.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -994,7 +1078,7 @@ fun AgentScreen(
                                                 opt.displayName,
                                                 fontWeight = FontWeight.SemiBold,
                                                 fontSize = 14.sp,
-                                                color = if (isSelected) PocketOrange else MaterialTheme.colorScheme.onSurface,
+                                                color = if (isSelected) PocketAccent else MaterialTheme.colorScheme.onSurface,
                                             )
                                             Text(
                                                 opt.id,
@@ -1019,8 +1103,8 @@ fun AgentScreen(
                             item {
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
-                                    color = PocketOrange.copy(alpha = 0.12f),
-                                    border = BorderStroke(1.dp, PocketOrange.copy(alpha = 0.5f)),
+                                    color = PocketAccent.copy(alpha = 0.12f),
+                                    border = BorderStroke(1.dp, PocketAccent.copy(alpha = 0.5f)),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
@@ -1033,11 +1117,11 @@ fun AgentScreen(
                                         Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Icon(Icons.Default.Check, null, tint = PocketOrange, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.Check, null, tint = PocketAccent, modifier = Modifier.size(18.dp))
                                         Spacer(Modifier.width(10.dp))
                                         Column(Modifier.weight(1f)) {
                                             Text(stringResource(R.string.agent_use_custom_id), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text(modelSearch.trim(), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = PocketOrange)
+                                            Text(modelSearch.trim(), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = PocketAccent)
                                         }
                                     }
                                 }
@@ -1047,10 +1131,10 @@ fun AgentScreen(
                             val isSelected = model == option.id
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
-                                color = if (isSelected) PocketOrange.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                                color = if (isSelected) PocketAccent.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
                                 border = BorderStroke(
                                     1.dp,
-                                    if (isSelected) PocketOrange.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                    if (isSelected) PocketAccent.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1080,7 +1164,7 @@ fun AgentScreen(
                                                     option.displayName,
                                                     fontWeight = FontWeight.SemiBold,
                                                     fontSize = 14.sp,
-                                                    color = if (isSelected) PocketOrange else MaterialTheme.colorScheme.onSurface,
+                                                    color = if (isSelected) PocketAccent else MaterialTheme.colorScheme.onSurface,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
@@ -1120,32 +1204,41 @@ fun AgentScreen(
                 modifier = Modifier.padding(top = 4.dp),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
-                            modifier = Modifier.size(34.dp),
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(PocketAccent, PocketAccentTeal),
+                                    ),
+                                    RoundedCornerShape(14.dp),
+                                ),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.SmartToy,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.SmartToy,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp),
+                            )
                         }
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(12.dp))
                         Column {
-                            Text(stringResource(R.string.agent_ai_agent), fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                            Text(
+                                stringResource(R.string.agent_ai_agent),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 18.sp,
+                                letterSpacing = (-0.4).sp,
+                                color = Color(0xFFF5F5F7),
+                            )
                             Text(
                                 if (isAntigravity) {
                                     "Antigravity · ${formatAntigravityModelName(state.antigravityModel)}"
                                 } else {
                                     "${state.agentKind.title} · ${model.ifBlank { selectedKind.title }}"
                                 },
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 13.sp,
+                                color = PocketMuted,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -1191,9 +1284,9 @@ fun AgentScreen(
             item {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                        shape = CircleShape,
+                        color = Color(0xFF1E1E24),
+                        border = BorderStroke(1.dp, PocketCardBorder),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Row(
@@ -1213,9 +1306,8 @@ fun AgentScreen(
                                     AgentKind.HERMES -> "Hermes"
                                 }
                                 Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
-                                    border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)) else null,
+                                    shape = CircleShape,
+                                    color = if (isSelected) Color.White else Color.Transparent,
                                     modifier = Modifier
                                         .weight(1f)
                                         .clickable(enabled = state.agentInstalling == null) {
@@ -1224,15 +1316,15 @@ fun AgentScreen(
                                         },
                                 ) {
                                     Box(
-                                        modifier = Modifier.padding(vertical = 12.dp, horizontal = 4.dp),
+                                        modifier = Modifier.padding(vertical = 9.dp, horizontal = 4.dp),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
                                                 shortTitle,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                                                 fontSize = 12.sp,
-                                                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                color = if (isSelected) Color.Black else PocketMuted,
                                                 maxLines = 1,
                                             )
                                             if (pendingChangeCount > 0) {
@@ -1251,7 +1343,7 @@ fun AgentScreen(
                                             }
                                             if (updateAvailable) {
                                                 Spacer(Modifier.width(3.dp))
-                                                Box(Modifier.size(5.dp).background(PocketOrange, CircleShape))
+                                                Box(Modifier.size(5.dp).background(PocketAccent, CircleShape))
                                             }
                                         }
                                     }
@@ -1316,9 +1408,9 @@ fun AgentScreen(
                     } else if (!viewedAgentInstalled) {
                         Spacer(Modifier.height(8.dp))
                         Surface(
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(24.dp),
                             color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
+                            border = BorderStroke(1.dp, PocketCardBorder),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Column(Modifier.padding(16.dp)) {
@@ -1577,8 +1669,8 @@ private fun AgentAntigravityCard(
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, PocketCardBorder),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -1702,7 +1794,7 @@ private fun AgentAntigravityCard(
                             Text(
                                 stringResource(R.string.agent_sync),
                                 fontSize = 11.sp,
-                                color = PocketOrange,
+                                color = PocketAccent,
                                 fontWeight = FontWeight.SemiBold,
                             )
                         }
@@ -1723,13 +1815,13 @@ private fun AgentAntigravityCard(
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
-                                    .background(PocketOrange.copy(alpha = 0.12f), RoundedCornerShape(9.dp)),
+                                    .background(PocketAccent.copy(alpha = 0.12f), RoundedCornerShape(9.dp)),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
                                     Icons.Default.AutoAwesome,
                                     contentDescription = null,
-                                    tint = PocketOrange,
+                                    tint = PocketAccent,
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
@@ -1788,7 +1880,7 @@ private fun AgentAntigravityCard(
                         Text(
                             effortCaption,
                             fontSize = 11.sp,
-                            color = PocketOrange,
+                            color = PocketAccent,
                             fontWeight = FontWeight.Medium,
                         )
                     }
@@ -1807,7 +1899,7 @@ private fun AgentAntigravityCard(
                                 val isSelected = state.antigravityEffort == effort
                                 Surface(
                                     shape = RoundedCornerShape(9.dp),
-                                    color = if (isSelected) PocketOrange else Color.Transparent,
+                                    color = if (isSelected) PocketAccent else Color.Transparent,
                                     modifier = Modifier
                                         .weight(1f)
                                         .clickable { onSetEffort(effort) },
@@ -1831,23 +1923,20 @@ private fun AgentAntigravityCard(
             }
 
             if (auth.status == AntigravityAuthStatus.SIGNED_IN) {
-                OutlinedButton(
+                SecondaryActionButton(
                     onClick = onTest,
                     enabled = state.apiPingStatus != ApiPingStatus.PINGING,
                     modifier = Modifier.fillMaxWidth().height(46.dp),
-                    shape = RoundedCornerShape(13.dp),
-                    border = BorderStroke(1.dp, PocketOrange.copy(alpha = 0.7f)),
                 ) {
                     if (state.apiPingStatus == ApiPingStatus.PINGING) {
-                        CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 1.8.dp, color = PocketOrange)
+                        CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 1.8.dp, color = PocketMuted)
                         Spacer(Modifier.width(8.dp))
                     } else {
-                        Icon(Icons.Default.Refresh, null, Modifier.size(16.dp), tint = PocketOrange)
+                        Icon(Icons.Default.Refresh, null, Modifier.size(16.dp), tint = PocketMuted)
                         Spacer(Modifier.width(8.dp))
                     }
                     Text(
                         if (state.apiPingStatus == ApiPingStatus.PINGING) stringResource(R.string.agent_testing_connection) else stringResource(R.string.agent_test_connection),
-                        color = PocketOrange,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -1935,8 +2024,8 @@ private fun AgentProviderCard(
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, PocketCardBorder),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -2030,16 +2119,18 @@ private fun AgentProviderCard(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Text(
-                                            stringResource(R.string.agent_endpoints),
+                                            stringResource(R.string.agent_endpoints).uppercase(java.util.Locale.ROOT),
                                             Modifier.weight(1f),
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.SemiBold,
+                                            letterSpacing = 1.sp,
+                                            color = PocketMuted,
                                         )
                                         Text(
                                             stringResource(R.string.agent_endpoint_new),
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = PocketOrange,
+                                            color = PocketAccent,
                                             modifier = Modifier.clickable(onClick = onCreateEndpoint).padding(4.dp),
                                         )
                                     }
@@ -2071,7 +2162,7 @@ private fun AgentProviderCard(
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
                                                 Text(
-                                                    listOf(ep.baseUrl, ep.model).filter(String::isNotBlank).joinToString(" · "),
+                                                    listOf(hostOnly(ep.baseUrl), ep.model).filter(String::isNotBlank).joinToString(" · "),
                                                     fontSize = 11.sp,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     maxLines = 1,
@@ -2141,7 +2232,7 @@ private fun AgentProviderCard(
                         if (isDiscovering) stringResource(R.string.agent_discovering) else if (models.isEmpty()) stringResource(R.string.agent_discover_models) else stringResource(R.string.agent_models_count, models.size),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = PocketOrange,
+                        color = PocketAccent,
                         modifier = Modifier.clickable(enabled = !isDiscovering, onClick = onDiscover).padding(6.dp),
                     )
                 }
@@ -2166,7 +2257,7 @@ private fun AgentProviderCard(
             if (status != null) {
                 Column(modifier = Modifier.padding(start = 48.dp, end = 8.dp, bottom = 8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(if (statusOk) Icons.Default.Info else Icons.Default.Warning, null, tint = if (statusOk) PocketOrange else MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
+                        Icon(if (statusOk) Icons.Default.Info else Icons.Default.Warning, null, tint = if (statusOk) PocketAccent else MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(7.dp))
                         Text(status, fontSize = 10.sp, lineHeight = 14.sp, color = if (statusOk) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
                     }
@@ -2230,7 +2321,7 @@ private fun AgentProviderCard(
                         Text(
                             if (addKeyExpanded) stringResource(R.string.settings_cancel) else stringResource(R.string.agent_add_key),
                             fontSize = 11.sp,
-                            color = PocketOrange,
+                            color = PocketAccent,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clickable { addKeyExpanded = !addKeyExpanded }.padding(6.dp),
                         )
@@ -2245,7 +2336,7 @@ private fun AgentProviderCard(
                                 ) {
                                     Column(Modifier.weight(1f)) {
                                         Text(key.name, fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                                        Text(if (key.isActive) stringResource(R.string.settings_active) else stringResource(R.string.settings_key_tap_activate), fontSize = 10.sp, color = if (key.isActive) PocketOrange else MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(if (key.isActive) stringResource(R.string.settings_active) else stringResource(R.string.settings_key_tap_activate), fontSize = 10.sp, color = if (key.isActive) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     AgentSelectionDot(key.isActive)
                                     IconButton(onClick = { onRemoveKey(key.id) }) {
@@ -2307,19 +2398,17 @@ private fun AgentProviderCard(
             }
 
             Spacer(Modifier.height(12.dp))
-            OutlinedButton(
+            SecondaryActionButton(
                 onClick = onValidate,
                 enabled = apiKey.isNotBlank() && !isDiscovering && !isValidating &&
                     (selectedKind == ProviderKind.CLAUDE || (baseUrl.isNotBlank() && model.isNotBlank())),
                 modifier = Modifier.fillMaxWidth().height(46.dp),
-                shape = RoundedCornerShape(13.dp),
-                border = BorderStroke(1.dp, PocketOrange.copy(alpha = 0.7f)),
             ) {
                 if (isValidating) {
-                    CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 1.8.dp, color = PocketOrange)
+                    CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 1.8.dp, color = PocketMuted)
                     Spacer(Modifier.width(8.dp))
                 } else {
-                    Icon(if (selectedKind == ProviderKind.CLAUDE) Icons.Default.Check else Icons.Default.Refresh, null, Modifier.size(16.dp), tint = PocketOrange)
+                    Icon(if (selectedKind == ProviderKind.CLAUDE) Icons.Default.Check else Icons.Default.Refresh, null, Modifier.size(16.dp), tint = PocketMuted)
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
@@ -2329,7 +2418,6 @@ private fun AgentProviderCard(
                         selectedKind == ProviderKind.CLAUDE -> stringResource(R.string.agent_save_sub_token)
                         else -> stringResource(R.string.agent_test_connection)
                     },
-                    color = PocketOrange,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -2352,10 +2440,10 @@ private fun PremiumSummaryRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            modifier = Modifier.size(38.dp).background(PocketOrange.copy(alpha = 0.10f), RoundedCornerShape(11.dp)),
+            modifier = Modifier.size(38.dp).background(PocketAccent.copy(alpha = 0.10f), RoundedCornerShape(11.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, null, tint = PocketOrange, modifier = Modifier.size(19.dp))
+            Icon(icon, null, tint = PocketAccent, modifier = Modifier.size(19.dp))
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -2416,10 +2504,10 @@ private fun AgentUpdateBlock(
                 if (state.agentUpdatesChecking) {
                     CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 1.6.dp)
                 } else {
-                    Icon(Icons.Default.Refresh, contentDescription = null, tint = PocketOrange, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.Refresh, contentDescription = null, tint = PocketAccent, modifier = Modifier.size(14.dp))
                 }
                 Spacer(Modifier.width(5.dp))
-                Text(stringResource(R.string.agent_check_updates), color = PocketOrange, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.agent_check_updates), color = PocketAccent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
         }
 
@@ -2433,8 +2521,8 @@ private fun AgentUpdateBlock(
 
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = PocketOrange.copy(alpha = 0.08f),
-                    border = BorderStroke(1.dp, PocketOrange.copy(alpha = 0.28f)),
+                    color = PocketAccent.copy(alpha = 0.08f),
+                    border = BorderStroke(1.dp, PocketAccent.copy(alpha = 0.28f)),
                 ) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2442,7 +2530,7 @@ private fun AgentUpdateBlock(
                                 Text(agent.title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text("v${update.installedVersion} → v${update.latestVersion}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Text(stringResource(R.string.agent_update), color = PocketOrange, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+                            Text(stringResource(R.string.agent_update), color = PocketAccent, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
                         }
                         if (updating) {
                             state.agentUpdateMessage?.let { Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -2498,11 +2586,145 @@ private fun AgentTypingDots(
 @Composable
 private fun AgentSelectionDot(selected: Boolean) {
     Box(
-        Modifier.size(22.dp).border(if (selected) 2.dp else 1.5.dp, if (selected) PocketOrange else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), CircleShape),
+        Modifier.size(22.dp).border(if (selected) 2.dp else 1.5.dp, if (selected) PocketAccent else MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        if (selected) Box(Modifier.size(10.dp).background(PocketOrange, CircleShape))
+        if (selected) Box(Modifier.size(10.dp).background(PocketAccent, CircleShape))
     }
+}
+
+/** Three-up summary of the current model list: working, broken, and average probe latency. */
+@Composable
+private fun ModelStatsGrid(
+    working: Int,
+    broken: Int,
+    avgLatencyMs: Double?,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        StatCell(
+            label = stringResource(R.string.agent_stat_working),
+            value = working.toString(),
+            accent = Color(0xFF4ADE80),
+            modifier = Modifier.weight(1f),
+        )
+        StatCell(
+            label = stringResource(R.string.agent_stat_broken),
+            value = broken.toString(),
+            accent = Color(0xFFFB7185),
+            modifier = Modifier.weight(1f),
+        )
+        StatCell(
+            label = stringResource(R.string.agent_stat_avg_latency),
+            value = avgLatencyMs?.let { "%.1fs".format(it / 1000.0) } ?: "—",
+            accent = PocketMuted,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun StatCell(
+    label: String,
+    value: String,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = PocketSurfaceVariant,
+        border = BorderStroke(1.dp, PocketCardBorder),
+        modifier = modifier,
+    ) {
+        Column(
+            Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                value,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = accent,
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                label,
+                fontSize = 10.sp,
+                color = PocketMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * Pill chip that acts as a toggle: white fill and a check mark while active,
+ * dark surface and muted label otherwise. Replaces the old Switch toggles.
+ */
+@Composable
+private fun PillToggleChip(
+    text: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        shape = CircleShape,
+        color = if (active) Color.White else Color(0xFF1E1E24),
+        border = BorderStroke(1.dp, if (active) Color.White else PocketCardBorder),
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (active) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = Color.Black,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(5.dp))
+            }
+            Text(
+                text,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (active) Color.Black else PocketMuted,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/**
+ * Neutral secondary action button: #1f1f28 fill with a #2a2a32 hairline.
+ * The redesign replaces oversized accent buttons with this quieter style,
+ * leaving the violet accent for indicators, selections, and the header avatar.
+ */
+@Composable
+private fun SecondaryActionButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = PocketSurfaceVariant,
+            contentColor = Color.White,
+            disabledContainerColor = PocketSurfaceVariant.copy(alpha = 0.45f),
+            disabledContentColor = PocketMuted,
+        ),
+        border = BorderStroke(1.dp, PocketOutline),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+    ) { content(this) }
 }
 
 /** Provides popular default models for providers when discovery hasn't been run or is unavailable. */
@@ -2550,9 +2772,9 @@ internal fun ModelScanTerminal(
     }
     Surface(
         modifier = modifier.heightIn(max = 200.dp),
-        shape = RoundedCornerShape(10.dp),
-        color = Color(0xFF0D1117),
-        border = BorderStroke(1.dp, Color(0xFF30363D)),
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF111111),
+        border = BorderStroke(1.dp, Color(0xFF1F1F23)),
     ) {
         LazyColumn(
             state = listState,
@@ -2561,18 +2783,19 @@ internal fun ModelScanTerminal(
                 .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
             items(lines) { line ->
+                // Soft, desaturated log palette — the old neon red/green reads as noise.
                 val color = when {
-                    line.startsWith("✓") -> Color(0xFF3FB950)
-                    line.startsWith("✗") || line.startsWith("!") -> Color(0xFFF85149)
-                    line.startsWith("T") -> Color(0xFFD29922)
-                    line.startsWith("$") || line.startsWith("Done") -> Color(0xFF58A6FF)
-                    else -> Color(0xFF8B949E)
+                    line.startsWith("✓") -> Color(0xFF4ADE80).copy(alpha = 0.8f)
+                    line.startsWith("✗") || line.startsWith("!") -> Color(0xFFFB7185).copy(alpha = 0.8f)
+                    line.startsWith("T") -> Color(0xFFFBBF24).copy(alpha = 0.8f)
+                    line.startsWith("$") || line.startsWith("Done") -> PocketAccent.copy(alpha = 0.8f)
+                    else -> PocketMuted
                 }
                 Text(
                     line,
                     color = color,
                     fontSize = 11.sp,
-                    lineHeight = 14.sp,
+                    lineHeight = 15.sp,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -2583,7 +2806,7 @@ internal fun ModelScanTerminal(
                 item {
                     Text(
                         "…",
-                        color = PocketOrange,
+                        color = PocketAccent,
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                     )

@@ -90,7 +90,7 @@ import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketGreen
-import com.jarves.mh.ui.theme.PocketOrange
+import com.jarves.mh.ui.theme.PocketAccent
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -139,7 +139,7 @@ private fun LegacySettingsScreen(
                         Icon(
                             Icons.Default.Settings,
                             contentDescription = null,
-                            tint = PocketOrange,
+                            tint = PocketAccent,
                             modifier = Modifier.size(24.dp),
                         )
                         Spacer(Modifier.width(10.dp))
@@ -252,7 +252,7 @@ private fun LegacySettingsScreen(
                                                 "${(state.devStackProgress * 100).toInt().coerceIn(0, 100)}%",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 13.sp,
-                                                color = PocketOrange,
+                                                color = PocketAccent,
                                             )
                                         }
                                         installed -> Unit // badge already shown next to the name
@@ -270,7 +270,7 @@ private fun LegacySettingsScreen(
                                     LinearProgressIndicator(
                                         progress = { state.devStackProgress.coerceIn(0f, 1f) },
                                         modifier = Modifier.fillMaxWidth().height(8.dp),
-                                        color = PocketOrange,
+                                        color = PocketAccent,
                                         trackColor = MaterialTheme.colorScheme.surface,
                                     )
                                     Spacer(Modifier.height(6.dp))
@@ -301,7 +301,7 @@ private fun LegacySettingsScreen(
                                             "${formatBytes(speed)}/s",
                                             fontSize = 11.sp,
                                             fontFamily = FontFamily.Monospace,
-                                            color = PocketOrange,
+                                            color = PocketAccent,
                                         )
                                     }
                                 } else if (index != DevStack.entries.lastIndex) {
@@ -388,7 +388,7 @@ private fun LegacySettingsScreen(
                                             when (state.apiPingStatus) {
                                                 ApiPingStatus.OK -> PocketGreen
                                                 ApiPingStatus.FAILED -> MaterialTheme.colorScheme.error
-                                                ApiPingStatus.PINGING -> PocketOrange
+                                                ApiPingStatus.PINGING -> PocketAccent
                                                 ApiPingStatus.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
                                             },
                                         ),
@@ -448,7 +448,7 @@ private fun LegacySettingsScreen(
                                 Icon(
                                     Icons.Default.Key,
                                     contentDescription = null,
-                                    tint = if (isSelected) PocketOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    tint = if (isSelected) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp),
                                 )
                                 Spacer(Modifier.width(10.dp))
@@ -457,13 +457,13 @@ private fun LegacySettingsScreen(
                                         Text(kind.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                                         if (kind.experimental) {
                                             Spacer(Modifier.width(6.dp))
-                                            Text("EXPERIMENTAL", color = PocketOrange, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                            Text("EXPERIMENTAL", color = PocketAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                     Text(kind.subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 if (isSelected) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = PocketOrange, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = PocketAccent, modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
@@ -481,7 +481,7 @@ private fun LegacySettingsScreen(
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = PocketOrange,
+                        focusedBorderColor = PocketAccent,
                     ),
                 )
 
@@ -501,7 +501,7 @@ private fun LegacySettingsScreen(
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = PocketOrange,
+                            focusedBorderColor = PocketAccent,
                         ),
                     )
                     OutlinedButton(
@@ -562,7 +562,7 @@ private fun LegacySettingsScreen(
                         }
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = PocketOrange,
+                        focusedBorderColor = PocketAccent,
                     ),
                 )
 
@@ -628,7 +628,7 @@ private fun LegacySettingsScreen(
                         .fillMaxWidth()
                         .height(50.dp),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = PocketOrange),
+                    colors = ButtonDefaults.buttonColors(containerColor = PocketAccent),
                 ) {
                     if (isValidating) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
@@ -752,7 +752,7 @@ private fun LegacySettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text("Mobile Harness", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text("v1.0.0", color = PocketOrange, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text("v1.0.0", color = PocketAccent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         }
                         Text(
                             "Autonomous AI Developer with native on-device Linux PRoot sandbox and Claude Code integration.",
@@ -773,11 +773,11 @@ private fun SectionHeader(title: String, subtitle: String, icon: ImageVector) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Surface(
             shape = RoundedCornerShape(10.dp),
-            color = PocketOrange.copy(alpha = 0.12f),
+            color = PocketAccent.copy(alpha = 0.12f),
             modifier = Modifier.size(36.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = PocketOrange, modifier = Modifier.size(18.dp))
+                Icon(icon, contentDescription = null, tint = PocketAccent, modifier = Modifier.size(18.dp))
             }
         }
         Spacer(Modifier.width(10.dp))
@@ -802,7 +802,7 @@ private fun ThemeOptionCard(
             .clickable(onClick = onClick)
             .border(
                 width = if (selected) 2.dp else 1.dp,
-                color = if (selected) PocketOrange else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                color = if (selected) PocketAccent else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(14.dp),
             ),
         shape = RoundedCornerShape(14.dp),
@@ -818,7 +818,7 @@ private fun ThemeOptionCard(
             Icon(
                 icon,
                 contentDescription = title,
-                tint = if (selected) PocketOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (selected) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp),
             )
             Text(
