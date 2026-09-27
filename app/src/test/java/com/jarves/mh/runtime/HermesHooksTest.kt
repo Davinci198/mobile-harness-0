@@ -49,8 +49,10 @@ class HermesHooksTest {
 
     @Test
     fun toolCallsMapOntoToolEvents() {
+        // The guest sends the tool arguments top-level as `tool_input`.
         val started = mapHermesHook(
-            payload("pre_tool_call", JSONObject().put("path", "/tmp/x"), toolName = "write_file"),
+            payload("pre_tool_call", toolName = "write_file")
+                .put("tool_input", JSONObject().put("path", "/tmp/x")),
         )
         assertTrue(started is HermesHookAction.ToolStart)
         assertEquals("write_file", (started as HermesHookAction.ToolStart).name)
