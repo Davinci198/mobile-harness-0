@@ -10,6 +10,7 @@ import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
+import com.jarves.mh.model.isLoopbackBaseUrl
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.UUID
@@ -101,7 +102,8 @@ internal abstract class HeadlessCliBridge(
         pushForegroundProgress("Starting ${kind.title}…")
 
         val secret = secretFor(provider).orEmpty()
-        if (provider.kind != ProviderKind.FREE && secret.isBlank()) {
+        // A loopback gateway on this device runs keyless; only remote providers need a saved key.
+        if (provider.kind != ProviderKind.FREE && secret.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) {
             eventBus.emit(
                 RuntimeEvent.SessionFailed(sessionId, "No API key is saved for ${provider.kind.title}."),
             )

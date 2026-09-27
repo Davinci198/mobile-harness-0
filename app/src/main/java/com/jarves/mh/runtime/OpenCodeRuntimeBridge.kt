@@ -4,6 +4,7 @@ import android.content.Context
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
+import com.jarves.mh.model.isLoopbackBaseUrl
 
 /**
  * Headless OpenCode v2 bridge: `opencode run --standalone --format json --auto`.
@@ -75,12 +76,19 @@ internal class OpenCodeRuntimeBridge(
             "OPENCODE_DISABLE_MODELS_FETCH" to "true",
         )
         val kind = provider.kind
-        if (kind == ProviderKind.FREE || secret.isNullOrBlank()) return environment
+        if (kind == ProviderKind.FREE) return environment
+        val rawKey = secret.orEmpty()
+        // A loopback gateway on this device runs keyless: keep the guest pointed
+        // at it instead of falling back to the provider's public endpoint.
+        if (rawKey.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return environment
+        // Guest CLIs refuse to boot with an empty key variable, while a loopback
+        // gateway ignores the header — send a placeholder instead of nothing.
+        val key = rawKey.ifBlank { "loopback" }
         if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
             when (kind) {
                 ProviderKind.NVIDIA_NIM -> {
-                    environment["NVIDIA_API_KEY"] = secret
-                    environment["NIM_API_KEY"] = secret
+                    environment["NVIDIA_API_KEY"] = key
+                    environment["NIM_API_KEY"] = key
                     // Full offline config (HarnessRouter pattern): pin npm package,
                     // baseURL, env-resolved key, the one model for this turn, and
                     // disable workspace snapshots. Catalog fetch is already off above,
@@ -97,29 +105,29 @@ internal class OpenCodeRuntimeBridge(
                     }
                 }
                 else -> {
-                    environment["OPENAI_API_KEY"] = secret
+                    environment["OPENAI_API_KEY"] = key
                     environment["OPENAI_BASE_URL"] = gatewayUrl
                 }
             }
             return environment
         }
         when (kind) {
-            ProviderKind.DEEPSEEK -> environment["DEEPSEEK_API_KEY"] = secret
+            ProviderKind.DEEPSEEK -> environment["DEEPSEEK_API_KEY"] = key
             ProviderKind.ANTHROPIC -> {
-                environment["ANTHROPIC_API_KEY"] = secret
+                environment["ANTHROPIC_API_KEY"] = key
                 if (provider.resolvedBaseUrl.isNotBlank() && "api.anthropic.com" !in provider.resolvedBaseUrl) {
                     environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
                 }
             }
-            ProviderKind.LLM_ROUTER -> environment["OPENROUTER_API_KEY"] = secret
+            ProviderKind.LLM_ROUTER -> environment["OPENROUTER_API_KEY"] = key
             ProviderKind.KIMI -> {
-                environment["ANTHROPIC_API_KEY"] = secret
+                environment["ANTHROPIC_API_KEY"] = key
                 environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
             }
-            ProviderKind.OPENCODE_ZEN -> environment["OPENCODE_ZEN_API_KEY"] = secret
+            ProviderKind.OPENCODE_ZEN -> environment["OPENCODE_ZEN_API_KEY"] = key
             ProviderKind.NVIDIA_NIM -> {
-                environment["NIM_API_KEY"] = secret
-                environment["NVIDIA_API_KEY"] = secret
+                environment["NIM_API_KEY"] = key
+                environment["NVIDIA_API_KEY"] = key
                 // Direct (no proxy): still pin the model + baseURL offline so a
                 // disabled catalog fetch cannot leave `--model nvidia/…` unresolved.
                 // Key = exact /v1/models catalog id — bare ids and synthetic
@@ -137,10 +145,10 @@ internal class OpenCodeRuntimeBridge(
             ProviderKind.CUSTOM -> {
                 val api = provider.dshApi.ifBlank { "anthropic-messages" }
                 if (api == "openai-completions" || api == "openai-responses") {
-                    environment["OPENAI_API_KEY"] = secret
+                    environment["OPENAI_API_KEY"] = key
                     environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
                 } else {
-                    environment["ANTHROPIC_API_KEY"] = secret
+                    environment["ANTHROPIC_API_KEY"] = key
                     environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
                 }
             }

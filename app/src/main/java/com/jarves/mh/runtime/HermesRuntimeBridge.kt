@@ -4,6 +4,7 @@ import android.content.Context
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
+import com.jarves.mh.model.isLoopbackBaseUrl
 
 /**
  * Headless Hermes bridge (Nous Research): `hermes chat --quiet
@@ -55,40 +56,47 @@ internal class HermesRuntimeBridge(
     ): Map<String, String> {
         val environment = linkedMapOf<String, String>("HOME" to "/root")
         val kind = provider.kind
-        if (kind == ProviderKind.FREE || secret.isNullOrBlank()) return environment
+        if (kind == ProviderKind.FREE) return environment
+        val rawKey = secret.orEmpty()
+        // A loopback gateway on this device runs keyless: keep the guest pointed
+        // at it instead of falling back to the provider's public endpoint.
+        if (rawKey.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return environment
+        // Guest CLIs refuse to boot with an empty key variable, while a loopback
+        // gateway ignores the header — send a placeholder instead of nothing.
+        val key = rawKey.ifBlank { "loopback" }
         if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
-            environment["OPENAI_API_KEY"] = secret
+            environment["OPENAI_API_KEY"] = key
             environment["OPENAI_BASE_URL"] = gatewayUrl
             return environment
         }
         when (kind) {
-            ProviderKind.DEEPSEEK -> environment["DEEPSEEK_API_KEY"] = secret
+            ProviderKind.DEEPSEEK -> environment["DEEPSEEK_API_KEY"] = key
             ProviderKind.ANTHROPIC -> {
-                environment["ANTHROPIC_API_KEY"] = secret
+                environment["ANTHROPIC_API_KEY"] = key
                 if (provider.resolvedBaseUrl.isNotBlank() && "api.anthropic.com" !in provider.resolvedBaseUrl) {
                     environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
                 }
             }
-            ProviderKind.LLM_ROUTER -> environment["OPENROUTER_API_KEY"] = secret
+            ProviderKind.LLM_ROUTER -> environment["OPENROUTER_API_KEY"] = key
             ProviderKind.KIMI -> {
-                environment["ANTHROPIC_API_KEY"] = secret
+                environment["ANTHROPIC_API_KEY"] = key
                 environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
             }
             ProviderKind.OPENCODE_ZEN -> {
-                environment["OPENAI_API_KEY"] = secret
+                environment["OPENAI_API_KEY"] = key
                 environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
             }
             ProviderKind.NVIDIA_NIM -> {
-                environment["OPENAI_API_KEY"] = secret
+                environment["OPENAI_API_KEY"] = key
                 environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
             }
             ProviderKind.CUSTOM -> {
                 val api = provider.dshApi.ifBlank { "anthropic-messages" }
                 if (api == "openai-completions" || api == "openai-responses") {
-                    environment["OPENAI_API_KEY"] = secret
+                    environment["OPENAI_API_KEY"] = key
                     environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
                 } else {
-                    environment["ANTHROPIC_API_KEY"] = secret
+                    environment["ANTHROPIC_API_KEY"] = key
                     environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
                 }
             }

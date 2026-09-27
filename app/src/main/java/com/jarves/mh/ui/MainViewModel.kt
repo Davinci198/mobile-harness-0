@@ -34,6 +34,7 @@ import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.generateQuickChatIdentity
+import com.jarves.mh.model.isLoopbackBaseUrl
 import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
@@ -1423,7 +1424,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun scanModels(profile: ProviderProfile, secret: String, models: List<DiscoveredModel>) {
         if (_state.value.isModelScanning) return
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
-        if (key.isBlank()) {
+        if (key.isBlank() && !isLoopbackBaseUrl(profile.resolvedBaseUrl)) {
             _state.update {
                 it.copy(
                     modelScanLines = it.modelScanLines + "! API key required for model scan",

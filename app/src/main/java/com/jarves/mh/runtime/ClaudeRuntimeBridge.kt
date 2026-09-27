@@ -11,6 +11,7 @@ import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RiskLevel
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
+import com.jarves.mh.model.isLoopbackBaseUrl
 import com.jarves.mh.tools.ToolPermissionGate
 import com.jarves.mh.tools.ToolPermissionGateDecision
 import com.jarves.mh.tools.ToolPermissionLevel
@@ -113,7 +114,8 @@ class ClaudeRuntimeBridge(
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         pushForegroundProgress("Starting Claude Code…")
         val secret = secretFor(provider).orEmpty()
-        if (secret.isBlank()) {
+        // A loopback gateway on this device runs keyless; only remote providers need a saved secret.
+        if (secret.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) {
             val message = if (provider.kind == ProviderKind.CLAUDE) {
                 "No Claude subscription token is saved. Add one from Agent → AI provider."
             } else {
@@ -122,6 +124,9 @@ class ClaudeRuntimeBridge(
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, message))
             return@withContext sessionId
         }
+        // Claude Code refuses to launch with an empty key variable, while a
+        // loopback gateway ignores the header — send a placeholder instead.
+        val credential = secret.ifBlank { "loopback" }
 
         var formatGateway: LocalFormatGateway? = null
         runCatching {
@@ -148,8 +153,8 @@ class ClaudeRuntimeBridge(
             formatGateway = if (provider.kind.protocol in setOf(
                     com.jarves.mh.model.ProviderProtocol.OPENAI_CHAT,
                     com.jarves.mh.model.ProviderProtocol.OPENAI_RESPONSES,
-                )) LocalFormatGateway(provider, secret).start() else null
-            val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = secret, localGatewayUrl = formatGateway?.url)
+                )) LocalFormatGateway(provider, credential).start() else null
+            val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = credential, localGatewayUrl = formatGateway?.url)
             Log.d("ClaudeBridge", "Provider: ${provider.kind}, Model: ${provider.model}, BaseUrl: ${provider.baseUrl}")
             Log.d("ClaudeBridge", "Launch environment keys: ${launch.environment.keys}")
 

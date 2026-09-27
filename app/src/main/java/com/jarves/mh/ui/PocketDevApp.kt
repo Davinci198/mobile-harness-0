@@ -205,7 +205,12 @@ import com.jarves.mh.model.ProjectChat
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.inferredDshApiForUrl
+import com.jarves.mh.model.isHttpScheme
+import com.jarves.mh.model.isLoopbackBaseUrl
+import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.model.providersForAgent
+import com.jarves.mh.model.schemeOf
+import com.jarves.mh.model.withDefaultScheme
 import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
@@ -229,6 +234,7 @@ import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.EndpointModelCatalog
 import com.jarves.mh.network.ModelDiscoveryResult
+import com.jarves.mh.network.ProviderApiClient
 import com.jarves.mh.network.GitHubRepository
 import com.jarves.mh.ui.theme.PocketBlue
 import com.jarves.mh.ui.theme.PocketGreen
@@ -2383,15 +2389,15 @@ private fun ProviderSetupScreen(
                     onApiKey = { apiKey = it },
                     hasStoredSecret = initial.kind == selected && initial.hasSecret,
                     onDiscover = {
-                        val url = if (selected.fixedBaseUrl) selected.defaultBaseUrl else baseUrl.trim()
+                        val url = if (selected.fixedBaseUrl) selected.defaultBaseUrl else withDefaultScheme(baseUrl)
                         onDiscover(ProviderProfile(selected, url, model.trim(), dshApi = dshApi), apiKey)
                     },
                     onValidate = { models ->
-                        val url = if (selected.fixedBaseUrl) selected.defaultBaseUrl else baseUrl.trim()
+                        val url = if (selected.fixedBaseUrl) selected.defaultBaseUrl else withDefaultScheme(baseUrl)
                         onValidate(ProviderProfile(selected, url, model.trim(), dshApi = dshApi), apiKey, models)
                     },
                     onSave = {
-                        val url = if (selected.fixedBaseUrl) selected.defaultBaseUrl else baseUrl.trim()
+                        val url = if (selected.fixedBaseUrl) selected.defaultBaseUrl else withDefaultScheme(baseUrl)
                         onSave(ProviderProfile(selected, url, model.trim(), dshApi = dshApi), apiKey)
                     },
                     onChangeAgent = { showAgentPicker = true },
@@ -2714,7 +2720,7 @@ private fun ProviderCredentialsStep(
     val context = LocalContext.current
     var models by remember(baseUrl, provider, modelCatalogs) {
         val kindName = provider.name
-        val url = if (provider.fixedBaseUrl) provider.defaultBaseUrl else baseUrl
+        val url = if (provider.fixedBaseUrl) provider.defaultBaseUrl else withDefaultScheme(baseUrl)
         val catalog = modelCatalogs.find { it.matches(kindName, url) }
         mutableStateOf(catalog?.models ?: emptyList())
     }
@@ -2727,6 +2733,15 @@ private fun ProviderCredentialsStep(
     var modelSearch by rememberSaveable { mutableStateOf("") }
     val modelSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val hasKey = apiKey.isNotBlank() || hasStoredSecret
+    val loopbackTarget = isLoopbackBaseUrl(if (provider.fixedBaseUrl) provider.defaultBaseUrl else baseUrl)
+    val canUseEndpoint = hasKey || loopbackTarget
+    val requestPreview = remember(provider, baseUrl, model, dshApi, agentKind) {
+        if (provider.fixedBaseUrl) ""
+        else ProviderApiClient().requestPreviewUrl(
+            baseUrl.trim(),
+            providerProtocolForAgent(ProviderProfile(provider, baseUrl, model, dshApi = dshApi), agentKind),
+        )
+    }
     val filteredModels = remember(models, modelSearch) {
         val query = modelSearch.trim()
         if (query.isEmpty()) models else models.filter {
@@ -2906,7 +2921,21 @@ private fun ProviderCredentialsStep(
                         { onBaseUrl(it); status = null; statusDetails = null },
                         label = { Text(stringResource(R.string.settings_base_url)) },
                         supportingText = {
-                            if (provider.fixedBaseUrl) Text(stringResource(R.string.agent_fixed_by, provider.title))
+                            when {
+                                provider.fixedBaseUrl -> Text(stringResource(R.string.agent_fixed_by, provider.title))
+                                baseUrl.isNotBlank() && schemeOf(baseUrl).isEmpty() ->
+                                    Text(stringResource(R.string.agent_url_needs_scheme))
+                                baseUrl.isNotBlank() && !isHttpScheme(baseUrl) ->
+                                    Text(stringResource(R.string.agent_url_bad_scheme), color = MaterialTheme.colorScheme.error)
+                                requestPreview.isNotBlank() -> Text(
+                                    stringResource(R.string.agent_url_preview, requestPreview),
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                else -> {}
+                            }
                         },
                         readOnly = provider.fixedBaseUrl,
                         enabled = !provider.fixedBaseUrl,
@@ -2945,7 +2974,7 @@ private fun ProviderCredentialsStep(
                 onClick = {
                     if (models.isEmpty()) discoverModels() else showModels = true
                 },
-                enabled = baseUrl.isNotBlank() && hasKey && !isDiscovering && !isValidating,
+                enabled = baseUrl.isNotBlank() && canUseEndpoint && !isDiscovering && !isValidating,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) {
                 if (isDiscovering) {
@@ -2998,7 +3027,7 @@ private fun ProviderCredentialsStep(
                             isValidating = false
                         }
                     },
-                    enabled = baseUrl.isNotBlank() && model.isNotBlank() && hasKey && !isDiscovering && !isValidating,
+                    enabled = baseUrl.isNotBlank() && model.isNotBlank() && canUseEndpoint && !isDiscovering && !isValidating,
                     modifier = Modifier.fillMaxWidth().height(54.dp),
                 ) {
                     if (isValidating) {
