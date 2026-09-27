@@ -48,7 +48,7 @@ internal class HermesWarmSession(
     ): Process? {
         val current = process
         if (current != null && current.isAlive && this.signature == signature) {
-            Log.d("HermesWarmSession", "reusing warm session pid=${current.pid()}")
+            Log.d("HermesWarmSession", "reusing warm session pid=${current.spawnPid()}")
             return current
         }
         if (current != null) Log.i("HermesWarmSession", "warm session unusable, respawning")
@@ -263,7 +263,7 @@ internal class HermesWarmSession(
                 runCatching { target.destroyForcibly() }
                 Thread.sleep(500)
                 if (target.isAlive) runCatching { target.destroyForcibly() }
-                Log.i("HermesWarmSession", "close: pid=${target.pid()} stillAlive=${target.isAlive}")
+                Log.i("HermesWarmSession", "close: pid=${target.spawnPid()} stillAlive=${target.isAlive}")
             }.apply { isDaemon = true; start() }
         }
         runCatching { server?.close() }
@@ -285,3 +285,6 @@ internal class HermesWarmSession(
             "The Hermes session exited unexpectedly; the phone may have suspended it. Retry with the app in the foreground."
     }
 }
+
+/** `Process.pid()` does not exist on Android; the native spawn does expose it. */
+private fun Process.spawnPid(): Int = (this as? NativeSpawnProcess)?.pid ?: -1
