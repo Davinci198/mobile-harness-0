@@ -10,6 +10,7 @@ import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 import kotlinx.coroutines.delay
@@ -245,6 +246,38 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureAgentWrappers() {
         ensureShWrapper(OPENCODE_GUEST_PATH, OPENCODE2_GUEST_PATH)
         ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
+    }
+
+    /**
+     * Parks MCP servers whose guest executable is gone. Hermes reports them as
+     * a permanent connection failure but still spends discovery and retry time
+     * on them, and that wait sits on the critical path before the first API
+     * call of a turn. Rewrites the config only when something changes.
+     */
+    fun parkMissingHermesMcpServers(): Int {
+        val config = guestFile("root/.hermes/config.yaml")
+        val text = runCatching { config.readText() }.getOrNull() ?: return 0
+        val result = parkMissingMcpServers(text, ::guestCommandAvailable)
+        if (result.parked > 0) runCatching { config.writeText(result.config) }
+        return result.parked
+    }
+
+    private fun guestCommandAvailable(command: String): Boolean {
+        if (command.contains('/')) return guestExecutableExists(command)
+        return GUEST_PATH_DIRS.any { guestExecutableExists("$it/$command") }
+    }
+
+    private fun guestExecutableExists(path: String): Boolean {
+        val file = File(rootfs, path.removePrefix("/"))
+        if (file.exists()) return true
+        // Absolute guest symlinks resolve against the host root and look missing.
+        val target = runCatching { Files.readSymbolicLink(file.toPath()) }.getOrNull() ?: return false
+        val resolved = if (target.isAbsolute) {
+            File(rootfs, target.toString().removePrefix("/"))
+        } else {
+            File(file.parentFile, target.toString())
+        }
+        return resolved.exists()
     }
 
     fun isAgentInstalled(agent: com.jarves.mh.model.AgentKind): Boolean {
@@ -2241,6 +2274,17 @@ fi
     private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
 
     companion object {
+        // PATH dirs a guest `command:` is resolved from (Debian default plus
+        // the user-local bin hermes installs into).
+        private val GUEST_PATH_DIRS = listOf(
+            "/usr/local/sbin",
+            "/usr/local/bin",
+            "/usr/sbin",
+            "/usr/bin",
+            "/sbin",
+            "/bin",
+            "/root/.local/bin",
+        )
         const val AGY_GUEST_PATH = "/root/.local/bin/agy"
         const val GITHUB_CLI_GUEST_PATH = "/root/.local/bin/gh"
         const val OPENCODE_GUEST_PATH = "/root/.opencode/bin/opencode"

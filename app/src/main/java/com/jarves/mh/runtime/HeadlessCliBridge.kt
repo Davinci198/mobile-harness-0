@@ -138,6 +138,9 @@ internal abstract class HeadlessCliBridge(
                 "${kind.title} is not installed. Open Settings → Coding agent to install it."
             }
             runCatching { installer.ensureAgentWrappers() }
+            // A guest MCP server whose executable disappeared costs discovery
+            // and retries on every launch, before the first API call.
+            if (kind == AgentKind.HERMES) runCatching { installer.parkMissingHermesMcpServers() }
             // Leftovers from a previous killed session (orphaned guest children
             // like `opencode serve`) can block the new run at startup.
             runCatching { installer.killGuestOrphans() }
