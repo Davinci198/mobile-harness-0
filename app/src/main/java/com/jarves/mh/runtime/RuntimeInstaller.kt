@@ -262,6 +262,25 @@ class RuntimeInstaller(private val context: Context) {
         return result.parked
     }
 
+    /**
+     * Points the guest Hermes config at this app's loopback hook listener so a
+     * warm interactive session can report stream/tool/API events. Throws when
+     * the config cannot be read or written: without the webhook a warm turn
+     * would report nothing, so the caller must fall back to the cold path.
+     */
+    fun ensureHermesHookConfig(url: String) {
+        val config = guestFile("root/.hermes/config.yaml")
+        val text = runCatching { config.readText() }.getOrElse {
+            throw IllegalStateException("Hermes config is missing; warm sessions are unavailable", it)
+        }
+        val result = ensureHermesHooks(text, url)
+        if (result.changed) {
+            runCatching { config.writeText(result.config) }.getOrElse {
+                throw IllegalStateException("Could not register the Hermes hook endpoint", it)
+            }
+        }
+    }
+
     private fun guestCommandAvailable(command: String): Boolean {
         if (command.contains('/')) return guestExecutableExists(command)
         return GUEST_PATH_DIRS.any { guestExecutableExists("$it/$command") }

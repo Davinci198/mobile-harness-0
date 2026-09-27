@@ -81,6 +81,25 @@ internal abstract class HeadlessCliBridge(
      */
     protected abstract fun parseJsonlLine(line: String, sessionId: String): CliParsed
 
+    /**
+     * Warm (long-lived) sessions are opt-in per bridge; only Hermes provides
+     * one. Every failure falls back to the cold one-shot path.
+     */
+    protected open fun supportsWarmSession(): Boolean = false
+
+    /** Command seeding the warm session's first turn: no `--quiet`/`--format`. */
+    protected open fun warmCommandFor(
+        prompt: String,
+        provider: ProviderProfile,
+        secret: String?,
+        guestWorkspacePath: String,
+        gatewayUrl: String?,
+    ): List<String> = commandFor(prompt, provider, secret, guestWorkspacePath, gatewayUrl)
+
+    private val warmSession by lazy {
+        HermesWarmSession { url -> installer.ensureHermesHookConfig(url) }
+    }
+
     override suspend fun startSession(
         projectId: String,
         projectSlug: String,
@@ -159,28 +178,48 @@ internal abstract class HeadlessCliBridge(
             val before = checkpoints.snapshot(workspace)
             val guestWorkspacePath = "/workspace/$projectSlug"
             val contextPrompt = buildContextPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind)
-            val command = commandFor(contextPrompt, provider, secret, guestWorkspacePath, gatewayUrl)
-            Log.d("HeadlessBridge", "${kind.title} command: $command")
-            val process = installer.process(
-                installed.proot,
-                installed.rootfs,
-                workspace,
-                environmentFor(provider, secret, gatewayUrl),
-                command,
+            val warmTurn = runWarmTurn(
+                provider = provider,
+                secret = secret,
+                gatewayUrl = gatewayUrl,
                 guestWorkspacePath = guestWorkspacePath,
-                emulateHardLinks = false,
+                workspace = workspace,
+                installed = installed,
+                contextPrompt = contextPrompt,
+                sessionId = sessionId,
             )
-            activeProcess = process
-            // One-shot headless CLIs take the prompt via argv. An open stdin
-            // pipe whose write end the JVM never closes blocks opencode in
-            // epoll_wait before the first API call (0-byte hang). Close it so
-            // the guest sees EOF immediately.
-            runCatching { process.outputStream.close() }
-            if (userStopRequested) process.destroy()
-            val result = runCliSession(process, sessionId)
-            val exit = process.waitFor()
-            Log.d("HeadlessBridge", "${kind.title} process exited with code $exit")
-            if (exit != 0) runCatching { installer.killGuestOrphans() }
+            val exit: Int?
+            val result: CliRunResult
+            if (warmTurn != null) {
+                exit = null
+                result = CliRunResult(failed = warmTurn.failed, sawAnyOutput = warmTurn.sawAnyOutput)
+                // A failed turn leaves the session in an unknown state: drop it
+                // so the next Agent Execution respawns (or goes cold) cleanly.
+                if (warmTurn.failed != null) runCatching { warmSession.close() }
+            } else {
+                val command = commandFor(contextPrompt, provider, secret, guestWorkspacePath, gatewayUrl)
+                Log.d("HeadlessBridge", "${kind.title} command: $command")
+                val process = installer.process(
+                    installed.proot,
+                    installed.rootfs,
+                    workspace,
+                    environmentFor(provider, secret, gatewayUrl),
+                    command,
+                    guestWorkspacePath = guestWorkspacePath,
+                    emulateHardLinks = false,
+                )
+                activeProcess = process
+                // One-shot headless CLIs take the prompt via argv. An open stdin
+                // pipe whose write end the JVM never closes blocks opencode in
+                // epoll_wait before the first API call (0-byte hang). Close it so
+                // the guest sees EOF immediately.
+                runCatching { process.outputStream.close() }
+                if (userStopRequested) process.destroy()
+                result = runCliSession(process, sessionId)
+                exit = process.waitFor()
+                Log.d("HeadlessBridge", "${kind.title} process exited with code $exit")
+                if (exit != 0) runCatching { installer.killGuestOrphans() }
+            }
             val changed = checkpoints.changedFiles(workspace, before)
             if (changed.isNotEmpty()) {
                 checkpoints.saveChangedPaths(projectId, changed, workspace)
@@ -203,7 +242,7 @@ internal abstract class HeadlessCliBridge(
                             // before emitting any event; never leave the trace blank.
                             "${kind.title} exited $exit without reporting an error (empty output). " +
                                 "A stale managed service or dead models fetch usually causes this; retry with the app in the foreground."
-                        } else if (exit != 0) {
+                        } else if (exit != null && exit != 0) {
                             "${kind.title} was terminated early (exit $exit). The phone suspends guest processes when the app leaves the screen; keep mobile-harness in the foreground and retry."
                         } else {
                             "${kind.title} stopped with exit code $exit"
@@ -225,6 +264,60 @@ internal abstract class HeadlessCliBridge(
         activeSessionId = null
         RuntimeTaskController.stopAction = null
         sessionId
+    }
+
+    /**
+     * Runs the turn on the long-lived interactive session when this bridge
+     * supports one. Returns null when the turn must run through the cold
+     * one-shot path (unsupported bridge, spawn or boot failure); a warm turn
+     * that failed returns its result so the user sees the error instead of
+     * silently paying a second boot.
+     */
+    private suspend fun runWarmTurn(
+        provider: ProviderProfile,
+        secret: String?,
+        gatewayUrl: String?,
+        guestWorkspacePath: String,
+        workspace: File,
+        installed: InstalledRuntime,
+        contextPrompt: String,
+        sessionId: String,
+    ): WarmTurnResult? {
+        if (!supportsWarmSession()) return null
+        val environment = environmentFor(provider, secret, gatewayUrl)
+        val signature = listOf(
+            provider.kind.name,
+            provider.model,
+            provider.resolvedBaseUrl,
+            provider.dshApi,
+            gatewayUrl.orEmpty(),
+            guestWorkspacePath,
+            environment.toString(),
+        ).joinToString("|")
+        val process = warmSession.ensureStarted(signature) { _ ->
+            installer.process(
+                installed.proot,
+                installed.rootfs,
+                workspace,
+                environment,
+                warmCommandFor(contextPrompt, provider, secret, guestWorkspacePath, gatewayUrl),
+                guestWorkspacePath = guestWorkspacePath,
+                emulateHardLinks = false,
+                pseudoTerminal = true,
+                ptyRows = 40,
+                ptyColumns = 120,
+            )
+        } ?: return null
+        activeProcess = process
+        if (userStopRequested) process.destroy()
+        Log.d("HeadlessBridge", "${kind.title} warm session turn starting")
+        val turn = warmSession.runTurn(contextPrompt, sessionId) { event -> eventBus.emit(event) }
+        Log.d(
+            "HeadlessBridge",
+            "${kind.title} warm turn done: failed=${turn.failed != null}, " +
+                "died=${turn.processDied}, timeout=${turn.timedOut}",
+        )
+        return turn
     }
 
     private suspend fun runCliSession(process: Process, sessionId: String): CliRunResult {
