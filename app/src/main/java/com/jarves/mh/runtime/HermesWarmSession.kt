@@ -15,6 +15,13 @@ internal data class WarmTurnResult(
 )
 
 /**
+ * A session that is ready to run a turn: [seeded] is true when this call just
+ * spawned it, which means the turn's prompt already went out through `-q` and
+ * must not be typed into the prompt again.
+ */
+internal data class WarmStart(val process: Process, val seeded: Boolean)
+
+/**
  * One long-lived interactive `hermes chat` process reused across Agent
  * Executions, so a turn pays the model latency instead of the 22-26s boot.
  *
@@ -40,19 +47,24 @@ internal class HermesWarmSession(
 
     /**
      * Returns a running session matching [signature], spawning one (and waiting
-     * for its interactive prompt) when needed; null means "fall back to cold".
+     * for it to come up) when needed; null means "fall back to cold".
      */
     suspend fun ensureStarted(
         signature: String,
         spawn: (hookUrl: String) -> Process,
-    ): Process? {
+    ): WarmStart? {
         val current = process
         if (current != null && current.isAlive && this.signature == signature) {
             Log.d("HermesWarmSession", "reusing warm session pid=${current.spawnPid()}")
-            return current
+            if (!awaitSessionReady(current, seeded = false)) {
+                close()
+            } else {
+                return WarmStart(current, seeded = false)
+            }
+        } else if (current != null) {
+            Log.i("HermesWarmSession", "warm session unusable, respawning")
+            close()
         }
-        if (current != null) Log.i("HermesWarmSession", "warm session unusable, respawning")
-        close()
         val listener = HermesHookServer { payload -> pendingHooks.offer(payload) }.start()
         val spawned = runCatching {
             ensureHookConfig(listener.url)
@@ -68,17 +80,18 @@ internal class HermesWarmSession(
         outputOffset = 0L
         lineBuffer.setLength(0)
         pendingHooks.clear()
-        if (!awaitInteractivePrompt(spawned)) {
+        if (!awaitSessionReady(spawned, seeded = true)) {
             close()
             return null
         }
-        return spawned
+        return WarmStart(spawned, seeded = true)
     }
 
-    /** Runs one turn: submits [prompt], streams events, waits for the idle prompt. */
+    /** Runs one turn: submits [prompt] unless the session was seeded with it. */
     suspend fun runTurn(
         prompt: String,
         sessionId: String,
+        submitPrompt: Boolean,
         emit: suspend (RuntimeEvent) -> Unit,
     ): WarmTurnResult {
         val target = process
@@ -88,13 +101,16 @@ internal class HermesWarmSession(
         }
         val boundary = WarmTurnBoundary(prompt.lineSequence().first().trim())
         pendingHooks.clear()
-        val submission = (prompt.replace('\r', ' ').replace('\n', ' ').trim() + "\r")
-            .toByteArray(Charsets.UTF_8)
-        runCatching {
-            target.outputStream.write(submission)
-            target.outputStream.flush()
-        }.onFailure {
-            return WarmTurnResult(failed = "Could not send the prompt to the Hermes session.", sawAnyOutput = false)
+        var bootLogged = false
+        if (submitPrompt) {
+            val submission = (prompt.replace('\r', ' ').replace('\n', ' ').trim() + "\r")
+                .toByteArray(Charsets.UTF_8)
+            runCatching {
+                target.outputStream.write(submission)
+                target.outputStream.flush()
+            }.onFailure {
+                return WarmTurnResult(failed = "Could not send the prompt to the Hermes session.", sawAnyOutput = false)
+            }
         }
 
         var sawAnyOutput = false
@@ -164,6 +180,10 @@ internal class HermesWarmSession(
             }
             drain()
             sawNewOutput(target)?.let { chunk ->
+                if (!bootLogged) {
+                    bootLogged = true
+                    Log.i("HermesWarmSession", "tui output: " + chunk.replace('\n', ' ').take(400))
+                }
                 sawAnyOutput = true
                 lastOutputAt = System.currentTimeMillis()
                 lineBuffer.append(chunk)
@@ -207,6 +227,28 @@ internal class HermesWarmSession(
             failed = if (sawText) null else lastError ?: NO_REPLY_MESSAGE,
             sawAnyOutput = sawAnyOutput,
         )
+    }
+
+    /**
+     * Waits until the session can carry a turn.
+     *
+     * A freshly seeded session is already running the turn its `-q` prompt
+     * started, so its idle prompt only renders once the answer is done: waiting
+     * for it would always time out. Any output (or the first hook delivery)
+     * proves the session is up, and nothing is consumed, so the turn still sees
+     * every line. A reused session is idle, so there the prompt line is the
+     * readiness signal.
+     */
+    private suspend fun awaitSessionReady(target: Process, seeded: Boolean): Boolean {
+        if (!seeded) return awaitInteractivePrompt(target)
+        val native = target as? NativeSpawnProcess ?: return false
+        val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            if (!target.isAlive) return false
+            if (pendingHooks.isNotEmpty() || native.outputFile.length() > outputOffset) return true
+            delay(50)
+        }
+        return false
     }
 
     private suspend fun awaitInteractivePrompt(target: Process): Boolean {
@@ -287,4 +329,4 @@ internal class HermesWarmSession(
 }
 
 /** `Process.pid()` does not exist on Android; the native spawn does expose it. */
-private fun Process.spawnPid(): Int = (this as? NativeSpawnProcess)?.pid ?: -1
+internal fun Process.spawnPid(): Int = (this as? NativeSpawnProcess)?.pid ?: -1
