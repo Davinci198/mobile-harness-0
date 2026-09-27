@@ -109,6 +109,37 @@ internal class HermesRuntimeBridge(
     override fun parseJsonlLine(line: String, sessionId: String): CliParsed =
         HermesJsonlParser.parseLine(line, sessionId)
 
+    // Hermes keeps one interactive `hermes chat` alive between turns: on a TTY
+    // `-q` seeds the first turn and the session stays interactive (`--quiet`
+    // / `--format stream-json` are what imply single-query exit), which turns a
+    // 22-26s boot per turn into one boot per project/endpoint.
+    override fun supportsWarmSession(): Boolean = true
+
+    override fun warmCommandFor(
+        prompt: String,
+        provider: ProviderProfile,
+        secret: String?,
+        guestWorkspacePath: String,
+        gatewayUrl: String?,
+    ): List<String> = buildList {
+        add(guestExecutable)
+        add("chat")
+        val providerName = hermesProviderName(provider)
+        if (providerName.isNotBlank()) {
+            add("--provider")
+            add(providerName)
+        }
+        if (provider.kind != ProviderKind.FREE) {
+            val model = provider.model.ifBlank { provider.kind.defaultModel }
+            if (model.isNotBlank()) {
+                add("--model")
+                add(model)
+            }
+        }
+        add("-q")
+        add(prompt)
+    }
+
     private fun hermesProviderName(provider: ProviderProfile): String {
         if (provider.kind == ProviderKind.FREE) return ""
         return when (provider.kind) {
