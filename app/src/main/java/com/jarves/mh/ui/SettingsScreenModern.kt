@@ -117,7 +117,7 @@ import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketGreen
-import com.jarves.mh.ui.theme.PocketOrange
+import com.jarves.mh.ui.theme.PocketAccent
 import kotlinx.coroutines.launch
 
 private enum class SettingsSection { APPEARANCE, VOICE, TOOLS, PERMISSIONS, BACKGROUND, RUNTIME, UPDATE_CHANNEL }
@@ -403,7 +403,7 @@ fun SettingsScreen(
                             }
                             when {
                                 removing -> Text(stringResource(R.string.settings_removing), color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                installing -> Text("${(state.devStackProgress * 100).toInt()}%", color = PocketOrange, fontWeight = FontWeight.Bold)
+                                installing -> Text("${(state.devStackProgress * 100).toInt()}%", color = PocketAccent, fontWeight = FontWeight.Bold)
                                 installed && stack == DevStack.WEB -> Text(stringResource(R.string.settings_included), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 installed -> TextButton(
                                     onClick = { stackPendingRemoval = stack },
@@ -417,7 +417,7 @@ fun SettingsScreen(
                             LinearProgressIndicator(
                                 progress = { state.devStackProgress.coerceIn(0f, 1f) },
                                 modifier = Modifier.fillMaxWidth().height(7.dp),
-                                color = PocketOrange,
+                                color = PocketAccent,
                                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
                             )
                             Spacer(Modifier.height(9.dp))
@@ -439,7 +439,7 @@ fun SettingsScreen(
                                                 Text(
                                                     "${formatTransferSpeed(speed)} · ${formatTransferEta(downloaded, total, speed)} left",
                                                     fontSize = 11.sp,
-                                                    color = PocketOrange,
+                                                    color = PocketAccent,
                                                     fontFamily = FontFamily.Monospace,
                                                 )
                                             }
@@ -650,7 +650,7 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Settings, null, Modifier.size(20.dp), tint = PocketOrange)
+                        Icon(Icons.Default.Settings, null, Modifier.size(20.dp), tint = PocketAccent)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Mobile Harness", fontWeight = FontWeight.SemiBold)
@@ -910,7 +910,7 @@ private fun ConnectionSettings(
                 when (state.apiPingStatus) {
                     ApiPingStatus.OK -> Color(0xFF58C9A3)
                     ApiPingStatus.FAILED -> MaterialTheme.colorScheme.error
-                    ApiPingStatus.PINGING -> PocketOrange
+                    ApiPingStatus.PINGING -> PocketAccent
                     ApiPingStatus.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
                 }, CircleShape,
             ))
@@ -919,7 +919,7 @@ private fun ConnectionSettings(
                 Text(stringResource(R.string.settings_active_connection), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(state.provider.model.ifBlank { stringResource(R.string.settings_not_configured) }, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 state.activeApiKeyName?.let { name ->
-                    Text(stringResource(R.string.settings_key_label, name), fontSize = 11.sp, color = PocketOrange, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.settings_key_label, name), fontSize = 11.sp, color = PocketAccent, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 state.apiPingMessage?.let {
                     Text(it, fontSize = 11.sp, color = if (state.apiPingStatus == ApiPingStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -936,7 +936,7 @@ private fun ConnectionSettings(
         modifier = Modifier.fillMaxWidth().clickable { providerExpanded = !providerExpanded },
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        border = BorderStroke(1.dp, if (providerExpanded) PocketOrange else MaterialTheme.colorScheme.outlineVariant),
+        border = BorderStroke(1.dp, if (providerExpanded) PocketAccent else MaterialTheme.colorScheme.outlineVariant),
     ) {
         Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -1027,7 +1027,7 @@ private fun ConnectionSettings(
                             Text(
                                 if (key.isActive) stringResource(R.string.settings_key_active_now) else stringResource(R.string.settings_key_tap_activate),
                                 fontSize = 11.sp,
-                                color = if (key.isActive) PocketOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (key.isActive) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         SelectionDot(key.isActive)
@@ -1095,10 +1095,10 @@ private fun ConnectionSettings(
 @Composable
 private fun SelectionDot(selected: Boolean) {
     Box(
-        Modifier.size(20.dp).border(if (selected) 2.dp else 1.dp, if (selected) PocketOrange else MaterialTheme.colorScheme.outline, CircleShape),
+        Modifier.size(20.dp).border(if (selected) 2.dp else 1.dp, if (selected) PocketAccent else MaterialTheme.colorScheme.outline, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        if (selected) Box(Modifier.size(9.dp).background(PocketOrange, CircleShape))
+        if (selected) Box(Modifier.size(9.dp).background(PocketAccent, CircleShape))
     }
 }
 
@@ -1107,11 +1107,11 @@ private fun ModernThemeChoice(title: String, icon: ImageVector, selected: Boolea
     Surface(
         modifier = modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        color = if (selected) PocketOrange.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) PocketOrange else MaterialTheme.colorScheme.outlineVariant),
+        color = if (selected) PocketAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) PocketAccent else MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(Modifier.padding(vertical = 13.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, title, Modifier.size(20.dp), tint = if (selected) PocketOrange else MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(icon, title, Modifier.size(20.dp), tint = if (selected) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(5.dp))
             Text(title, fontSize = 12.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
         }
@@ -1136,15 +1136,15 @@ private fun PermissionLevelChoice(
     Surface(
         modifier = modifier.clickable(onClick = onClick).padding(vertical = 4.dp),
         shape = RoundedCornerShape(10.dp),
-        color = if (selected) PocketOrange.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) PocketOrange else MaterialTheme.colorScheme.outlineVariant),
+        color = if (selected) PocketAccent.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) PocketAccent else MaterialTheme.colorScheme.outlineVariant),
     ) {
         Text(
             label,
             Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp),
             fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) PocketOrange else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (selected) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }

@@ -11,19 +11,29 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-val PocketOrange = Color(0xFFF28C52)
+/**
+ * Agent redesign palette (mobile_x5f_harness_redesign_agent.html).
+ *
+ * The saturated orange accent is replaced by a desaturated violet; orange now only
+ * appears rarely, as a warning state. Surfaces follow the mock: #0f0f10 screen,
+ * #17171c cards, #262631 hairline borders.
+ */
+val PocketAccent = Color(0xFF7C5CFC)
+val PocketAccentTeal = Color(0xFF3AD7D0)
 val PocketBlue = Color(0xFF8EA8FF)
 val PocketGreen = Color(0xFF69D69E)
-val PocketBackground = Color(0xFF0B0E14)
-val PocketSurface = Color(0xFF131821)
-val PocketSurfaceVariant = Color(0xFF1B222D)
-val PocketOutline = Color(0xFF2A3240)
+val PocketBackground = Color(0xFF0F0F10)
+val PocketSurface = Color(0xFF17171C)
+val PocketSurfaceVariant = Color(0xFF1F1F28)
+val PocketOutline = Color(0xFF2A2A32)
+val PocketCardBorder = Color(0xFF262631)
+val PocketMuted = Color(0xFF9A9AA3)
 
 private val DarkColors = darkColorScheme(
-    primary = PocketOrange,
-    onPrimary = Color(0xFF241107),
-    primaryContainer = Color(0xFF42281D),
-    onPrimaryContainer = Color(0xFFFFDDCC),
+    primary = PocketAccent,
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFF2B2150),
+    onPrimaryContainer = Color(0xFFDCD4FF),
     secondary = PocketBlue,
     onSecondary = Color(0xFF001F58),
     tertiary = PocketGreen,
@@ -33,16 +43,16 @@ private val DarkColors = darkColorScheme(
     surface = PocketSurface,
     onSurface = Color(0xFFE6EDF3),
     surfaceVariant = PocketSurfaceVariant,
-    onSurfaceVariant = Color(0xFF9AA0A6),
+    onSurfaceVariant = PocketMuted,
     outline = PocketOutline,
-    outlineVariant = Color(0xFF333B4A),
+    outlineVariant = PocketCardBorder,
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFFD85A20),
+    primary = Color(0xFF5B3FD9),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFFFE0D2),
-    onPrimaryContainer = Color(0xFF451A08),
+    primaryContainer = Color(0xFFE8E0FF),
+    onPrimaryContainer = Color(0xFF2B2150),
     secondary = Color(0xFF3366CC),
     onSecondary = Color(0xFFFFFFFF),
     tertiary = Color(0xFF1B8A5A),

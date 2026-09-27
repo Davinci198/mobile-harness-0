@@ -126,6 +126,11 @@
     <string name="agent_hide_broken">Hide broken</string>
     <string name="agent_autoscan">Auto-scan first connect</string>
     <string name="agent_scanning">Scanning models…</string>
+    <string name="agent_log_details">Test details</string>
+    <string name="agent_log_latest">latest logs</string>
+    <string name="agent_stat_working">Working</string>
+    <string name="agent_stat_broken">Broken</string>
+    <string name="agent_stat_avg_latency">Avg latency</string>
     <string name="agent_saved_lists">Saved model lists</string>
     <string name="agent_delete_list">Delete saved model list</string>
     <string name="agent_use_custom_id">Use custom model ID:</string>
