@@ -131,6 +131,15 @@
     <string name="agent_stat_working">Funcționale</string>
     <string name="agent_stat_broken">Defecte</string>
     <string name="agent_stat_avg_latency">Timp mediu</string>
+    <string name="agent_verified_avg">%1$d din %2$d verificate · %3$s medie</string>
+    <string name="agent_filter_all">Toate</string>
+    <string name="agent_filter_working">Funcționale</string>
+    <string name="agent_filter_broken">Defecte</string>
+    <string name="agent_filter_free">Gratuite</string>
+    <string name="agent_models_list">Modele</string>
+    <string name="agent_discover_hint">Au fost descoperite %1$d modele în %2$d endpoint-uri. Verificarea folosește un prompt scurt și măsoară latența reală.</string>
+    <string name="agent_test_short">Testează</string>
+    <string name="agent_last_check">Ultima verificare · %1$s</string>
     <string name="agent_saved_lists">Liste de modele salvate</string>
     <string name="agent_delete_list">Șterge lista de modele salvată</string>
     <string name="agent_use_custom_id">Folosește ID model personalizat:</string>
