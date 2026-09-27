@@ -2,6 +2,7 @@ package com.jarves.mh.network
 
 import com.jarves.mh.model.ProviderProtocol
 import com.jarves.mh.model.dshApiForProtocol
+import com.jarves.mh.model.isLoopbackBaseUrl
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -296,7 +297,10 @@ class ProviderApiClient {
         val cleanBaseUrl = normalizeBaseUrl(baseUrl)
         val cleanModel = model.trim()
         val cleanKey = sanitizeApiKey(apiKey)
-        if (cleanBaseUrl.isBlank() || cleanModel.isBlank() || cleanKey.isBlank()) {
+        // A loopback gateway on this device answers without credentials, so a
+        // missing key is only an error for remote endpoints.
+        val keyRequired = !isLoopbackBaseUrl(cleanBaseUrl)
+        if (cleanBaseUrl.isBlank() || cleanModel.isBlank() || (keyRequired && cleanKey.isBlank())) {
             return@withContext ConnectionValidation.Failure("Base URL, model, and API key are required.")
         }
         val body = validationBody(cleanModel, protocol)
@@ -504,6 +508,13 @@ class ProviderApiClient {
         url.host.equals("openrouter.ai", ignoreCase = true) &&
             url.path.trimEnd('/').endsWith("/models")
     }.getOrDefault(false)
+
+    /**
+     * The endpoint [validate] probes first, so the Base URL field can show the
+     * exact URL that will be called instead of leaving it to guesswork.
+     */
+    internal fun requestPreviewUrl(baseUrl: String, protocol: ProviderProtocol): String =
+        messagesEndpointCandidates(normalizeBaseUrl(baseUrl), protocol).firstOrNull().orEmpty()
 
     internal fun validationBody(model: String, protocol: ProviderProtocol): String = when (protocol) {
         ProviderProtocol.OPENAI_RESPONSES -> JSONObject()

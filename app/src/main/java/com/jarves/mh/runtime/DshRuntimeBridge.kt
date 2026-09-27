@@ -11,6 +11,7 @@ import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
+import com.jarves.mh.model.isLoopbackBaseUrl
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.UUID
@@ -70,7 +71,8 @@ class DshRuntimeBridge(
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         pushForegroundProgress("Starting DeepSeek Harness…")
         val secret = secretFor(provider).orEmpty()
-        if (secret.isBlank()) {
+        // A loopback gateway on this device runs keyless; only remote providers need a key.
+        if (secret.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) {
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, "No API key is saved for ${provider.kind.title}."))
             return@withContext sessionId
         }
@@ -112,7 +114,9 @@ class DshRuntimeBridge(
                 // PocketDev already confines the whole Linux guest with PRoot. Let dsh
                 // use every tool inside that boundary without an unavailable approval UI.
                 "DSH_PERMISSION_MODE" to "danger-full-access",
-                route.keyEnv to secret,
+                // Guest CLIs refuse to boot with an empty key variable; a loopback
+                // gateway ignores the header, so send a placeholder instead.
+                route.keyEnv to secret.ifBlank { "loopback" },
             )
             if (route.keyEnv != FALLBACK_KEY_ENV) environment.remove(FALLBACK_KEY_ENV)
 

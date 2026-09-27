@@ -1,5 +1,6 @@
 package com.jarves.mh.ui
 
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -62,6 +63,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -115,12 +118,18 @@ import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.defaultDshApiForProvider
 import com.jarves.mh.model.inferredDshApiForUrl
+import com.jarves.mh.model.isHttpScheme
+import com.jarves.mh.model.isLoopbackBaseUrl
 import com.jarves.mh.model.providersForAgent
+import com.jarves.mh.model.providerProtocolForAgent
+import com.jarves.mh.model.schemeOf
+import com.jarves.mh.model.withDefaultScheme
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.EndpointDetection
 import com.jarves.mh.network.EndpointModelCatalog
 import com.jarves.mh.network.ModelDiscoveryResult
+import com.jarves.mh.network.ProviderApiClient
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.ui.theme.PocketAccent
 import com.jarves.mh.ui.theme.PocketAccentTeal
@@ -154,6 +163,30 @@ internal fun hostOnly(rawUrl: String): String {
         .removePrefix("http://")
         .substringBefore('/')
     return stripped.ifBlank { rawUrl }
+}
+
+/** One base URL offered under the Base URL field, optionally carrying its gateway protocol. */
+private data class PresetEndpoint(
+    @StringRes val labelRes: Int,
+    val baseUrl: String,
+    val dshApi: String? = null,
+)
+
+/**
+ * Preset base URLs per provider. Custom API gets the local gateways this device
+ * can reach without a key; Kimi gets its regional endpoints.
+ */
+private fun presetEndpointsFor(kind: ProviderKind): List<PresetEndpoint> = when (kind) {
+    ProviderKind.KIMI -> listOf(
+        PresetEndpoint(R.string.preset_endpoint_kimi_international, "https://api.moonshot.ai/anthropic"),
+        PresetEndpoint(R.string.preset_endpoint_kimi_china, "https://api.moonshot.cn/anthropic"),
+    )
+    ProviderKind.CUSTOM -> listOf(
+        PresetEndpoint(R.string.preset_endpoint_ollama, "http://localhost:11434", "openai-completions"),
+        PresetEndpoint(R.string.preset_endpoint_lmstudio, "http://localhost:1234", "openai-completions"),
+        PresetEndpoint(R.string.preset_endpoint_vllm, "http://localhost:8000", "openai-completions"),
+    )
+    else -> emptyList()
 }
 
 /** Latency badge color: green under 2s, yellow under 5s, red when broken or slower. */
@@ -353,7 +386,9 @@ fun AgentScreen(
         val effectiveKey = apiKey.trim().ifBlank { newApiKey.trim() }
         val supportsPublicDiscovery = selectedKind == ProviderKind.LLM_ROUTER ||
             selectedKind == ProviderKind.OPENCODE_ZEN
-        if (effectiveKey.isBlank() && !supportsPublicDiscovery) {
+        // A loopback gateway on this device serves its model list without credentials.
+        val loopbackTarget = isLoopbackBaseUrl(if (selectedKind.fixedBaseUrl) selectedKind.defaultBaseUrl else baseUrl)
+        if (effectiveKey.isBlank() && !supportsPublicDiscovery && !loopbackTarget) {
             status = context.getString(R.string.agent_api_key_first)
             statusOk = false
             statusProviderMessage = null
@@ -367,7 +402,7 @@ fun AgentScreen(
             statusOk = true
             statusProviderMessage = null
             val kind = selectedKind
-            val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl.trim()
+            val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else withDefaultScheme(baseUrl)
             val profile = ProviderProfile(kind, url, model.trim(), dshApi = dshApi)
             when (val result = onDiscoverModels(profile, effectiveKey)) {
                 is ModelDiscoveryResult.Success -> {
@@ -402,7 +437,7 @@ fun AgentScreen(
             return
         }
         val kind = selectedKind
-        val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl.trim()
+        val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else withDefaultScheme(baseUrl)
         val profile = ProviderProfile(kind, url, model.trim(), dshApi = dshApi)
         val key = apiKey.trim().ifBlank { newApiKey.trim() }
         onScanModels(profile, key, models)
@@ -548,7 +583,7 @@ fun AgentScreen(
         val endpoint = if (editingEndpointId.isBlank()) {
             CustomEndpoint(
                 label = endpointLabel.trim(),
-                baseUrl = endpointUrl.trim(),
+                baseUrl = withDefaultScheme(endpointUrl),
                 model = endpointModel.trim(),
                 dshApi = endpointDsh,
                 keyName = endpointKeyName,
@@ -557,7 +592,7 @@ fun AgentScreen(
             CustomEndpoint(
                 id = editingEndpointId,
                 label = endpointLabel.trim(),
-                baseUrl = endpointUrl.trim(),
+                baseUrl = withDefaultScheme(endpointUrl),
                 model = endpointModel.trim(),
                 dshApi = endpointDsh,
                 keyName = endpointKeyName,
@@ -606,6 +641,21 @@ fun AgentScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                     )
+                    if (endpointUrl.isNotBlank()) {
+                        if (schemeOf(endpointUrl).isEmpty()) {
+                            Text(
+                                stringResource(R.string.agent_url_needs_scheme),
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else if (!isHttpScheme(endpointUrl)) {
+                            Text(
+                                stringResource(R.string.agent_url_bad_scheme),
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
                     OutlinedTextField(
                         value = endpointModel,
                         onValueChange = { endpointModel = it },
@@ -696,7 +746,7 @@ fun AgentScreen(
                         } else if (!endpointDetecting) {
                             endpointDetecting = true
                             scope.launch {
-                                val detected = onDetectEndpoint(endpointUrl.trim(), endpointKeyName)
+                                val detected = onDetectEndpoint(withDefaultScheme(endpointUrl), endpointKeyName)
                                 endpointDetecting = false
                                 if (detected.dshApi != null) {
                                     endpointDsh = detected.dshApi
@@ -1779,7 +1829,7 @@ fun AgentScreen(
                                     statusOk = true
                                 }
                                 val kind = selectedKind
-                                val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl.trim()
+                                val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else withDefaultScheme(baseUrl)
                                 val profile = ProviderProfile(kind, url, model.trim(), dshApi = dshApi)
                                 if (kind == ProviderKind.CLAUDE) {
                                     onSaveProvider(profile, apiKey.trim())
@@ -2214,6 +2264,8 @@ private fun AgentProviderCard(
     val context = LocalContext.current
     val visibleKinds = remember(state.agentKind) { providersForAgent(state.agentKind) }
     var connectionExpanded by rememberSaveable(selectedKind) { mutableStateOf(false) }
+    // Reset the filter when the Agent changes so a stale query can't hide every provider.
+    var providerQuery by rememberSaveable(state.agentKind) { mutableStateOf("") }
     // Keep this state across provider changes so selecting Custom API can
     // immediately reveal its required setup instead of resetting on recomposition.
     var endpointExpanded by rememberSaveable(state.agentKind) { mutableStateOf(false) }
@@ -2253,12 +2305,41 @@ private fun AgentProviderCard(
                     modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    val query = providerQuery.trim()
+                    val filteredKinds = if (query.isEmpty()) {
+                        visibleKinds
+                    } else {
+                        visibleKinds.filter {
+                            it.title.contains(query, ignoreCase = true) ||
+                                it.subtitle.contains(query, ignoreCase = true)
+                        }
+                    }
+                    // Only the fuller provider lists are worth filtering; a short list stays one tap away.
+                    if (visibleKinds.size > 6) {
+                        OutlinedTextField(
+                            value = providerQuery,
+                            onValueChange = { providerQuery = it },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(15.dp)) },
+                            placeholder = { Text(stringResource(R.string.agent_provider_search), fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                    }
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f),
                     ) {
                         Column {
-                            visibleKinds.forEachIndexed { index, kind ->
+                            if (filteredKinds.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.agent_provider_no_match),
+                                    fontSize = 12.sp,
+                                    color = PocketMuted,
+                                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 14.dp),
+                                )
+                            }
+                            filteredKinds.forEachIndexed { index, kind ->
                                 Row(
                                     Modifier
                                         .fillMaxWidth()
@@ -2276,7 +2357,7 @@ private fun AgentProviderCard(
                                     }
                                     AgentSelectionDot(selectedKind == kind)
                                 }
-                                if (index != visibleKinds.lastIndex) {
+                                if (index != filteredKinds.lastIndex) {
                                     HorizontalDivider(Modifier.padding(start = 13.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                                 }
                             }
@@ -2396,11 +2477,74 @@ private fun AgentProviderCard(
                                 }
                             }
                         }
+                        val presets = remember(selectedKind) { presetEndpointsFor(selectedKind) }
+                        val baseUrlForPreview = if (selectedKind.fixedBaseUrl) selectedKind.defaultBaseUrl else baseUrl
+                        val previewProtocol = providerProtocolForAgent(
+                            ProviderProfile(selectedKind, baseUrlForPreview, model, dshApi = dshApi),
+                            state.agentKind,
+                        )
+                        val requestPreview = remember(baseUrlForPreview, previewProtocol) {
+                            if (baseUrlForPreview.isBlank()) {
+                                ""
+                            } else {
+                                ProviderApiClient().requestPreviewUrl(baseUrlForPreview, previewProtocol)
+                            }
+                        }
+                        val urlSupporting: @Composable (() -> Unit)? = when {
+                            selectedKind.fixedBaseUrl -> ({
+                                Text(stringResource(R.string.agent_fixed_by, selectedKind.title))
+                            })
+                            baseUrl.isNotBlank() && schemeOf(baseUrl).isEmpty() -> ({
+                                Text(stringResource(R.string.agent_url_needs_scheme), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            })
+                            baseUrl.isNotBlank() && !isHttpScheme(baseUrl) -> ({
+                                Text(stringResource(R.string.agent_url_bad_scheme), color = MaterialTheme.colorScheme.error)
+                            })
+                            requestPreview.isNotEmpty() -> ({
+                                Text(
+                                    stringResource(R.string.agent_url_preview, requestPreview),
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            })
+                            else -> null
+                        }
+                        val presetTrailing: @Composable (() -> Unit)? = if (presets.isNotEmpty() && !selectedKind.fixedBaseUrl) {
+                            {
+                                var presetMenu by rememberSaveable(selectedKind) { mutableStateOf(false) }
+                                Box {
+                                    IconButton(onClick = { presetMenu = true }) {
+                                        Icon(
+                                            Icons.Default.KeyboardArrowDown,
+                                            contentDescription = stringResource(R.string.agent_endpoint_presets),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                    DropdownMenu(expanded = presetMenu, onDismissRequest = { presetMenu = false }) {
+                                        presets.forEach { preset ->
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(preset.labelRes), fontSize = 13.sp) },
+                                                onClick = {
+                                                    presetMenu = false
+                                                    onBaseUrl(preset.baseUrl)
+                                                    preset.dshApi?.let(onDshApi)
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            null
+                        }
                         OutlinedTextField(
                             value = baseUrl,
                             onValueChange = { if (!selectedKind.fixedBaseUrl) onBaseUrl(it) },
                             label = { Text(stringResource(R.string.settings_base_url)) },
-                            supportingText = if (selectedKind.fixedBaseUrl) ({ Text(stringResource(R.string.agent_fixed_by, selectedKind.title)) }) else null,
+                            supportingText = urlSupporting,
+                            trailingIcon = presetTrailing,
                             readOnly = selectedKind.fixedBaseUrl,
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
@@ -2638,9 +2782,21 @@ private fun AgentProviderCard(
     }
 
     Spacer(Modifier.height(16.dp))
+    // Loopback gateways on this device answer without credentials.
+    val loopbackEndpoint = isLoopbackBaseUrl(if (selectedKind.fixedBaseUrl) selectedKind.defaultBaseUrl else baseUrl)
+    if (loopbackEndpoint && apiKey.isBlank() && selectedKind != ProviderKind.CLAUDE) {
+        Text(
+            stringResource(R.string.agent_local_no_key),
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            color = PocketMuted,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(6.dp))
+    }
     SecondaryActionButton(
         onClick = onValidate,
-        enabled = apiKey.isNotBlank() && !isDiscovering && !isValidating &&
+        enabled = (apiKey.isNotBlank() || loopbackEndpoint) && !isDiscovering && !isValidating &&
             (selectedKind == ProviderKind.CLAUDE || (baseUrl.isNotBlank() && model.isNotBlank())),
         modifier = Modifier.fillMaxWidth().height(48.dp),
     ) {

@@ -1,6 +1,7 @@
 package com.jarves.mh.network
 
 import com.jarves.mh.model.ProviderProtocol
+import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -118,5 +119,40 @@ class ProviderApiClientTest {
             listOf("https://api.example.com/v1/models"),
             client.modelEndpoints("https://api.example.com/v1", ProviderProtocol.OPENAI_CHAT),
         )
+    }
+
+    @Test
+    fun requestPreviewUrlShowsTheFirstProbedEndpoint() {
+        val client = ProviderApiClient()
+
+        assertEquals(
+            "http://localhost:11434/v1/chat/completions",
+            client.requestPreviewUrl("http://localhost:11434", ProviderProtocol.OPENAI_CHAT),
+        )
+        assertEquals(
+            "https://api.anthropic.com/v1/messages",
+            client.requestPreviewUrl("https://api.anthropic.com", ProviderProtocol.ANTHROPIC_GATEWAY),
+        )
+        assertEquals(
+            "https://openrouter.ai/api/v1/messages",
+            client.requestPreviewUrl("https://openrouter.ai/api", ProviderProtocol.OPENROUTER),
+        )
+        assertEquals(
+            "https://api.example.com/v1/chat/completions",
+            client.requestPreviewUrl("https://api.example.com/chat/completions", ProviderProtocol.OPENAI_CHAT),
+        )
+    }
+
+    @Test
+    fun remoteEndpointWithoutKeyIsRejectedBeforeAnyRequest() = runBlocking {
+        val result = ProviderApiClient().validate(
+            baseUrl = "https://api.anthropic.com",
+            model = "claude-sonnet-4-6",
+            apiKey = "",
+            protocol = ProviderProtocol.ANTHROPIC_GATEWAY,
+            discoveredModels = emptyList(),
+        )
+
+        assertTrue(result is ConnectionValidation.Failure)
     }
 }
