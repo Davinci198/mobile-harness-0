@@ -201,7 +201,7 @@ internal class HermesWarmSession(
                 }
             }
             if (!finished && boundary.turnStarted) {
-                val partial = lineBuffer.substring(lineBuffer.lastIndexOf("\n") + 1).trim()
+                val partial = stripAnsi(lineBuffer.substring(lineBuffer.lastIndexOf("\n") + 1)).trim()
                 val isIdlePrompt = partial.startsWith(PROMPT_MARK) &&
                     (shortEcho.isEmpty() || !partial.contains(shortEcho))
                 val quiet = System.currentTimeMillis() - lastOutputAt >= PROMPT_QUIET_MS
@@ -274,7 +274,7 @@ internal class HermesWarmSession(
             while (newline >= 0) {
                 val line = lineBuffer.substring(0, newline).trimEnd('\r')
                 lineBuffer.delete(0, newline + 1)
-                if (line.trim().startsWith(PROMPT_MARK)) {
+                if (stripAnsi(line).trim().startsWith(PROMPT_MARK)) {
                     Log.i("HermesWarmSession", "tui ready at prompt")
                     return true
                 }
@@ -282,7 +282,10 @@ internal class HermesWarmSession(
             }
             // The idle prompt often has no trailing newline yet: accept the tail.
             val tail = lineBuffer.substring(lineBuffer.lastIndexOf("\n") + 1)
-            if (tail.trim().startsWith(PROMPT_MARK)) return true
+            if (stripAnsi(tail).trim().startsWith(PROMPT_MARK)) {
+                Log.i("HermesWarmSession", "tui ready at prompt")
+                return true
+            }
         }
         return false
     }

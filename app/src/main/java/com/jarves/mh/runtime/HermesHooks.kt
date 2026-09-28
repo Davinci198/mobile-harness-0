@@ -70,6 +70,13 @@ private fun hookToolDetail(input: JSONObject?): String {
  * continuously (so a silence heuristic cannot work). The turn is over at the
  * first "❯" line that is not the echo of our own submission.
  */
+/** Strips CSI/OSC escape sequences so rendered lines can be matched as text. */
+internal fun stripAnsi(text: String): String = text.replace(ANSI_SEQUENCE, "")
+
+private val ANSI_SEQUENCE = Regex(
+    "\u001B\\[[0-9;?]*[ -/]*[@-~]|\u001B\\][^\u0007\u001B]*(\u0007|\u001B\\\\)|\u001B[()][A-Za-z0-9]",
+)
+
 internal class WarmTurnBoundary(echo: String) {
     private val echoPrefix: String = echo.take(ECHO_PREFIX_CHARS)
     private var running = false
@@ -86,7 +93,9 @@ internal class WarmTurnBoundary(echo: String) {
     /** Feeds one stdout line; returns true once the prompt is idle again. */
     fun onOutputLine(rawLine: String): Boolean {
         if (done) return true
-        val line = rawLine.trim()
+        // The TUI colours the prompt mark itself, so the raw line starts with
+        // escape sequences; match on the text it renders.
+        val line = stripAnsi(rawLine).trim()
         if (!running) {
             if (RUNNING_MARKERS.any { line.contains(it) }) running = true
             return false
