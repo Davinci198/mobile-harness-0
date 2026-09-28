@@ -2160,6 +2160,8 @@ private fun RootScreenHost(
                     onValidateProvider = viewModel::validateProvider,
                     onSetThemeMode = viewModel::setThemeMode,
                     onSetColorTheme = viewModel::setColorTheme,
+                    onSetCustomColors = viewModel::setCustomColors,
+                    onResetColorTheme = viewModel::resetColorTheme,
                     onPing = viewModel::pingApi,
                     onClearTerminal = viewModel::clearTerminal,
                     getSavedApiKey = viewModel::getSavedApiKey,

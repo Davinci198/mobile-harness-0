@@ -71,6 +71,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -84,7 +87,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -98,6 +103,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.jarves.mh.BuildConfig
 import com.jarves.mh.R
 import com.jarves.mh.data.ApiKeyInfo
@@ -117,6 +124,8 @@ import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.ui.theme.AppColorTheme
 import com.jarves.mh.ui.theme.AppThemeMode
+import com.jarves.mh.ui.theme.ColorPicker
+import com.jarves.mh.ui.theme.PalettePreview
 import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketAccent
 import kotlinx.coroutines.launch
@@ -132,6 +141,8 @@ fun SettingsScreen(
     onValidateProvider: suspend (ProviderProfile, String, List<DiscoveredModel>) -> ConnectionValidation,
     onSetThemeMode: (AppThemeMode) -> Unit,
     onSetColorTheme: (AppColorTheme) -> Unit,
+    onSetCustomColors: (Int, Int) -> Unit,
+    onResetColorTheme: () -> Unit,
     onPing: () -> Unit,
     onClearTerminal: () -> Unit,
     getSavedApiKey: (ProviderKind) -> String,
@@ -159,6 +170,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     var expanded by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     var terminalCleared by remember { mutableStateOf(false) }
+    var showColorPicker by remember { mutableStateOf(false) }
     var showReliabilityHelp by rememberSaveable { mutableStateOf(false) }
     var stackPendingRemoval by remember { mutableStateOf<DevStack?>(null) }
     val powerManager = context.getSystemService(PowerManager::class.java)
@@ -280,6 +292,14 @@ fun SettingsScreen(
                         ColorThemeChoice(stringResource(R.string.settings_theme_green), listOf(Color(0xFF43A047), Color(0xFF0A140E)), state.colorTheme == AppColorTheme.GREEN, { onSetColorTheme(AppColorTheme.GREEN) }, Modifier.weight(1f))
                         ColorThemeChoice(stringResource(R.string.settings_theme_rose), listOf(Color(0xFFDB2777), Color(0xFF7C3AED)), state.colorTheme == AppColorTheme.ROSE, { onSetColorTheme(AppColorTheme.ROSE) }, Modifier.weight(1f))
                     }
+                    Spacer(Modifier.height(8.dp))
+                    CustomColorRow(
+                        enabled = state.colorTheme == AppColorTheme.CUSTOM,
+                        accent = Color(state.customAccent),
+                        background = Color(state.customBackground),
+                        onClick = { showColorPicker = true },
+                        onReset = onResetColorTheme,
+                    )
                     if (Build.VERSION.SDK_INT >= 33) {
                         Spacer(Modifier.height(12.dp))
                         Text(
@@ -709,6 +729,72 @@ fun SettingsScreen(
                     )
                 }
                 Spacer(Modifier.height(18.dp))
+            }
+        }
+
+        if (showColorPicker) {
+            var draftAccent by remember { mutableStateOf(Color(state.customAccent)) }
+            var draftBackground by remember { mutableStateOf(Color(state.customBackground)) }
+            Dialog(
+                onDismissRequest = { showColorPicker = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Surface(
+                    Modifier
+                        .fillMaxWidth(0.94f)
+                        .padding(top = 28.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                ) {
+                    Column(
+                        Modifier
+                            .padding(16.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            stringResource(R.string.settings_custom_colors),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        ColorPicker(
+                            label = stringResource(R.string.settings_custom_accent),
+                            color = draftAccent,
+                            onColorChange = { draftAccent = it },
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        ColorPicker(
+                            label = stringResource(R.string.settings_custom_background),
+                            color = draftBackground,
+                            onColorChange = { draftBackground = it },
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            stringResource(R.string.settings_custom_preview),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        PalettePreview(accent = draftAccent, background = draftBackground)
+                        Spacer(Modifier.height(16.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    onSetCustomColors(draftAccent.toArgb(), draftBackground.toArgb())
+                                    showColorPicker = false
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) { Text(stringResource(R.string.settings_save)) }
+                            TextButton(
+                                onClick = { showColorPicker = false },
+                                modifier = Modifier.weight(1f),
+                            ) { Text(stringResource(R.string.settings_cancel)) }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1155,6 +1241,53 @@ private fun ColorThemeChoice(title: String, swatch: List<Color>, selected: Boole
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+@Composable
+private fun CustomColorRow(
+    enabled: Boolean,
+    accent: Color,
+    background: Color,
+    onClick: () -> Unit,
+    onReset: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = if (enabled) PocketAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(if (enabled) 1.5.dp else 1.dp, if (enabled) PocketAccent else MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                Modifier
+                    .height(20.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+            ) {
+                Box(Modifier.weight(1f).fillMaxHeight().background(accent))
+                Box(Modifier.weight(1f).fillMaxHeight().background(background))
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = stringResource(R.string.settings_custom_theme),
+                fontSize = 12.sp,
+                fontWeight = if (enabled) FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier.weight(1f),
+            )
+            if (enabled) {
+                TextButton(onClick = onReset) { Text(stringResource(R.string.settings_reset), fontSize = 12.sp) }
+            } else {
+                Icon(
+                    Icons.Default.Colorize,
+                    null,
+                    Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

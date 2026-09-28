@@ -140,6 +140,14 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("color_theme", "violet") ?: "violet"
         set(value) { preferences.edit().putString("color_theme", value).apply() }
 
+    var customAccent: Int
+        get() = preferences.getInt("custom_accent", 0xFF7C5CFC.toInt())
+        set(value) { preferences.edit().putInt("custom_accent", value).apply() }
+
+    var customBackground: Int
+        get() = preferences.getInt("custom_background", 0xFF0F0F10.toInt())
+        set(value) { preferences.edit().putInt("custom_background", value).apply() }
+
     var legacySeededCredentialRemoved: Boolean
         get() = preferences.getBoolean("legacy_seeded_credential_removed", false)
         set(value) { preferences.edit().putBoolean("legacy_seeded_credential_removed", value).apply() }
