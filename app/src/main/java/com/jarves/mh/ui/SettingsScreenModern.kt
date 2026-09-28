@@ -115,6 +115,7 @@ import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.KeepAliveTracker
+import com.jarves.mh.ui.theme.AppColorTheme
 import com.jarves.mh.ui.theme.AppThemeMode
 import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketAccent
@@ -130,6 +131,7 @@ fun SettingsScreen(
     onDiscoverModels: suspend (ProviderProfile, String) -> ModelDiscoveryResult,
     onValidateProvider: suspend (ProviderProfile, String, List<DiscoveredModel>) -> ConnectionValidation,
     onSetThemeMode: (AppThemeMode) -> Unit,
+    onSetColorTheme: (AppColorTheme) -> Unit,
     onPing: () -> Unit,
     onClearTerminal: () -> Unit,
     getSavedApiKey: (ProviderKind) -> String,
@@ -265,6 +267,18 @@ fun SettingsScreen(
                         ModernThemeChoice(stringResource(R.string.settings_chip_dark), Icons.Default.DarkMode, state.themeMode == AppThemeMode.DARK, { onSetThemeMode(AppThemeMode.DARK) }, Modifier.weight(1f))
                         ModernThemeChoice(stringResource(R.string.settings_chip_light), Icons.Default.LightMode, state.themeMode == AppThemeMode.LIGHT, { onSetThemeMode(AppThemeMode.LIGHT) }, Modifier.weight(1f))
                         ModernThemeChoice(stringResource(R.string.settings_chip_system), Icons.Default.PhoneAndroid, state.themeMode == AppThemeMode.SYSTEM, { onSetThemeMode(AppThemeMode.SYSTEM) }, Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.settings_color_theme),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ColorThemeChoice(stringResource(R.string.settings_theme_violet), listOf(Color(0xFF7C5CFC), Color(0xFF1F1F28)), state.colorTheme == AppColorTheme.VIOLET, { onSetColorTheme(AppColorTheme.VIOLET) }, Modifier.weight(1f))
+                        ColorThemeChoice(stringResource(R.string.settings_theme_green), listOf(Color(0xFF43A047), Color(0xFF0A140E)), state.colorTheme == AppColorTheme.GREEN, { onSetColorTheme(AppColorTheme.GREEN) }, Modifier.weight(1f))
+                        ColorThemeChoice(stringResource(R.string.settings_theme_rose), listOf(Color(0xFFDB2777), Color(0xFF7C3AED)), state.colorTheme == AppColorTheme.ROSE, { onSetColorTheme(AppColorTheme.ROSE) }, Modifier.weight(1f))
                     }
                     if (Build.VERSION.SDK_INT >= 33) {
                         Spacer(Modifier.height(12.dp))
@@ -1114,6 +1128,33 @@ private fun ModernThemeChoice(title: String, icon: ImageVector, selected: Boolea
             Icon(icon, title, Modifier.size(20.dp), tint = if (selected) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(5.dp))
             Text(title, fontSize = 12.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        }
+    }
+}
+
+@Composable
+private fun ColorThemeChoice(title: String, swatch: List<Color>, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) PocketAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) PocketAccent else MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.padding(vertical = 13.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(
+                Modifier.height(20.dp).fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                swatch.forEach { Box(Modifier.weight(1f).fillMaxHeight().background(it, RoundedCornerShape(4.dp))) }
+            }
+            Spacer(Modifier.height(5.dp))
+            Text(
+                title,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
