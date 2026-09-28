@@ -170,6 +170,8 @@ data class AppUiState(
     val customEndpoints: List<CustomEndpoint> = emptyList(),
     val themeMode: com.jarves.mh.ui.theme.AppThemeMode = com.jarves.mh.ui.theme.AppThemeMode.DARK,
     val colorTheme: com.jarves.mh.ui.theme.AppColorTheme = com.jarves.mh.ui.theme.AppColorTheme.VIOLET,
+    val customAccent: Int = 0xFF7C5CFC.toInt(),
+    val customBackground: Int = 0xFF0F0F10.toInt(),
     val apiPingStatus: ApiPingStatus = ApiPingStatus.IDLE,
     val apiPingMessage: String? = null,
     val projects: List<Project> = emptyList(),
@@ -366,6 +368,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .getOrDefault(com.jarves.mh.ui.theme.AppThemeMode.DARK),
             colorTheme = runCatching { com.jarves.mh.ui.theme.AppColorTheme.valueOf(preferences.colorTheme.uppercase()) }
                 .getOrDefault(com.jarves.mh.ui.theme.AppColorTheme.VIOLET),
+            customAccent = preferences.customAccent,
+            customBackground = preferences.customBackground,
             projects = preferences.loadProjects(),
             githubAuthStatus = GitHubAuthStatus.DISCONNECTED,
             githubLogin = preferences.githubLogin.takeIf(String::isNotBlank),
@@ -1014,6 +1018,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setColorTheme(theme: com.jarves.mh.ui.theme.AppColorTheme) {
         preferences.colorTheme = theme.name.lowercase()
         _state.update { it.copy(colorTheme = theme) }
+    }
+
+    fun setCustomColors(accent: Int, background: Int) {
+        preferences.customAccent = accent
+        preferences.customBackground = background
+        preferences.colorTheme = "custom"
+        _state.update { it.copy(customAccent = accent, customBackground = background, colorTheme = com.jarves.mh.ui.theme.AppColorTheme.CUSTOM) }
+    }
+
+    fun resetColorTheme() {
+        preferences.colorTheme = "violet"
+        _state.update { it.copy(colorTheme = com.jarves.mh.ui.theme.AppColorTheme.VIOLET) }
     }
 
     fun getSavedApiKey(kind: ProviderKind): String = vault.get(kind.name).orEmpty()

@@ -9,6 +9,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -18,7 +19,7 @@ import androidx.core.view.WindowCompat
  * (mobile_xf5_harness_redesign_agent.html); GREEN and ROSE sample the Gboard
  * keyboards the user shipped as screenshots.
  */
-enum class AppColorTheme { VIOLET, GREEN, ROSE }
+enum class AppColorTheme { VIOLET, GREEN, ROSE, CUSTOM }
 
 /**
  * Brand colors + Material3 schemes for one [AppColorTheme]. The [darkColors] and
@@ -198,7 +199,6 @@ private val RosePalette = PocketPalette(
 )
 
 private val ActivePalette = mutableStateOf(VioletPalette)
-
 val PocketAccent: Color get() = ActivePalette.value.accent
 val PocketAccentTeal: Color get() = ActivePalette.value.accentTeal
 val PocketBlue: Color get() = ActivePalette.value.blue
@@ -210,10 +210,14 @@ val PocketOutline: Color get() = ActivePalette.value.outline
 val PocketCardBorder: Color get() = ActivePalette.value.cardBorder
 val PocketMuted: Color get() = ActivePalette.value.muted
 
-private fun paletteFor(colorTheme: AppColorTheme): PocketPalette = when (colorTheme) {
+val DefaultCustomAccent: Int = 0xFF7C5CFC.toInt()
+val DefaultCustomBackground: Int = 0xFF0F0F10.toInt()
+
+private fun paletteFor(colorTheme: AppColorTheme, customAccent: Int, customBackground: Int): PocketPalette = when (colorTheme) {
     AppColorTheme.VIOLET -> VioletPalette
     AppColorTheme.GREEN -> GreenPalette
     AppColorTheme.ROSE -> RosePalette
+    AppColorTheme.CUSTOM -> customPalette(Color(customAccent), Color(customBackground))
 }
 
 enum class AppThemeMode { SYSTEM, DARK, LIGHT }
@@ -222,10 +226,14 @@ enum class AppThemeMode { SYSTEM, DARK, LIGHT }
 fun PocketTheme(
     themeMode: AppThemeMode = AppThemeMode.SYSTEM,
     colorTheme: AppColorTheme = AppColorTheme.VIOLET,
+    customAccent: Int = DefaultCustomAccent,
+    customBackground: Int = DefaultCustomBackground,
     content: @Composable () -> Unit,
 ) {
-    val palette = paletteFor(colorTheme)
-    if (ActivePalette.value !== palette) ActivePalette.value = palette
+    val palette = remember(colorTheme, customAccent, customBackground) {
+        paletteFor(colorTheme, customAccent, customBackground)
+    }
+    if (ActivePalette.value != palette) ActivePalette.value = palette
 
     val isDark = when (themeMode) {
         AppThemeMode.DARK -> true

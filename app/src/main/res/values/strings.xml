@@ -21,6 +21,12 @@
     <string name="settings_theme_violet">Violet</string>
     <string name="settings_theme_green">Green</string>
     <string name="settings_theme_rose">Purple &amp; pink</string>
+    <string name="settings_custom_theme">Custom colors</string>
+    <string name="settings_custom_colors">Custom colors</string>
+    <string name="settings_custom_accent">Accent</string>
+    <string name="settings_custom_background">Background</string>
+    <string name="settings_custom_preview">Preview</string>
+    <string name="settings_save">Save</string>
     <string name="settings_background_title">Background execution</string>
     <string name="settings_bg_active_sub">Active for coding tasks</string>
     <string name="settings_bg_inactive_sub">Battery optimization may stop tasks</string>
