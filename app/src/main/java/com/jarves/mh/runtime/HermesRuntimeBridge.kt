@@ -109,10 +109,11 @@ internal class HermesRuntimeBridge(
     override fun parseJsonlLine(line: String, sessionId: String): CliParsed =
         HermesJsonlParser.parseLine(line, sessionId)
 
-    // Hermes keeps one interactive `hermes chat` alive between turns: on a TTY
-    // `-q` seeds the first turn and the session stays interactive (`--quiet`
-    // / `--format stream-json` are what imply single-query exit), which turns a
-    // 22-26s boot per turn into one boot per project/endpoint.
+    // Hermes keeps one interactive `hermes chat` alive between turns, which
+    // turns a 22-26s boot per turn into one boot per project/endpoint. The
+    // session is started *without* `-q`: on a TTY `-q` is the legacy
+    // single-query mode, and Hermes finalises the session and exits right after
+    // the first answer ("Shutting down... (finalizing session)").
     override fun supportsWarmSession(): Boolean = true
 
     override fun warmCommandFor(
@@ -136,8 +137,6 @@ internal class HermesRuntimeBridge(
                 add(model)
             }
         }
-        add("-q")
-        add(prompt)
     }
 
     private fun hermesProviderName(provider: ProviderProfile): String {
