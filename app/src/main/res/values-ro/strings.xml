@@ -17,6 +17,10 @@
     <string name="settings_chip_dark">Întunecat</string>
     <string name="settings_chip_light">Luminoasă</string>
     <string name="settings_chip_system">Sistem</string>
+    <string name="settings_color_theme">Temă de culori</string>
+    <string name="settings_theme_violet">Violet</string>
+    <string name="settings_theme_green">Verde</string>
+    <string name="settings_theme_rose">Mov și roz</string>
     <string name="settings_background_title">Execuție în fundal</string>
     <string name="settings_bg_active_sub">Activ pentru taskuri de programare</string>
     <string name="settings_bg_inactive_sub">Optimizarea bateriei poate opri taskurile</string>

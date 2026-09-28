@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity() {
                     screenShareLauncher.launch(mpm.createScreenCaptureIntent())
                 }
             }
-            PocketTheme(themeMode = state.themeMode) {
+            PocketTheme(themeMode = state.themeMode, colorTheme = state.colorTheme) {
                 PocketDevApp(viewModel)
             }
         }

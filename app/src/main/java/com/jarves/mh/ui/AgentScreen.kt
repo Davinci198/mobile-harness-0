@@ -140,6 +140,7 @@ import com.jarves.mh.ui.theme.PocketBlue
 import com.jarves.mh.ui.theme.PocketCardBorder
 import com.jarves.mh.ui.theme.PocketMuted
 import com.jarves.mh.ui.theme.PocketOutline
+import com.jarves.mh.ui.theme.PocketSurface
 import com.jarves.mh.ui.theme.PocketSurfaceVariant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -970,8 +971,8 @@ fun AgentScreen(
                     }
                     Surface(
                         shape = CircleShape,
-                        color = Color(0xFF1F1F28),
-                        border = BorderStroke(1.dp, Color(0xFF2A2A32)),
+                        color = PocketSurfaceVariant,
+                        border = BorderStroke(1.dp, PocketOutline),
                         enabled = !isDiscovering && !state.isModelScanning,
                         onClick = ::runDiscoverOrTest,
                         modifier = Modifier.padding(start = 12.dp),
@@ -1013,7 +1014,7 @@ fun AgentScreen(
                             .fillMaxWidth()
                             .height(2.dp)
                             .clip(RoundedCornerShape(1.dp))
-                            .background(Color(0xFF1F1F28)),
+                            .background(PocketSurfaceVariant),
                     ) {
                         Box(
                             Modifier
@@ -1042,7 +1043,7 @@ fun AgentScreen(
                     shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = PocketAccent.copy(alpha = 0.5f),
-                        unfocusedBorderColor = Color(0xFF262631),
+                        unfocusedBorderColor = PocketCardBorder,
                         focusedContainerColor = Color(0xFF1C1C22),
                         unfocusedContainerColor = Color(0xFF1C1C22),
                     ),
@@ -1137,7 +1138,7 @@ fun AgentScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Box(
-                                Modifier.size(20.dp).background(Color(0xFF1F1F28), CircleShape),
+                                Modifier.size(20.dp).background(PocketSurfaceVariant, CircleShape),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
@@ -1517,8 +1518,8 @@ fun AgentScreen(
                                                     Box(
                                                         Modifier
                                                             .size(32.dp)
-                                                            .background(Color(0xFF1F1F28), RoundedCornerShape(10.dp))
-                                                            .border(1.dp, Color(0xFF2A2A32), RoundedCornerShape(10.dp)),
+                                                            .background(PocketSurfaceVariant, RoundedCornerShape(10.dp))
+                                                            .border(1.dp, PocketOutline, RoundedCornerShape(10.dp)),
                                                         contentAlignment = Alignment.Center,
                                                     ) {
                                                         Icon(
@@ -2748,7 +2749,7 @@ private fun AgentProviderCard(
                 )
                 Surface(
                     shape = CircleShape,
-                    color = Color(0xFF262631),
+                    color = PocketCardBorder,
                     border = BorderStroke(1.dp, Color(0xFF2E2E3A)),
                     modifier = Modifier.clickable(enabled = !isDiscovering, onClick = onDiscover),
                 ) {
@@ -3032,8 +3033,8 @@ private fun PremiumSummaryRow(
         Box(
             modifier = Modifier
                 .size(36.dp)
-                .background(Color(0xFF1F1F28), RoundedCornerShape(12.dp))
-                .border(1.dp, Color(0xFF2A2A32), RoundedCornerShape(12.dp)),
+                .background(PocketSurfaceVariant, RoundedCornerShape(12.dp))
+                .border(1.dp, PocketOutline, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, null, tint = Color(0xFFC9C9D1), modifier = Modifier.size(18.dp))
@@ -3182,7 +3183,7 @@ private fun AgentSelectionDot(selected: Boolean) {
         Modifier
             .size(20.dp)
             .background(if (selected) Color.White else Color.Transparent, CircleShape)
-            .border(1.5.dp, if (selected) Color.White else Color(0xFF2A2A32), CircleShape),
+            .border(1.5.dp, if (selected) Color.White else PocketOutline, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         if (selected) {
@@ -3235,7 +3236,7 @@ private fun StatCell(
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF17171C),
+        color = PocketSurface,
         border = BorderStroke(1.dp, PocketCardBorder),
         modifier = modifier,
     ) {

@@ -17,6 +17,10 @@
     <string name="settings_chip_dark">Dark</string>
     <string name="settings_chip_light">Light</string>
     <string name="settings_chip_system">System</string>
+    <string name="settings_color_theme">Color theme</string>
+    <string name="settings_theme_violet">Violet</string>
+    <string name="settings_theme_green">Green</string>
+    <string name="settings_theme_rose">Purple &amp; pink</string>
     <string name="settings_background_title">Background execution</string>
     <string name="settings_bg_active_sub">Active for coding tasks</string>
     <string name="settings_bg_inactive_sub">Battery optimization may stop tasks</string>

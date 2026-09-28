@@ -169,6 +169,7 @@ data class AppUiState(
     val activeApiKeyName: String? = null,
     val customEndpoints: List<CustomEndpoint> = emptyList(),
     val themeMode: com.jarves.mh.ui.theme.AppThemeMode = com.jarves.mh.ui.theme.AppThemeMode.DARK,
+    val colorTheme: com.jarves.mh.ui.theme.AppColorTheme = com.jarves.mh.ui.theme.AppColorTheme.VIOLET,
     val apiPingStatus: ApiPingStatus = ApiPingStatus.IDLE,
     val apiPingMessage: String? = null,
     val projects: List<Project> = emptyList(),
@@ -363,6 +364,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             antigravityEffort = preferences.antigravityEffort,
             themeMode = runCatching { com.jarves.mh.ui.theme.AppThemeMode.valueOf(preferences.themeMode.uppercase()) }
                 .getOrDefault(com.jarves.mh.ui.theme.AppThemeMode.DARK),
+            colorTheme = runCatching { com.jarves.mh.ui.theme.AppColorTheme.valueOf(preferences.colorTheme.uppercase()) }
+                .getOrDefault(com.jarves.mh.ui.theme.AppColorTheme.VIOLET),
             projects = preferences.loadProjects(),
             githubAuthStatus = GitHubAuthStatus.DISCONNECTED,
             githubLogin = preferences.githubLogin.takeIf(String::isNotBlank),
@@ -1006,6 +1009,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setThemeMode(mode: com.jarves.mh.ui.theme.AppThemeMode) {
         preferences.themeMode = mode.name.lowercase()
         _state.update { it.copy(themeMode = mode) }
+    }
+
+    fun setColorTheme(theme: com.jarves.mh.ui.theme.AppColorTheme) {
+        preferences.colorTheme = theme.name.lowercase()
+        _state.update { it.copy(colorTheme = theme) }
     }
 
     fun getSavedApiKey(kind: ProviderKind): String = vault.get(kind.name).orEmpty()
