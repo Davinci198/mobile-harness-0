@@ -18,7 +18,8 @@ JNIEXPORT jintArray JNICALL
 Java_com_jarves_mh_runtime_NativeSpawn_spawn(JNIEnv *env, jobject self, jobjectArray java_argv,
                                                jobjectArray java_env, jstring java_cwd,
                                                jstring java_output, jboolean use_pty,
-                                               jint pty_rows, jint pty_columns) {
+                                               jint pty_rows, jint pty_columns,
+                                               jboolean raw_input) {
     (void)self;
     jsize argc = (*env)->GetArrayLength(env, java_argv);
     jsize envc = (*env)->GetArrayLength(env, java_env);
@@ -76,6 +77,15 @@ Java_com_jarves_mh_runtime_NativeSpawn_spawn(JNIEnv *env, jobject self, jobjectA
             struct termios terminal;
             if (tcgetattr(slave_fd, &terminal) == 0) {
                 terminal.c_lflag &= (tcflag_t)~(ECHO | ECHONL);
+                // A full-screen TUI needs the terminal answers (colour, device
+                // attributes) to arrive one byte at a time: canonical mode would
+                // hold them in the line discipline until a newline shows up.
+                if (raw_input) {
+                    terminal.c_lflag &= (tcflag_t)~(ICANON | IEXTEN);
+                    terminal.c_iflag &= (tcflag_t)~(ICRNL | INLCR | IGNCR);
+                    terminal.c_cc[VMIN] = 1;
+                    terminal.c_cc[VTIME] = 0;
+                }
                 tcsetattr(slave_fd, TCSANOW, &terminal);
             }
             dup2(slave_fd, STDIN_FILENO);
