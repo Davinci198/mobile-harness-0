@@ -35,6 +35,7 @@ internal class HermesWarmSession(
     private val lineBuffer = StringBuilder()
     private val queryTail = StringBuilder()
     private var queryAnswers = 0
+    private var tuiReady = false
     private val pendingHooks = LinkedBlockingQueue<org.json.JSONObject>()
 
     /** True while a spawned session is still running. */
@@ -76,6 +77,7 @@ internal class HermesWarmSession(
         lineBuffer.setLength(0)
         queryTail.setLength(0)
         queryAnswers = 0
+        tuiReady = false
         pendingHooks.clear()
         // Without `-q` the session boots idle, so its prompt line is the
         // readiness signal for a fresh spawn as well as a reused one.
@@ -103,7 +105,9 @@ internal class HermesWarmSession(
         // Bracketed paste, the way a terminal delivers a multi-line paste: the
         // TUI inserts the newlines into its buffer instead of treating them as
         // "submit", so the whole context prompt arrives in one piece.
-        val submission = (PASTE_START + prompt.replace("\r\n", "\n").trim() + PASTE_END + "\r")
+        // Ctrl+U discards whatever the line already holds (a dropped paste, a
+        // stale query answer) so this turn starts from an empty prompt.
+        val submission = (KILL_LINE + PASTE_START + prompt.replace("\r\n", "\n").trim() + PASTE_END + "\r")
             .toByteArray(Charsets.UTF_8)
         runCatching {
             target.outputStream.write(submission)
@@ -285,8 +289,13 @@ internal class HermesWarmSession(
      * raw PTY. It asks for the background colour and the terminal identity and
      * then waits: nothing is rendered and no turn runs until the answers come
      * back, which a headless reader never sends.
+     *
+     * Only the startup window is answered: once the prompt line is on screen
+     * the TUI reads the same bytes as user input, and a late answer lands in
+     * the input buffer as literal text.
      */
     private fun answerTerminalQueries(target: Process, chunk: String) {
+        if (tuiReady) return
         queryTail.append(chunk)
         val seen = queryTail.toString()
         var unanswered = seen
@@ -304,6 +313,7 @@ internal class HermesWarmSession(
             unanswered = unanswered.replaceFirst(query, "")
             answered++
         }
+        if (seen.contains(PROMPT_MARK)) tuiReady = true
         if (seen.length > QUERY_TAIL_CHARS) queryTail.delete(0, seen.length - QUERY_TAIL_CHARS)
     }
 
@@ -316,6 +326,7 @@ internal class HermesWarmSession(
         lineBuffer.setLength(0)
         queryTail.setLength(0)
         queryAnswers = 0
+        tuiReady = false
         pendingHooks.clear()
         if (target != null) {
             // proot ignores the polite signal often enough that the wrapper has
@@ -346,6 +357,7 @@ internal class HermesWarmSession(
             "Hermes returned no reply for this turn. The warm session was dropped; the next turn starts fresh."
         private const val DIED_MESSAGE =
             "The Hermes session exited unexpectedly; the phone may have suspended it. Retry with the app in the foreground."
+        private const val KILL_LINE = "\u0015"
         private const val PASTE_START = "\u001B[200~"
         private const val PASTE_END = "\u001B[201~"
         private const val QUERY_TAIL_CHARS = 32
