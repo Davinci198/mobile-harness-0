@@ -60,6 +60,7 @@ internal class NativeSpawnProcess private constructor(
             pseudoTerminal: Boolean = false,
             ptyRows: Int = 40,
             ptyColumns: Int = 120,
+            rawInput: Boolean = false,
         ): NativeSpawnProcess {
             outputFile.parentFile?.mkdirs()
             if (pseudoTerminal) outputFile.delete()
@@ -71,6 +72,7 @@ internal class NativeSpawnProcess private constructor(
                 pseudoTerminal,
                 ptyRows,
                 ptyColumns,
+                rawInput,
             )
             check(spawned.size == 3 && spawned[0] > 0) { "Native runtime launch failed" }
             val input = ParcelFileDescriptor.AutoCloseOutputStream(ParcelFileDescriptor.adoptFd(spawned[1]))
@@ -106,6 +108,7 @@ private object NativeSpawn {
         pseudoTerminal: Boolean,
         ptyRows: Int,
         ptyColumns: Int,
+        rawInput: Boolean,
     ): IntArray
     external fun waitFor(pid: Int, noHang: Boolean): Int
     external fun kill(pid: Int, signal: Int): Int

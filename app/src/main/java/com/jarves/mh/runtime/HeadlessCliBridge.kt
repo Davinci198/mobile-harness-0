@@ -346,6 +346,9 @@ internal abstract class HeadlessCliBridge(
                 pseudoTerminal = true,
                 ptyRows = 40,
                 ptyColumns = 120,
+                // The interactive TUI reads its input raw: without this the
+                // terminal answers it expects never leave the line discipline.
+                rawInput = true,
             )
         } ?: return null
         activeProcess = start.process
