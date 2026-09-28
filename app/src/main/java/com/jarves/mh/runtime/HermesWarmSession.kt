@@ -49,7 +49,7 @@ internal class HermesWarmSession(
         val current = process
         if (current != null && current.isAlive && this.signature == signature) {
             Log.d("HermesWarmSession", "reusing warm session pid=${current.spawnPid()}")
-            if (!awaitInteractivePrompt(current)) {
+            if (!awaitReusableSession(current)) {
                 close()
             } else {
                 return current
@@ -234,6 +234,31 @@ internal class HermesWarmSession(
         )
     }
 
+    /**
+     * Waits until a reused session can take input again.
+     *
+     * An idle TUI does not repaint - no prompt line, no status line - so there
+     * is nothing new to recognise. Silence is the readiness signal here: the
+     * session already proved it boots when it was spawned, so a couple of
+     * quiet hundred milliseconds mean it is waiting at the prompt.
+     */
+    private suspend fun awaitReusableSession(target: Process): Boolean {
+        val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
+        var lastOutputAt = System.currentTimeMillis()
+        while (System.currentTimeMillis() < deadline) {
+            if (!target.isAlive) return false
+            if (sawNewOutput(target) != null) {
+                lastOutputAt = System.currentTimeMillis()
+                lineBuffer.setLength(0)
+            } else if (System.currentTimeMillis() - lastOutputAt >= REUSE_QUIET_MS) {
+                Log.i("HermesWarmSession", "reused session is idle and ready")
+                return true
+            }
+            delay(50)
+        }
+        return false
+    }
+
     /** Waits until the session is idle at its prompt and able to accept input. */
     private suspend fun awaitInteractivePrompt(target: Process): Boolean {
         val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
@@ -320,6 +345,7 @@ internal class HermesWarmSession(
         private const val PASTE_START = "\u001B[200~"
         private const val PASTE_END = "\u001B[201~"
         private const val MAX_LOGGED_HOOKS = 8
+        private const val REUSE_QUIET_MS = 600L
 
     }
 }
