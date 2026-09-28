@@ -99,10 +99,21 @@ internal class HermesWarmSession(
         // Bracketed paste, the way a terminal delivers a multi-line paste: the
         // TUI inserts the newlines into its buffer instead of treating them as
         // "submit", so the whole context prompt arrives in one piece.
-        val submission = (PASTE_START + prompt.replace("\r\n", "\n").trim() + PASTE_END + "\r")
+        val paste = (PASTE_START + prompt.replace("\r\n", "\n").trim() + PASTE_END)
             .toByteArray(Charsets.UTF_8)
         runCatching {
-            target.outputStream.write(submission)
+            target.outputStream.write(paste)
+            target.outputStream.flush()
+        }.onFailure {
+            return WarmTurnResult(failed = "Could not send the prompt to the Hermes session.", sawAnyOutput = false)
+        }
+        // Hermes reads an Enter that lands within 50ms of the last text change as
+        // a line break inside the message instead of a submit (its own guard
+        // against a doubled submit on fast typing), so the Enter goes out in its
+        // own write, well after the paste.
+        delay(PASTE_SETTLE_MS)
+        runCatching {
+            target.outputStream.write("\r".toByteArray(Charsets.UTF_8))
             target.outputStream.flush()
         }.onFailure {
             return WarmTurnResult(failed = "Could not send the prompt to the Hermes session.", sawAnyOutput = false)
@@ -349,6 +360,7 @@ internal class HermesWarmSession(
         private const val PASTE_END = "\u001B[201~"
         private const val MAX_LOGGED_HOOKS = 8
         private const val REUSE_QUIET_MS = 600L
+        private const val PASTE_SETTLE_MS = 250L
 
     }
 }
