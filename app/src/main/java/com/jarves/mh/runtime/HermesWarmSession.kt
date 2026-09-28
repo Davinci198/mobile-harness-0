@@ -15,22 +15,15 @@ internal data class WarmTurnResult(
 )
 
 /**
- * A session that is ready to run a turn: [seeded] is true when this call just
- * spawned it, which means the turn's prompt already went out through `-q` and
- * must not be typed into the prompt again.
- */
-internal data class WarmStart(val process: Process, val seeded: Boolean)
-
-/**
  * One long-lived interactive `hermes chat` process reused across Agent
  * Executions, so a turn pays the model latency instead of the 22-26s boot.
  *
  * The session is keyed by [signature] (provider, model, endpoint, workspace):
  * any change, a dead process or a boot failure closes it and the caller falls
- * back to the one-shot cold path. The first turn is seeded through `-q` (the
- * multi-line context prompt stays in argv, never in TUI input); later turns
- * are typed onto the PTY, the turn boundary comes from [WarmTurnBoundary] plus
- * the webhook stream events.
+ * back to the one-shot cold path. The session is started without `-q` (which
+ * would make Hermes answer once and exit), so every turn is pasted into the
+ * TUI as a bracketed paste; the turn boundary comes from [WarmTurnBoundary]
+ * plus the webhook stream events.
  */
 internal class HermesWarmSession(
     private val ensureHookConfig: (String) -> Unit,
@@ -40,8 +33,6 @@ internal class HermesWarmSession(
     private var signature: String? = null
     private var outputOffset = 0L
     private val lineBuffer = StringBuilder()
-    private val queryTail = StringBuilder()
-    private var queryAnswers = 0
     private val pendingHooks = LinkedBlockingQueue<org.json.JSONObject>()
 
     /** True while a spawned session is still running. */
@@ -54,14 +45,14 @@ internal class HermesWarmSession(
     suspend fun ensureStarted(
         signature: String,
         spawn: (hookUrl: String) -> Process,
-    ): WarmStart? {
+    ): Process? {
         val current = process
         if (current != null && current.isAlive && this.signature == signature) {
             Log.d("HermesWarmSession", "reusing warm session pid=${current.spawnPid()}")
-            if (!awaitSessionReady(current, seeded = false)) {
+            if (!awaitReusableSession(current)) {
                 close()
             } else {
-                return WarmStart(current, seeded = false)
+                return current
             }
         } else if (current != null) {
             Log.i("HermesWarmSession", "warm session unusable, respawning")
@@ -81,21 +72,20 @@ internal class HermesWarmSession(
         this.signature = signature
         outputOffset = 0L
         lineBuffer.setLength(0)
-        queryTail.setLength(0)
-        queryAnswers = 0
         pendingHooks.clear()
-        if (!awaitSessionReady(spawned, seeded = true)) {
+        // Without `-q` the session boots idle, so its prompt line is the
+        // readiness signal for a fresh spawn as well as a reused one.
+        if (!awaitInteractivePrompt(spawned)) {
             close()
             return null
         }
-        return WarmStart(spawned, seeded = true)
+        return spawned
     }
 
-    /** Runs one turn: submits [prompt] unless the session was seeded with it. */
+    /** Runs one turn: pastes [prompt] into the session and waits for the reply. */
     suspend fun runTurn(
         prompt: String,
         sessionId: String,
-        submitPrompt: Boolean,
         emit: suspend (RuntimeEvent) -> Unit,
     ): WarmTurnResult {
         val target = process
@@ -106,16 +96,29 @@ internal class HermesWarmSession(
         val boundary = WarmTurnBoundary(prompt.lineSequence().first().trim())
         pendingHooks.clear()
         var bootLogged = false
-        if (submitPrompt) {
-            val submission = (prompt.replace('\r', ' ').replace('\n', ' ').trim() + "\r")
-                .toByteArray(Charsets.UTF_8)
-            runCatching {
-                target.outputStream.write(submission)
-                target.outputStream.flush()
-            }.onFailure {
-                return WarmTurnResult(failed = "Could not send the prompt to the Hermes session.", sawAnyOutput = false)
-            }
+        // Bracketed paste, the way a terminal delivers a multi-line paste: the
+        // TUI inserts the newlines into its buffer instead of treating them as
+        // "submit", so the whole context prompt arrives in one piece.
+        val paste = (PASTE_START + prompt.replace("\r\n", "\n").trim() + PASTE_END)
+            .toByteArray(Charsets.UTF_8)
+        runCatching {
+            target.outputStream.write(paste)
+            target.outputStream.flush()
+        }.onFailure {
+            return WarmTurnResult(failed = "Could not send the prompt to the Hermes session.", sawAnyOutput = false)
         }
+        // Hermes reads an Enter that lands within 50ms of the last text change as
+        // a line break inside the message instead of a submit (its own guard
+        // against a doubled submit on fast typing), so the Enter goes out in its
+        // own write, well after the paste.
+        delay(PASTE_SETTLE_MS)
+        runCatching {
+            target.outputStream.write("\r".toByteArray(Charsets.UTF_8))
+            target.outputStream.flush()
+        }.onFailure {
+            return WarmTurnResult(failed = "Could not send the prompt to the Hermes session.", sawAnyOutput = false)
+        }
+        Log.i("HermesWarmSession", "prompt submitted (${prompt.length} chars)")
 
         var sawAnyOutput = false
         var sawText = false
@@ -128,10 +131,19 @@ internal class HermesWarmSession(
         // partial tail counts once the TUI stops repainting for a moment.
         val shortEcho = prompt.lineSequence().first().trim().take(SHORT_ECHO_CHARS)
 
+        var loggedHooks = 0
         val drain: suspend () -> Unit = {
             while (true) {
                 val payload = pendingHooks.poll() ?: break
                 sawAnyOutput = true
+                if (loggedHooks < MAX_LOGGED_HOOKS) {
+                    loggedHooks++
+                    Log.i(
+                        "HermesWarmSession",
+                        "hook ${payload.optString("hook_event_name")} " +
+                            "kind=${payload.optJSONObject("extra")?.optString("kind").orEmpty()}",
+                    )
+                }
                 when (val action = mapHermesHook(payload)) {
                     is HermesHookAction.Text -> {
                         boundary.markRunning()
@@ -200,7 +212,7 @@ internal class HermesWarmSession(
                 }
             }
             if (!finished && boundary.turnStarted) {
-                val partial = lineBuffer.substring(lineBuffer.lastIndexOf("\n") + 1).trim()
+                val partial = stripAnsi(lineBuffer.substring(lineBuffer.lastIndexOf("\n") + 1)).trim()
                 val isIdlePrompt = partial.startsWith(PROMPT_MARK) &&
                     (shortEcho.isEmpty() || !partial.contains(shortEcho))
                 val quiet = System.currentTimeMillis() - lastOutputAt >= PROMPT_QUIET_MS
@@ -234,27 +246,31 @@ internal class HermesWarmSession(
     }
 
     /**
-     * Waits until the session can carry a turn.
+     * Waits until a reused session can take input again.
      *
-     * A freshly seeded session is already running the turn its `-q` prompt
-     * started, so its idle prompt only renders once the answer is done: waiting
-     * for it would always time out. Any output (or the first hook delivery)
-     * proves the session is up, and nothing is consumed, so the turn still sees
-     * every line. A reused session is idle, so there the prompt line is the
-     * readiness signal.
+     * An idle TUI does not repaint - no prompt line, no status line - so there
+     * is nothing new to recognise. Silence is the readiness signal here: the
+     * session already proved it boots when it was spawned, so a couple of
+     * quiet hundred milliseconds mean it is waiting at the prompt.
      */
-    private suspend fun awaitSessionReady(target: Process, seeded: Boolean): Boolean {
-        if (!seeded) return awaitInteractivePrompt(target)
-        val native = target as? NativeSpawnProcess ?: return false
+    private suspend fun awaitReusableSession(target: Process): Boolean {
         val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
+        var lastOutputAt = System.currentTimeMillis()
         while (System.currentTimeMillis() < deadline) {
             if (!target.isAlive) return false
-            if (pendingHooks.isNotEmpty() || native.outputFile.length() > outputOffset) return true
+            if (sawNewOutput(target) != null) {
+                lastOutputAt = System.currentTimeMillis()
+                lineBuffer.setLength(0)
+            } else if (System.currentTimeMillis() - lastOutputAt >= REUSE_QUIET_MS) {
+                Log.i("HermesWarmSession", "reused session is idle and ready")
+                return true
+            }
             delay(50)
         }
         return false
     }
 
+    /** Waits until the session is idle at its prompt and able to accept input. */
     private suspend fun awaitInteractivePrompt(target: Process): Boolean {
         val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
@@ -269,12 +285,18 @@ internal class HermesWarmSession(
             while (newline >= 0) {
                 val line = lineBuffer.substring(0, newline).trimEnd('\r')
                 lineBuffer.delete(0, newline + 1)
-                if (line.trim().startsWith(PROMPT_MARK)) return true
+                if (stripAnsi(line).trim().startsWith(PROMPT_MARK)) {
+                    Log.i("HermesWarmSession", "tui ready at prompt")
+                    return true
+                }
                 newline = lineBuffer.indexOf("\n")
             }
             // The idle prompt often has no trailing newline yet: accept the tail.
             val tail = lineBuffer.substring(lineBuffer.lastIndexOf("\n") + 1)
-            if (tail.trim().startsWith(PROMPT_MARK)) return true
+            if (stripAnsi(tail).trim().startsWith(PROMPT_MARK)) {
+                Log.i("HermesWarmSession", "tui ready at prompt")
+                return true
+            }
         }
         return false
     }
@@ -291,47 +313,14 @@ internal class HermesWarmSession(
         }
         if (count <= 0) return null
         outputOffset += count
-        val text = bytes.decodeToString(0, count)
-        answerTerminalQueries(target, text)
-        return text
+        return bytes.decodeToString(0, count)
     }
-
-    /**
-     * Answers the terminal capability queries the interactive TUI sends on a
-     * raw PTY. It asks for the background colour and the terminal identity and
-     * then waits: nothing is rendered and no turn runs until the answers come
-     * back, which a headless reader never sends.
-     */
-    private fun answerTerminalQueries(target: Process, chunk: String) {
-        queryTail.append(chunk)
-        val seen = queryTail.toString()
-        var unanswered = seen
-        var answered = 0
-        while (answered < MAX_QUERIES_PER_CHUNK) {
-            val (query, reply) = terminalReplyFor(unanswered) ?: break
-            runCatching {
-                target.outputStream.write(reply.toByteArray(Charsets.UTF_8))
-                target.outputStream.flush()
-            }
-            if (queryAnswers < MAX_LOGGED_QUERIES) {
-                queryAnswers++
-                Log.i("HermesWarmSession", "terminal query answered: ${query.toDebugText()}")
-            }
-            unanswered = unanswered.replaceFirst(query, "")
-            answered++
-        }
-        if (seen.length > QUERY_TAIL_CHARS) queryTail.delete(0, seen.length - QUERY_TAIL_CHARS)
-    }
-
-    private fun String.toDebugText(): String = replace("\u001B", "ESC")
 
     override fun close() {
         val target = process
         process = null
         signature = null
         lineBuffer.setLength(0)
-        queryTail.setLength(0)
-        queryAnswers = 0
         pendingHooks.clear()
         if (target != null) {
             // proot ignores the polite signal often enough that the wrapper has
@@ -340,7 +329,12 @@ internal class HermesWarmSession(
             Thread {
                 runCatching { target.destroy() }
                 runCatching { target.destroyForcibly() }
-                Thread.sleep(500)
+                // Poll until the wrapper is gone: the exit has to be collected
+                // or the process lingers as a zombie for the app's lifetime.
+                val deadline = System.currentTimeMillis() + 5_000
+                while (System.currentTimeMillis() < deadline && target.isAlive) {
+                    Thread.sleep(100)
+                }
                 if (target.isAlive) runCatching { target.destroyForcibly() }
                 Log.i("HermesWarmSession", "close: pid=${target.spawnPid()} stillAlive=${target.isAlive}")
             }.apply { isDaemon = true; start() }
@@ -362,28 +356,14 @@ internal class HermesWarmSession(
             "Hermes returned no reply for this turn. The warm session was dropped; the next turn starts fresh."
         private const val DIED_MESSAGE =
             "The Hermes session exited unexpectedly; the phone may have suspended it. Retry with the app in the foreground."
-        private const val QUERY_TAIL_CHARS = 32
-        private const val MAX_QUERIES_PER_CHUNK = 3
-        private const val MAX_LOGGED_QUERIES = 6
+        private const val PASTE_START = "\u001B[200~"
+        private const val PASTE_END = "\u001B[201~"
+        private const val MAX_LOGGED_HOOKS = 8
+        private const val REUSE_QUIET_MS = 600L
+        private const val PASTE_SETTLE_MS = 250L
 
-        /** Terminal query the TUI sends -> the answer a real terminal gives. */
-        internal val TERMINAL_REPLIES: List<Pair<String, String>> = listOf(
-            // OSC 10/11: foreground/background colour query.
-            "\u001B]11;?" to "\u001B]11;rgb:0000/0000/0000\u001B\\",
-            "\u001B]10;?" to "\u001B]10;rgb:ffff/ffff/ffff\u001B\\",
-            // Primary/secondary device attributes: "VT100 with advanced video".
-            "\u001B[c" to "\u001B[?1;2c",
-            "\u001B[>c" to "\u001B[>0;10;1c",
-            // XTVERSION and kitty keyboard protocol: no extensions.
-            "\u001B[>0q" to "\u001BP>|mobile-harness",
-            "\u001B[?u" to "\u001B[?0u",
-        )
     }
 }
 
 /** `Process.pid()` does not exist on Android; the native spawn does expose it. */
 internal fun Process.spawnPid(): Int = (this as? NativeSpawnProcess)?.pid ?: -1
-
-/** The first unanswered terminal query in [text], with the reply for it. */
-internal fun terminalReplyFor(text: String): Pair<String, String>? =
-    HermesWarmSession.TERMINAL_REPLIES.firstOrNull { text.contains(it.first) }

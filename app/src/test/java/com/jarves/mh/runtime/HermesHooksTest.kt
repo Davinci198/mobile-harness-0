@@ -128,4 +128,20 @@ class HermesHooksTest {
             connection.disconnect()
         }
     }
+
+    @Test
+    fun escapeSequencesAreStrippedFromRenderedLines() {
+        val styled = "\u001B[0m\u001B[38;5;230m\u276F\u001B[0m Research this topic\u001B[0m"
+        assertEquals("\u276F Research this topic", stripAnsi(styled).trim())
+    }
+
+    @Test
+    fun boundaryEndsOnAColouredPromptLine() {
+        val boundary = WarmTurnBoundary("bau bau")
+        boundary.markRunning()
+        assertFalse(boundary.onOutputLine("\u001B[0m\u001B[38;5;230m\u276F\u001B[0m bau bau\u001B[0m"))
+        assertTrue(
+            boundary.onOutputLine("\u001B[0m\u001B[38;5;230m\u276F\u001B[0m Research this topic\u001B[0m"),
+        )
+    }
 }
