@@ -11,6 +11,7 @@ import java.io.FileInputStream
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import moe.shizuku.server.IShizukuService
 import rikka.shizuku.Shizuku
 
 /** What the app knows about the Shizuku service on this device. */
@@ -122,19 +123,22 @@ object ShizukuBridge {
                     stderr = "Shizuku is not available or access was not granted",
                 )
             }
-            val process = runCatching { Shizuku.newProcess(arrayOf("sh", "-c", command), null, null) }
-                .getOrElse { error ->
-                    return@withContext ShizukuCommandResult(-1, "", error.message ?: "Cannot start Shizuku process")
-                }
+            val process = runCatching {
+                service()?.newProcess(arrayOf("sh", "-c", command), null, null)
+            }.getOrNull()
+            if (process == null) {
+                return@withContext ShizukuCommandResult(-1, "", "Cannot reach the Shizuku service")
+            }
 
             val stdout = StringBuilder()
             val stderr = StringBuilder()
             val outThread = thread { drain(process.inputStream, stdout) }
             val errThread = thread { drain(process.errorStream, stderr) }
 
-            // RemoteProcess only exposes a blocking waitFor(); bound it with a join so a
-            // hung command cannot pin this thread forever.
-            val waiter = thread { runCatching { process.waitFor() } }
+            // waitFor() blocks until the command finishes; bound it with a join so a hung
+            // command cannot pin this thread forever.
+            var exitCode = -1
+            val waiter = thread { runCatching { process.waitFor() }.onSuccess { exitCode = it } }
             runCatching { waiter.join(timeoutMs) }
             val finished = !waiter.isAlive
             if (!finished) runCatching { process.destroy() }
@@ -142,7 +146,7 @@ object ShizukuBridge {
             runCatching { errThread.join(READ_JOIN_MS) }
 
             ShizukuCommandResult(
-                exitCode = if (finished) waiter.get() else -1,
+                exitCode = if (finished) exitCode else -1,
                 stdout = stdout.toString(),
                 stderr = stderr.toString(),
                 timedOut = !finished,
@@ -174,6 +178,18 @@ object ShizukuBridge {
             val uid = Shizuku.getUid()
             if (uid == ALLOWED_UID_ROOT || uid == ALLOWED_UID_SHELL) uid else null
         }
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
+     * The AIDL service behind the binder. `Shizuku.newProcess` is not public API, so
+     * process creation goes through this interface, which arrives transitively with the
+     * Shizuku artifacts.
+     */
+    private fun service(): IShizukuService? = try {
+        val binder = Shizuku.getBinder()
+        if (binder == null || !binder.isBinderAlive) null else IShizukuService.Stub.asInterface(binder)
     } catch (_: Throwable) {
         null
     }
