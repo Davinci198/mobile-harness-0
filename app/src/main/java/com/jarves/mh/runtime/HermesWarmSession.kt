@@ -33,9 +33,6 @@ internal class HermesWarmSession(
     private var signature: String? = null
     private var outputOffset = 0L
     private val lineBuffer = StringBuilder()
-    private val queryTail = StringBuilder()
-    private var queryAnswers = 0
-    private var tuiReady = false
     private val pendingHooks = LinkedBlockingQueue<org.json.JSONObject>()
 
     /** True while a spawned session is still running. */
@@ -75,9 +72,6 @@ internal class HermesWarmSession(
         this.signature = signature
         outputOffset = 0L
         lineBuffer.setLength(0)
-        queryTail.setLength(0)
-        queryAnswers = 0
-        tuiReady = false
         pendingHooks.clear()
         // Without `-q` the session boots idle, so its prompt line is the
         // readiness signal for a fresh spawn as well as a reused one.
@@ -105,9 +99,7 @@ internal class HermesWarmSession(
         // Bracketed paste, the way a terminal delivers a multi-line paste: the
         // TUI inserts the newlines into its buffer instead of treating them as
         // "submit", so the whole context prompt arrives in one piece.
-        // Ctrl+U discards whatever the line already holds (a dropped paste, a
-        // stale query answer) so this turn starts from an empty prompt.
-        val submission = (KILL_LINE + PASTE_START + prompt.replace("\r\n", "\n").trim() + PASTE_END + "\r")
+        val submission = (PASTE_START + prompt.replace("\r\n", "\n").trim() + PASTE_END + "\r")
             .toByteArray(Charsets.UTF_8)
         runCatching {
             target.outputStream.write(submission)
@@ -257,7 +249,10 @@ internal class HermesWarmSession(
             while (newline >= 0) {
                 val line = lineBuffer.substring(0, newline).trimEnd('\r')
                 lineBuffer.delete(0, newline + 1)
-                if (line.trim().startsWith(PROMPT_MARK)) return true
+                if (line.trim().startsWith(PROMPT_MARK)) {
+                    Log.i("HermesWarmSession", "tui ready at prompt")
+                    return true
+                }
                 newline = lineBuffer.indexOf("\n")
             }
             // The idle prompt often has no trailing newline yet: accept the tail.
@@ -279,54 +274,14 @@ internal class HermesWarmSession(
         }
         if (count <= 0) return null
         outputOffset += count
-        val text = bytes.decodeToString(0, count)
-        answerTerminalQueries(target, text)
-        return text
+        return bytes.decodeToString(0, count)
     }
-
-    /**
-     * Answers the terminal capability queries the interactive TUI sends on a
-     * raw PTY. It asks for the background colour and the terminal identity and
-     * then waits: nothing is rendered and no turn runs until the answers come
-     * back, which a headless reader never sends.
-     *
-     * Only the startup window is answered: once the prompt line is on screen
-     * the TUI reads the same bytes as user input, and a late answer lands in
-     * the input buffer as literal text.
-     */
-    private fun answerTerminalQueries(target: Process, chunk: String) {
-        if (tuiReady) return
-        queryTail.append(chunk)
-        val seen = queryTail.toString()
-        var unanswered = seen
-        var answered = 0
-        while (answered < MAX_QUERIES_PER_CHUNK) {
-            val (query, reply) = terminalReplyFor(unanswered) ?: break
-            runCatching {
-                target.outputStream.write(reply.toByteArray(Charsets.UTF_8))
-                target.outputStream.flush()
-            }
-            if (queryAnswers < MAX_LOGGED_QUERIES) {
-                queryAnswers++
-                Log.i("HermesWarmSession", "terminal query answered: ${query.toDebugText()}")
-            }
-            unanswered = unanswered.replaceFirst(query, "")
-            answered++
-        }
-        if (seen.contains(PROMPT_MARK)) tuiReady = true
-        if (seen.length > QUERY_TAIL_CHARS) queryTail.delete(0, seen.length - QUERY_TAIL_CHARS)
-    }
-
-    private fun String.toDebugText(): String = replace("\u001B", "ESC")
 
     override fun close() {
         val target = process
         process = null
         signature = null
         lineBuffer.setLength(0)
-        queryTail.setLength(0)
-        queryAnswers = 0
-        tuiReady = false
         pendingHooks.clear()
         if (target != null) {
             // proot ignores the polite signal often enough that the wrapper has
@@ -335,7 +290,12 @@ internal class HermesWarmSession(
             Thread {
                 runCatching { target.destroy() }
                 runCatching { target.destroyForcibly() }
-                Thread.sleep(500)
+                // Poll until the wrapper is gone: the exit has to be collected
+                // or the process lingers as a zombie for the app's lifetime.
+                val deadline = System.currentTimeMillis() + 5_000
+                while (System.currentTimeMillis() < deadline && target.isAlive) {
+                    Thread.sleep(100)
+                }
                 if (target.isAlive) runCatching { target.destroyForcibly() }
                 Log.i("HermesWarmSession", "close: pid=${target.spawnPid()} stillAlive=${target.isAlive}")
             }.apply { isDaemon = true; start() }
@@ -357,32 +317,12 @@ internal class HermesWarmSession(
             "Hermes returned no reply for this turn. The warm session was dropped; the next turn starts fresh."
         private const val DIED_MESSAGE =
             "The Hermes session exited unexpectedly; the phone may have suspended it. Retry with the app in the foreground."
-        private const val KILL_LINE = "\u0015"
         private const val PASTE_START = "\u001B[200~"
         private const val PASTE_END = "\u001B[201~"
-        private const val QUERY_TAIL_CHARS = 32
-        private const val MAX_QUERIES_PER_CHUNK = 3
-        private const val MAX_LOGGED_QUERIES = 6
         private const val MAX_LOGGED_HOOKS = 8
 
-        /** Terminal query the TUI sends -> the answer a real terminal gives. */
-        internal val TERMINAL_REPLIES: List<Pair<String, String>> = listOf(
-            // OSC 10/11: foreground/background colour query.
-            "\u001B]11;?" to "\u001B]11;rgb:0000/0000/0000\u001B\\",
-            "\u001B]10;?" to "\u001B]10;rgb:ffff/ffff/ffff\u001B\\",
-            // Primary/secondary device attributes: "VT100 with advanced video".
-            "\u001B[c" to "\u001B[?1;2c",
-            "\u001B[>c" to "\u001B[>0;10;1c",
-            // XTVERSION and kitty keyboard protocol: no extensions.
-            "\u001B[>0q" to "\u001BP>|mobile-harness",
-            "\u001B[?u" to "\u001B[?0u",
-        )
     }
 }
 
 /** `Process.pid()` does not exist on Android; the native spawn does expose it. */
 internal fun Process.spawnPid(): Int = (this as? NativeSpawnProcess)?.pid ?: -1
-
-/** The first unanswered terminal query in [text], with the reply for it. */
-internal fun terminalReplyFor(text: String): Pair<String, String>? =
-    HermesWarmSession.TERMINAL_REPLIES.firstOrNull { text.contains(it.first) }
