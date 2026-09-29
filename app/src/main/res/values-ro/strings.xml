@@ -392,6 +392,9 @@
     <string name="files_refresh">Reîmprospătează fișierele</string>
     <string name="files_root_detected">Folder de proiect detectat</string>
     <string name="files_root_hint">Folosește %1$s ca rădăcină a proiectului ca să ruleze Chat, Terminal, Changes și Preview din același folder.</string>
+    <string name="files_root_subtitle">Răsfoiește stocarea</string>
+    <string name="files_used">folosit</string>
+    <string name="files_size_count">%1$s (%2$d)</string>
     <string name="files_root_use">Folosește %1$s ca rădăcină a proiectului</string>
     <string name="files_title">Fișierele proiectului</string>
     <string name="gh_clone_desc">Lipește un URL HTTPS public de depozit. Întregul istoric Git și ramura curentă vor fi păstrate.</string>

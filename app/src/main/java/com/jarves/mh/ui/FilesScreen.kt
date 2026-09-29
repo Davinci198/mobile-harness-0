@@ -81,6 +81,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -129,6 +130,8 @@ fun FilesScreen(
     view: FsViewMode,
     sort: FsSort,
     sortAscending: Boolean,
+    storageFree: Long,
+    storageTotal: Long,
     loading: Boolean,
     error: FsError?,
     openName: String?,
@@ -177,7 +180,7 @@ fun FilesScreen(
                     Column {
                         Text(activeRoot?.label ?: stringResource(R.string.files_browser_title), fontSize = 16.sp)
                         Text(
-                            text = path.ifEmpty { stringResource(R.string.files_root_hint) },
+                            text = path.ifEmpty { stringResource(R.string.files_root_subtitle) },
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -268,7 +271,8 @@ fun FilesScreen(
                 loading && entries.isEmpty() && categories.isEmpty() ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
 
-                atRoot && categories.isNotEmpty() -> CategoryGrid(categories, onOpen = onNavigate)
+                atRoot && categories.isNotEmpty() ->
+                    CategoryGrid(categories, storageFree, storageTotal, onOpen = onNavigate)
 
                 entries.isEmpty() && error == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(stringResource(R.string.files_empty), color = PocketMuted, fontSize = 13.sp)
@@ -419,54 +423,94 @@ private fun PlacesBar(roots: List<DeviceRoot>, active: DeviceRoot?, onSelect: (D
 }
 
 @Composable
-private fun CategoryGrid(categories: List<FsCategory>, onOpen: (String) -> Unit) {
+private fun CategoryGrid(categories: List<FsCategory>, storageFree: Long, storageTotal: Long, onOpen: (String) -> Unit) {
     LazyVerticalGrid(
-        columns = GridCells.Fixed(3),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        columns = GridCells.Fixed(4),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         items(categories, key = { "${it.kind}-${it.path}" }) { category ->
-            CategoryTile(category, onClick = { onOpen(category.path) })
+            CategoryTile(category, subtitle = categorySubtitle(category, storageFree, storageTotal)) { onOpen(category.path) }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CategoryTile(category: FsCategory, onClick: () -> Unit) {
-    Column(Modifier.padding(vertical = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+private fun CategoryTile(
+    category: FsCategory,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    val tint = categoryColor(category.kind)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
-            modifier = Modifier.size(width = 76.dp, height = 68.dp),
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.size(width = 60.dp, height = 60.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = tint.copy(alpha = 0.10f),
+            border = BorderStroke(1.dp, tint.copy(alpha = 0.28f)),
             onClick = onClick,
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(categoryIcon(category.kind), null, Modifier.size(32.dp), tint = PocketAccent)
+                Icon(categoryIcon(category.kind), null, Modifier.size(30.dp), tint = tint)
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             category.label,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )
         Text(
-            // A count of -1 means it has not come back yet. Saying so keeps the tile from
-            // jumping under the finger when the number lands a moment later.
-            if (category.count < 0) {
-                stringResource(R.string.files_counting)
-            } else {
-                stringResource(R.string.files_cat_count, category.count)
-            },
+            subtitle,
             fontSize = 11.sp,
-            color = PocketMuted,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
         )
     }
+}
+
+/** Each category keeps its own colour, the way a file manager tells them apart at a glance. */
+private fun categoryColor(kind: FsCategoryKind): Color = when (kind) {
+    FsCategoryKind.STORAGE -> Color(0xFF90A4AE)
+    FsCategoryKind.DOWNLOADS -> Color(0xFFD9A05B)
+    FsCategoryKind.IMAGES -> Color(0xFFAB47BC)
+    FsCategoryKind.AUDIO -> Color(0xFF26A69A)
+    FsCategoryKind.VIDEO -> Color(0xFFEF5350)
+    FsCategoryKind.DOCUMENTS -> Color(0xFF42A5F5)
+    FsCategoryKind.APPS -> Color(0xFF7CB342)
+    FsCategoryKind.SYSTEM -> Color(0xFF78909C)
+    FsCategoryKind.DATA -> Color(0xFF5C6BC0)
+    FsCategoryKind.VENDOR -> Color(0xFF4DB6AC)
+    FsCategoryKind.PRODUCT -> Color(0xFF8D6E63)
+    FsCategoryKind.WORKSPACES -> Color(0xFF5C6BC0)
+    FsCategoryKind.CHATS -> Color(0xFF66BB6A)
+    FsCategoryKind.RUNTIME -> Color(0xFFFFA726)
+    FsCategoryKind.SETUP -> Color(0xFF42A5F5)
+    FsCategoryKind.TERMINAL -> Color(0xFF78909C)
+    FsCategoryKind.OTHER -> Color(0xFF8D6E63)
+}
+
+/**
+ * What sits under the name. A file manager writes "size (count)", and for the storage
+ * tile it writes what is free of what, because that is the number people look for first.
+ */
+@Composable
+private fun categorySubtitle(category: FsCategory, storageFree: Long, storageTotal: Long): String {
+    if (category.kind == FsCategoryKind.STORAGE && storageTotal > 0L && storageFree >= 0L) {
+        val usedPercent = ((storageTotal - storageFree) * 100L) / storageTotal
+        return "$usedPercent% ${stringResource(R.string.files_used)}"
+    }
+    if (category.count < 0) return stringResource(R.string.files_counting)
+    if (category.bytes < 0L) return stringResource(R.string.files_cat_count, category.count)
+    return stringResource(R.string.files_size_count, formatFileSize(category.bytes), category.count)
 }
 
 private fun categoryIcon(kind: FsCategoryKind): ImageVector = when (kind) {

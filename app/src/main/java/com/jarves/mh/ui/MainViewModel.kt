@@ -198,6 +198,9 @@ data class AppUiState(
     val fsSearchResults: List<com.jarves.mh.storage.FsEntry> = emptyList(),
     val fsSearching: Boolean = false,
     val fsSelectedPath: String? = null,
+    /** Free and total bytes of the volume behind the active root, or -1 when unknown. */
+    val fsStorageFree: Long = -1L,
+    val fsStorageTotal: Long = -1L,
     val apiPingStatus: ApiPingStatus = ApiPingStatus.IDLE,
     val apiPingMessage: String? = null,
     val projects: List<Project> = emptyList(),
@@ -1102,8 +1105,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openFileRoot(root: com.jarves.mh.storage.DeviceRoot) {
-        _state.update { it.copy(fsRoot = root, fsPath = "", fsEntries = emptyList(), fsError = null) }
+        _state.update {
+            it.copy(
+                fsRoot = root,
+                fsPath = "",
+                fsEntries = emptyList(),
+                fsError = null,
+                fsStorageFree = -1L,
+                fsStorageTotal = -1L,
+            )
+        }
+        readStorageUsage()
         loadDirectory("")
+    }
+
+    /**
+     * What is left on the volume behind the active root, the way a file manager puts it
+     * under the storage tile. Reading it is a single statfs call, unlike a directory walk.
+     */
+    private fun readStorageUsage() {
+        val root = _state.value.fsRoot ?: return
+        if (root !is com.jarves.mh.storage.DeviceRoot.AllFiles && root !is com.jarves.mh.storage.DeviceRoot.Shizuku) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val path = android.os.Environment.getDataDirectory().path
+            val usage = runCatching {
+                val stat = android.os.StatFs(path)
+                stat.availableBytes to stat.totalBytes
+            }.getOrNull() ?: return@launch
+            _state.update { it.copy(fsStorageFree = usage.first, fsStorageTotal = usage.second) }
+        }
     }
 
     fun navigateFiles(path: String) {
@@ -1280,14 +1310,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             coroutineScope {
                 definitions.map { (kind, path) ->
                     async {
-                        val count = when (val listing = backend.list(path)) {
-                            is com.jarves.mh.storage.FsResult.Ok -> listing.value.size
-                            is com.jarves.mh.storage.FsResult.Err -> -1
+                        // The bytes come out of the listing the count already needed, so a
+                        // tile shows "size (count)" without a second round trip.
+                        when (val listing = backend.list(path)) {
+                            is com.jarves.mh.storage.FsResult.Ok -> Triple(
+                                kind,
+                                path,
+                                listing.value.size to listing.value
+                                    .filterNot { it.isDirectory }
+                                    .sumOf { it.sizeBytes },
+                            )
+
+                            is com.jarves.mh.storage.FsResult.Err -> Triple(kind, path, -1 to -1L)
                         }
-                        Triple(kind, path, count)
                     }
                 }.forEach { deferred ->
-                    val (kind, path, count) = deferred.await()
+                    val (kind, path, tally) = deferred.await()
+                    val (count, bytes) = tally
                     if (count < 0) {
                         // Not there, or not readable: drop the tile rather than lie.
                         _state.update { current ->
@@ -1297,7 +1336,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _state.update { current ->
                             current.copy(
                                 fsCategories = current.fsCategories.map { category ->
-                                    if (category.kind == kind && category.path == path) category.copy(count = count) else category
+                                    if (category.kind == kind && category.path == path) {
+                                        category.copy(count = count, bytes = bytes)
+                                    } else {
+                                        category
+                                    }
                                 },
                             )
                         }

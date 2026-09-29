@@ -2181,6 +2181,8 @@ private fun RootScreenHost(
                     view = state.fsView,
                     sort = state.fsSort,
                     sortAscending = state.fsSortAscending,
+                    storageFree = state.fsStorageFree,
+                    storageTotal = state.fsStorageTotal,
                     loading = state.fsLoading,
                     error = state.fsError,
                     openName = state.fsOpenName,

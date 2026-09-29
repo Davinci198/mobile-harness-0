@@ -35,6 +35,13 @@ data class FsCategory(
     val path: String,
     /** How many entries live directly inside, shown under the name. */
     val count: Int,
+    /**
+     * Bytes of the files counted here, or -1 while unknown. A file manager shows "size
+     * (count)" under each tile, and the bytes come from the listing already fetched for
+     * the count, so they cost nothing extra. Only files sitting directly in the category
+     * are counted: a recursive total would be a walk per category.
+     */
+    val bytes: Long = -1L,
 )
 
 /**
