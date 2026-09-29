@@ -1268,7 +1268,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch(Dispatchers.IO) {
             when (val result = backend.list(path)) {
-                is com.jarves.mh.storage.FsResult.Ok ->
+                is com.jarves.mh.storage.FsResult.Ok -> {
                     _state.update {
                         it.copy(
                             fsEntries = com.jarves.mh.storage.FsQuery.sort(result.value, sort, ascending),
@@ -1276,6 +1276,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             fsError = null,
                         )
                     }
+                    fillChildCounts(backend, path)
+                }
                 is com.jarves.mh.storage.FsResult.Err ->
                     _state.update { it.copy(fsEntries = emptyList(), fsLoading = false, fsError = result.error) }
             }
@@ -1287,6 +1289,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * than shown as empty, so the grid never advertises a folder that is not there; an
      * empty one is still shown, because "nothing here" is information too.
      */
+    private companion object {
+        const val MAX_COUNTED_FOLDERS = 40
+    }
+
     private fun loadCategories(backend: com.jarves.mh.storage.DeviceFs, root: com.jarves.mh.storage.DeviceRoot) {
         val definitions = com.jarves.mh.storage.FsCategories.definitionsFor(root)
         // The tiles go up first with no counts and each count lands as it arrives: on the
@@ -1344,6 +1350,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 },
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Fills in how much sits inside each folder, which is what a file manager writes under
+     * the name. It is a listing per folder, so it runs after the folder itself is on screen
+     * and stops at a cap: on the Shizuku root a full pass would be dozens of shell round
+     * trips, which is worse than the number is worth.
+     */
+    private fun fillChildCounts(backend: com.jarves.mh.storage.DeviceFs, path: String) {
+        val folders = _state.value.fsEntries.filter { it.isDirectory && it.childCount < 0 }
+            .take(MAX_COUNTED_FOLDERS)
+        if (folders.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            folders.forEach { folder ->
+                val full = com.jarves.mh.storage.FsPaths.join(path, folder.name)
+                val count = backend.list(full).valueOrNull()?.size
+                if (count != null) {
+                    _state.update { current ->
+                        current.copy(
+                            fsEntries = current.fsEntries.map { entry ->
+                                if (entry.name == folder.name && entry.childCount < 0) entry.copy(childCount = count) else entry
+                            },
+                        )
                     }
                 }
             }

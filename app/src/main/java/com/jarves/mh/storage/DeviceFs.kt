@@ -13,6 +13,12 @@ data class FsEntry(
     val lastModifiedMillis: Long = 0L,
     /** False when the backend knows an entry exists but cannot see inside it. */
     val readable: Boolean = true,
+    /**
+     * How many entries a directory holds, or -1 when not known yet. Knowing it costs one
+     * listing per folder, so it is filled in the background and only where it is cheap
+     * enough to be worth the wait.
+     */
+    val childCount: Int = -1,
 )
 
 /** A place the user can browse from. */

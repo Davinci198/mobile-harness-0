@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
@@ -254,6 +256,7 @@ fun FilesScreen(
 
             if (path.isNotEmpty()) {
                 PlacesBar(roots, activeRoot, onSelect = onOpenRoot, onAddFolder = { folderLauncher.launch(null) })
+                LocationHeader(path, storageFree, storageTotal)
             }
 
             error?.let { FsErrorBanner(it, onRemedy = onRemedy) }
@@ -378,6 +381,57 @@ private fun SearchResults(results: List<FsEntry>, view: FsViewMode, onOpen: (FsE
     LazyColumn(Modifier.fillMaxSize()) {
         items(results, key = { "res-" + it.relativePath }) { entry ->
             FileRow(entry, selected = false, onOpen = { onOpen(entry) }, onSelect = { onSelect(entry) })
+        }
+    }
+}
+
+@Composable
+/** Where you are, and how full the volume is, on one strip above the listing. */
+@Composable
+private fun LocationHeader(path: String, storageFree: Long, storageTotal: Long) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Home, null, Modifier.size(20.dp), tint = PocketAccent)
+        Icon(
+            Icons.Default.ChevronRight,
+            null,
+            Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Icon(
+            Icons.Default.Folder,
+            null,
+            Modifier.size(20.dp),
+            tint = Color(0xFFE8A33D),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            FsPaths.nameOf(path),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (storageTotal > 0L && storageFree >= 0L) {
+            val usedPercent = ((storageTotal - storageFree) * 100L) / storageTotal
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            ) {
+                Text(
+                    stringResource(R.string.files_used_pct, usedPercent),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
         }
     }
 }
@@ -540,29 +594,86 @@ private fun FileRow(entry: FsEntry, selected: Boolean, onOpen: () -> Unit, onSel
     Row(
         Modifier
             .fillMaxWidth()
-            .background(if (selected) PocketAccent.copy(alpha = 0.12f) else Color.Transparent)
+            .background(if (selected) PocketAccent.copy(alpha = 0.16f) else Color.Transparent)
             // Long press selects, the way a file manager does, so the row itself stays clean.
             .combinedClickable(onClick = onOpen, onLongClick = onSelect)
-            .padding(horizontal = 16.dp, vertical = 11.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = when {
-                entry.isDirectory -> Icons.Default.Folder
-                !entry.readable -> Icons.Default.Lock
-                else -> Icons.Default.Description
-            },
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = if (entry.isDirectory) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(12.dp))
+        FolderIcon(entry)
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(entry.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (!entry.isDirectory) {
-                Text(entrySubtitle(entry), fontSize = 11.sp, color = PocketMuted)
+            Text(
+                entry.name,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                // A folder says how much is inside it, a file says how big it is.
+                when {
+                    entry.isDirectory && entry.childCount >= 0 -> stringResource(R.string.files_cat_count, entry.childCount)
+                    entry.isDirectory -> stringResource(R.string.files_folder)
+                    else -> formatFileSize(entry.sizeBytes)
+                },
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        // The date sits at the far right of the row, on the name's line, the way a
+        // file manager keeps the eye moving down the column rather than the row.
+        if (entry.lastModifiedMillis > 0L) {
+            Text(
+                formatEntryDate(entry.lastModifiedMillis),
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                modifier = Modifier.padding(start = 10.dp),
+            )
+        }
+    }
+}
+
+/**
+ * A folder in the app's own amber, with a badge when the folder is a known kind, so
+ * DCIM, Music or Movies are recognisable before the name is read.
+ */
+@Composable
+private fun FolderIcon(entry: FsEntry) {
+    Box(Modifier.size(width = 44.dp, height = 40.dp), contentAlignment = Alignment.Center) {
+        Icon(
+            imageVector = if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Description,
+            contentDescription = null,
+            modifier = Modifier.size(40.dp),
+            tint = if (entry.isDirectory) Color(0xFFE8A33D) else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        val badge = entry.badgeKind()
+        if (badge != null) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomCenter).size(19.dp),
+                shape = RoundedCornerShape(4.dp),
+                color = Color.White,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(badge, null, Modifier.size(13.dp), tint = Color(0xFF2F6FDB))
+                }
             }
         }
+    }
+}
+
+private fun FsEntry.badgeKind(): ImageVector? {
+    if (!isDirectory) return null
+    return when {
+        listOf("dcim", "camera").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.PhotoCamera
+        listOf("music", "melodies").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.MusicNote
+        listOf("movie", "video", "camera").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.Movie
+        listOf("download").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.Download
+        listOf("document", "doc").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.Description
+        listOf("picture", "photo", "image").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.Image
+        else -> null
     }
 }
 

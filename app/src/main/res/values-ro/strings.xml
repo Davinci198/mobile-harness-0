@@ -394,6 +394,8 @@
     <string name="files_root_hint">Folosește %1$s ca rădăcină a proiectului ca să ruleze Chat, Terminal, Changes și Preview din același folder.</string>
     <string name="files_root_subtitle">Răsfoiește stocarea</string>
     <string name="files_used">folosit</string>
+    <string name="files_folder">dosar</string>
+    <string name="files_used_pct">%1$d%% folosit</string>
     <string name="files_size_count">%1$s (%2$d)</string>
     <string name="files_root_use">Folosește %1$s ca rădăcină a proiectului</string>
     <string name="files_title">Fișierele proiectului</string>
