@@ -72,19 +72,23 @@ object ShizukuFs {
     fun parseStatLine(line: String): FsEntry? {
         val parts = line.trim().split('|', limit = 4)
         if (parts.size < 4) return null
-        val mode = parts[0].trim()
+        val modeHex = parts[0].trim()
         val size = parts[1].trim().toLongOrNull() ?: return null
         val mtime = parts[2].trim().toLongOrNull() ?: 0L
         val name = parts[3]
         if (name.isEmpty()) return null
-        val isDirectory = mode.startsWith("4")
+        val mode = modeHex.toIntOrNull(16)
+        val isDirectory = mode != null && (mode shr 12) == 0x4
         return FsEntry(
             name = name,
             relativePath = name,
             isDirectory = isDirectory,
             sizeBytes = if (isDirectory) 0L else size,
             lastModifiedMillis = if (mtime <= 0L) 0L else mtime * 1000L,
-            readable = mode.startsWith("4") || (mode.length > 3 && mode[3] != '-'),
+            // %f is a hex mode, so the read bit has to be decoded: owner, group and other
+            // each carry one at 0x100, 0x20 and 0x4. An entry we cannot read is still
+            // worth listing, marked, rather than silently missing.
+            readable = mode?.let { (it and 0b100_100_100) != 0 } ?: true,
         )
     }
 

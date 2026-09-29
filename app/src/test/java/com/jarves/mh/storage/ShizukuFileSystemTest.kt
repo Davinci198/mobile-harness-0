@@ -52,7 +52,10 @@ class ShizukuFileSystemTest {
     fun pathsAreAnchoredAtTheStartPath() = runBlocking {
         val system = fs(start = "/data/local/tmp") { ok("81a4|1|100|probe.txt") }
         system.stat("probe.txt")
-        assertTrue(calls.single().contains("'/data/local/tmp/probe.txt'"))
+        assertEquals(
+            "stat -c '%f|%s|%Y|%n' '/data/local/tmp/probe.txt' 2>/dev/null || true",
+            calls.single(),
+        )
     }
 
     @Test

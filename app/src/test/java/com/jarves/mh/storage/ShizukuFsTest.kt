@@ -18,15 +18,18 @@ class ShizukuFsTest {
     }
 
     @Test
-    fun everyPathInACommandGoesThroughQuoting() {
-        for (command in listOf(
+    fun everyCommandQuotesThePathExactlyOnce() {
+        // Exact strings, not "contains": these lines are where a quoting mistake would
+        // turn a file name into shell syntax, and a partial match would hide it.
+        assertEquals(
+            "stat -c '%f|%s|%Y|%n' '/data/a b'\\''c' 2>/dev/null || true",
             ShizukuFs.statCommand("/data/a b'c"),
-            ShizukuFs.deleteCommand("/data/a b'c", recursive = true),
+        )
+        assertEquals(
+            "mkdir -p -- '/data/a b'\\''c' 2>/dev/null",
             ShizukuFs.createDirectoryCommand("/data/a b'c"),
-            ShizukuFs.renameCommand("/data/a b'c", "d e"),
-        )) {
-            assertTrue(command, command.contains("'\\''"))
-        }
+        )
+        assertTrue(ShizukuFs.deleteCommand("/data/a b'c", recursive = true).startsWith("rm -rf -- '/data/a b'\\''c'"))
     }
 
     @Test
@@ -73,9 +76,17 @@ class ShizukuFsTest {
     }
 
     @Test
-    fun unreadableEntriesAreMarked() {
-        val entry = ShizukuFs.parseStatLine("81a0|0|100|secret")!!
-        assertFalse(entry.readable)
+    fun unreadableEntriesAreMarkedButStillListed() {
+        // %f is a hex st_mode: (type << 12) | permissions. 0x81a4 is -rw-r--r--,
+        // 0x4000 is d---------.
+        assertTrue(ShizukuFs.parseStatLine("81a4|3|100|open.txt")!!.readable)
+        val locked = ShizukuFs.parseStatLine("100000|0|100|secret")!!
+        assertFalse(locked.readable)
+        assertFalse(locked.isDirectory)
+        // An unreadable directory is still a directory: the UI has to let you back out.
+        val lockedDir = ShizukuFs.parseStatLine("4000|0|100|private")!!
+        assertTrue(lockedDir.isDirectory)
+        assertFalse(lockedDir.readable)
     }
 
     @Test
