@@ -385,7 +385,6 @@ private fun SearchResults(results: List<FsEntry>, view: FsViewMode, onOpen: (FsE
     }
 }
 
-@Composable
 /** Where you are, and how full the volume is, on one strip above the listing. */
 @Composable
 private fun LocationHeader(path: String, storageFree: Long, storageTotal: Long) {

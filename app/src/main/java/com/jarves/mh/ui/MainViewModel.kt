@@ -313,6 +313,9 @@ data class AppUiState(
     val appUpdateError: String? = null,
 )
 
+/** How many folders in a listing get their item count filled in. */
+private const val MAX_COUNTED_FOLDERS = 40
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun s(id: Int, vararg args: Any?): String = getApplication<Application>().getString(id, *args)
 
@@ -1289,10 +1292,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * than shown as empty, so the grid never advertises a folder that is not there; an
      * empty one is still shown, because "nothing here" is information too.
      */
-    private companion object {
-        const val MAX_COUNTED_FOLDERS = 40
-    }
-
     private fun loadCategories(backend: com.jarves.mh.storage.DeviceFs, root: com.jarves.mh.storage.DeviceRoot) {
         val definitions = com.jarves.mh.storage.FsCategories.definitionsFor(root)
         // The tiles go up first with no counts and each count lands as it arrives: on the
