@@ -51,10 +51,11 @@ class ShizukuPermissionsTest {
     }
 
     @Test
-    fun parseSessionIdReadsTheNumericLine() {
-        assertEquals(42, ShizukuPermissions.parseSessionId("Success: created install session [42]\n"))
-        assertEquals(7, ShizukuPermissions.parseSessionId("\n  7  \n"))
-        assertNull(ShizukuPermissions.parseSessionId("Failure [not a number]"))
+    fun parseSessionIdReadsBothOutputShapes() {
+        // Verified on an Android 16 device.
+        assertEquals(1196182964, ShizukuPermissions.parseSessionId("Success: created install session [1196182964]\n"))
+        assertEquals(42, ShizukuPermissions.parseSessionId("42\n"))
+        assertNull(ShizukuPermissions.parseSessionId("Failure [INSTALL_FAILED_NO_PERMISSION]"))
         assertNull(ShizukuPermissions.parseSessionId(""))
     }
 

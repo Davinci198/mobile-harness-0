@@ -34,11 +34,18 @@ object ShizukuPermissions {
         return state.map { (permission, granted) -> PermissionState(permission, granted) }
     }
 
-    /** `pm install-create` prints the new session id on stdout. */
-    fun parseSessionId(output: String): Int? = output.trim().lines()
-        .map { it.trim() }
-        .firstOrNull { it.toIntOrNull() != null }
-        ?.toIntOrNull()
+    /**
+     * `pm install-create` reports the new session either bare or wrapped, depending on the
+     * Android version: `1196182964` or `Success: created install session [1196182964]`.
+     */
+    fun parseSessionId(output: String): Int? {
+        val bracketed = SESSION_IN_BRACKETS.find(output)
+        if (bracketed != null) return bracketed.groupValues[1].toIntOrNull()
+        return output.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.toIntOrNull() != null }
+            ?.toIntOrNull()
+    }
 
     /** True when `pm` reported a success rather than an error. */
     fun isSuccess(result: ShizukuCommandResult): Boolean = result.ok && result.stderr.isBlank()
@@ -69,3 +76,4 @@ object ShizukuPermissions {
 private const val PERMISSION_PREFIX = "android.permission."
 private const val USER_ID_MARKER = "userId="
 private const val GRANTED_MARKER = "granted=true"
+private val SESSION_IN_BRACKETS = Regex("""\[(\d+)]""")
