@@ -182,6 +182,7 @@ data class AppUiState(
     val fsUnavailable: List<com.jarves.mh.storage.FsError> = emptyList(),
     val fsRoot: com.jarves.mh.storage.DeviceRoot? = null,
     val fsPath: String = "",
+    val fsCategories: List<com.jarves.mh.storage.FsCategory> = emptyList(),
     val fsEntries: List<com.jarves.mh.storage.FsEntry> = emptyList(),
     val fsLoading: Boolean = false,
     val fsError: com.jarves.mh.storage.FsError? = null,
@@ -1151,12 +1152,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Stores a folder the user picked. The permission grant is persisted so the tree keeps
      * working after a reboot; without it the URI is useless, so both are dropped together.
      */
-    fun addSafTree(uri: android.net.Uri, label: String) {
-        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+    fun addSafTree(uri: android.net.Uri, @Suppress("UNUSED_PARAMETER") label: String) {        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
             android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         runCatching { getApplication<Application>().contentResolver.takePersistableUriPermission(uri, flags) }
         val trees = readSafTrees().toMutableList()
-        val entry = uri.toString() to label
+        val entry = uri.toString() to prettifyTreeLabel(uri)
         if (entry !in trees) trees += entry
         preferences.safTrees = org.json.JSONArray().apply { trees.forEach { put(JSONObject().put("uri", it.first).put("label", it.second)) } }.toString()
         refreshFileRoots()
@@ -1167,6 +1167,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val trees = readSafTrees().filterNot { it.first == treeUri }
         preferences.safTrees = org.json.JSONArray().apply { trees.forEach { put(JSONObject().put("uri", it.first).put("label", it.second)) } }.toString()
         refreshFileRoots()
+    }
+
+    /**
+     * Turns a tree URI into something a person recognises. The document id is
+     * `primary:Download/Foo` in its encoded form, which is noise on a chip.
+     */
+    private fun prettifyTreeLabel(uri: android.net.Uri): String {
+        val documentId = runCatching { android.provider.DocumentsContract.getTreeDocumentId(uri) }.getOrNull()
+        val decoded = documentId?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull() }
+        val tail = decoded?.substringAfterLast('/')?.ifBlank { null }
+            ?: decoded?.substringAfter(':')?.ifBlank { null }
+        return tail ?: documentId ?: uri.toString()
     }
 
     private fun readSafTrees(): List<Pair<String, String>> = runCatching {
@@ -1185,6 +1197,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _state.update {
                 it.copy(
                     fsEntries = emptyList(),
+                    fsCategories = emptyList(),
                     fsError = com.jarves.mh.storage.FsError(
                         com.jarves.mh.storage.FsErrorKind.NO_ACCESS,
                         s(R.string.files_error_root_unavailable),
@@ -1193,7 +1206,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
-        _state.update { it.copy(fsLoading = true, fsError = null) }
+        // At the root of a root the screen shows category tiles instead of a flat list, so
+        // the count per tile is what has to be worked out.
+        if (path.isEmpty()) {
+            loadCategories(backend, root)
+            return
+        }
+        _state.update { it.copy(fsLoading = true, fsError = null, fsCategories = emptyList()) }
         viewModelScope.launch(Dispatchers.IO) {
             when (val result = backend.list(path)) {
                 is com.jarves.mh.storage.FsResult.Ok ->
@@ -1202,6 +1221,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update { it.copy(fsEntries = emptyList(), fsLoading = false, fsError = result.error) }
             }
         }
+    }
+
+    /**
+     * Counts what lives in each category. A category that cannot be read is dropped rather
+     * than shown as empty, so the grid never advertises a folder that is not there; an
+     * empty one is still shown, because "nothing here" is information too.
+     */
+    private fun loadCategories(backend: com.jarves.mh.storage.DeviceFs, root: com.jarves.mh.storage.DeviceRoot) {
+        _state.update { it.copy(fsLoading = true, fsError = null, fsEntries = emptyList()) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val categories = com.jarves.mh.storage.FsCategories.definitionsFor(root).mapNotNull { (kind, path) ->
+                when (val listing = backend.list(path)) {
+                    is com.jarves.mh.storage.FsResult.Ok -> com.jarves.mh.storage.FsCategory(
+                        kind = kind,
+                        label = categoryLabel(kind),
+                        path = path,
+                        count = listing.value.size,
+                    )
+
+                    is com.jarves.mh.storage.FsResult.Err -> null
+                }
+            }
+            _state.update { it.copy(fsCategories = categories, fsLoading = false) }
+        }
+    }
+
+    private fun categoryLabel(kind: com.jarves.mh.storage.FsCategoryKind): String = when (kind) {
+        com.jarves.mh.storage.FsCategoryKind.STORAGE -> s(R.string.files_cat_storage)
+        com.jarves.mh.storage.FsCategoryKind.DOWNLOADS -> s(R.string.files_cat_downloads)
+        com.jarves.mh.storage.FsCategoryKind.IMAGES -> s(R.string.files_cat_images)
+        com.jarves.mh.storage.FsCategoryKind.AUDIO -> s(R.string.files_cat_audio)
+        com.jarves.mh.storage.FsCategoryKind.VIDEO -> s(R.string.files_cat_video)
+        com.jarves.mh.storage.FsCategoryKind.DOCUMENTS -> s(R.string.files_cat_documents)
+        com.jarves.mh.storage.FsCategoryKind.APPS -> s(R.string.files_cat_apps)
+        com.jarves.mh.storage.FsCategoryKind.SYSTEM -> s(R.string.files_cat_system)
+        com.jarves.mh.storage.FsCategoryKind.DATA -> s(R.string.files_cat_data)
+        com.jarves.mh.storage.FsCategoryKind.VENDOR -> s(R.string.files_cat_vendor)
+        com.jarves.mh.storage.FsCategoryKind.PRODUCT -> s(R.string.files_cat_product)
+        com.jarves.mh.storage.FsCategoryKind.WORKSPACES -> s(R.string.files_cat_workspaces)
+        com.jarves.mh.storage.FsCategoryKind.CHATS -> s(R.string.files_cat_chats)
+        com.jarves.mh.storage.FsCategoryKind.RUNTIME -> s(R.string.files_cat_runtime)
+        com.jarves.mh.storage.FsCategoryKind.SETUP -> s(R.string.files_cat_setup)
+        com.jarves.mh.storage.FsCategoryKind.TERMINAL -> s(R.string.files_cat_terminal)
+        com.jarves.mh.storage.FsCategoryKind.OTHER -> s(R.string.files_cat_other)
     }
 
     private fun mutateThenReload(

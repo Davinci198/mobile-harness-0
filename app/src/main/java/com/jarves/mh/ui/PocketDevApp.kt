@@ -2173,6 +2173,7 @@ private fun RootScreenHost(
                     activeRoot = state.fsRoot,
                     path = state.fsPath,
                     entries = state.fsEntries,
+                    categories = state.fsCategories,
                     loading = state.fsLoading,
                     error = state.fsError,
                     openName = state.fsOpenName,

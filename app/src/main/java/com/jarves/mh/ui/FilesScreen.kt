@@ -10,12 +10,28 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -52,6 +68,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarves.mh.R
 import com.jarves.mh.storage.DeviceRoot
+import com.jarves.mh.storage.FsCategory
+import com.jarves.mh.storage.FsCategoryKind
 import com.jarves.mh.storage.FsEntry
 import com.jarves.mh.storage.FsError
 import com.jarves.mh.storage.FsRemedy
@@ -75,6 +93,7 @@ fun FilesScreen(
     activeRoot: DeviceRoot?,
     path: String,
     entries: List<FsEntry>,
+    categories: List<FsCategory>,
     loading: Boolean,
     error: FsError?,
     openName: String?,
@@ -120,7 +139,7 @@ fun FilesScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text(stringResource(R.string.files_title), fontSize = 17.sp)
+                        Text(stringResource(R.string.files_browser_title), fontSize = 17.sp)
                         if (!path.isEmpty()) {
                             Text(path, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
@@ -148,8 +167,20 @@ fun FilesScreen(
             }
 
             when {
-                loading && entries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                loading && entries.isEmpty() && categories.isEmpty() ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+
+                // At the root of a root the grid reads as storage; once inside, a path
+                // turns into a plain list, because a grid of file names is unreadable.
+                path.isEmpty() && categories.isNotEmpty() -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    items(categories, key = { "${it.kind}-${it.path}" }) { category ->
+                        CategoryTile(category, onClick = { onNavigate(category.path) })
+                    }
                 }
 
                 entries.isEmpty() && error == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -240,6 +271,60 @@ private fun RootSwitcher(
             label = { Text(stringResource(R.string.files_add_folder), fontSize = 12.sp) },
         )
     }
+}
+
+@Composable
+private fun CategoryTile(category: FsCategory, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Surface(
+            modifier = Modifier.size(width = 62.dp, height = 56.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    categoryIcon(category.kind),
+                    null,
+                    Modifier.size(28.dp),
+                    tint = PocketAccent,
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            category.label,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Text(
+            stringResource(R.string.files_cat_count, category.count),
+            fontSize = 11.sp,
+            color = PocketMuted,
+        )
+    }
+}
+
+private fun categoryIcon(kind: FsCategoryKind): androidx.compose.ui.graphics.vector.ImageVector = when (kind) {
+    FsCategoryKind.STORAGE -> Icons.Default.SmartToy
+    FsCategoryKind.DOWNLOADS -> Icons.Default.Download
+    FsCategoryKind.IMAGES -> Icons.Default.Image
+    FsCategoryKind.AUDIO -> Icons.Default.MusicNote
+    FsCategoryKind.VIDEO -> Icons.Default.Movie
+    FsCategoryKind.DOCUMENTS -> Icons.Default.Description
+    FsCategoryKind.APPS -> Icons.Default.Apps
+    FsCategoryKind.SYSTEM, FsCategoryKind.DATA, FsCategoryKind.VENDOR, FsCategoryKind.PRODUCT -> Icons.Default.Memory
+    FsCategoryKind.WORKSPACES -> Icons.Default.Folder
+    FsCategoryKind.CHATS -> Icons.Default.Chat
+    FsCategoryKind.RUNTIME, FsCategoryKind.SETUP -> Icons.Default.Build
+    FsCategoryKind.TERMINAL -> Icons.Default.Terminal
+    FsCategoryKind.OTHER -> Icons.Default.Folder
 }
 
 @Composable
