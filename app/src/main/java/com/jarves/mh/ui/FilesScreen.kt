@@ -562,7 +562,8 @@ private fun categorySubtitle(category: FsCategory, storageFree: Long, storageTot
         return "$usedPercent% ${stringResource(R.string.files_used)}"
     }
     if (category.count < 0) return stringResource(R.string.files_counting)
-    if (category.bytes < 0L) return stringResource(R.string.files_cat_count, category.count)
+    // "0 B" is noise: a folder holding only subfolders has no bytes of its own to report.
+    if (category.bytes <= 0L) return stringResource(R.string.files_cat_count, category.count)
     return stringResource(R.string.files_size_count, formatFileSize(category.bytes), category.count)
 }
 
