@@ -392,6 +392,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     init {
+        syncShizukuBridge()
         // GitHub's official CLI owns its OAuth credential. Remove credentials from
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
@@ -1044,6 +1045,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Only tiers that have a working backend can become active, so an unavailable tier
      * would leave the app claiming power it does not have.
      */
+    /**
+     * The guest host-shell bridge follows the access level, the Shizuku grant and the
+     * per-tool permission: it only runs when all three say it should, and it is torn
+     * down (script included) as soon as one of them stops saying so.
+     */
+    private fun syncShizukuBridge() {
+        val current = _state.value
+        val forbidden = toolPermissionStore.resolve(com.jarves.mh.runtime.ShizukuExecHost.TOOL) ==
+            com.jarves.mh.tools.ToolPermissionLevel.FORBID
+        com.jarves.mh.runtime.ShizukuExecHost.setForbidden(forbidden)
+        com.jarves.mh.runtime.ShizukuExecHost.sync(
+            installer = installer,
+            shouldRun = current.accessLevel == com.jarves.mh.tools.AccessLevel.DEBUGGER && current.shizuku.usable,
+        )
+    }
+
     fun setAccessLevel(level: com.jarves.mh.tools.AccessLevel) {
         val statuses = com.jarves.mh.tools.accessLevelStatuses(
             shizukuInstalled = _state.value.shizuku.installed,
@@ -1053,6 +1070,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (statuses[level]?.available != true) return
         preferences.accessLevel = level.name
         _state.update { it.copy(accessLevel = level) }
+        syncShizukuBridge()
     }
 
     fun refreshShizuku() {
@@ -1070,6 +1088,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 next.copy(accessLevel = com.jarves.mh.tools.AccessLevel.STANDARD)
             }
         }
+        syncShizukuBridge()
     }
 
     fun requestShizukuAccess() {
@@ -1894,6 +1913,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (level == null) overrides.remove(tool) else overrides[tool] = level
             current.copy(toolPermissionOverrides = overrides)
         }
+        if (tool == com.jarves.mh.runtime.ShizukuExecHost.TOOL) syncShizukuBridge()
     }
 
     fun refreshAntigravityModels() {

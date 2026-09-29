@@ -100,6 +100,7 @@ class ToolPermissionStore(private val storage: ToolPermissionStorage) {
             "VisitWeb",
             "HttpRequest",
             "DownloadFile",
+            "ShizukuExec",
         )
 
         fun overrideKey(toolName: String) = "$KEY_OVERRIDE_PREFIX$toolName"
