@@ -28,16 +28,26 @@ class ShizukuFileSystemTest {
 
     @Test
     fun listStartsFromTheRootAndParsesTheOutput() = runBlocking {
-        val system = fs { ok("41f9|0|100|docs\n81a4|12|100|a.txt") }
+        // The find format, and find's first line is the directory it was pointed at.
+        val system = fs { ok("#MH0\n.\nd|755|4096|100.0|docs\nf|644|12|100.0|a.txt") }
         val entries = system.list("").valueOrNull()!!
         assertEquals(listOf("docs", "a.txt"), entries.map { it.name })
-        assertTrue(calls.single().contains("cd '/data'"))
+        assertTrue(calls.single(), calls.single().contains("for d in '/data'"))
     }
 
     @Test
     fun aMissingDirectoryIsReportedAsNotFound() = runBlocking {
-        val system = fs { ShizukuCommandResult(4, "", "") }
+        // The batched command marks a directory it could not enter, rather than exiting
+        // with a code the way the old per-directory command did.
+        val system = fs { ok("#MH0\n#MHX") }
         assertEquals(FsErrorKind.NOT_FOUND, system.list("nope").errorOrNull()!!.kind)
+    }
+
+    @Test
+    fun listingIssuesOneCommandHoweverManyDirectoriesAreAskedFor() = runBlocking {
+        val system = fs { ok("#MH0\n.\n#MH1\n.\n#MH2\n.") }
+        system.listMany(listOf("a", "b", "c"))
+        assertEquals(1, calls.size)
     }
 
     @Test
