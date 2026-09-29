@@ -26,13 +26,9 @@ class ShizukuFileSystem(
 
     override suspend fun list(path: String): FsResult<List<FsEntry>> {
         if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")
-        val result = run(ShizukuFs.listCommand(absolute(path)), LIST_TIMEOUT_MS)
-        // Exit code 4 is the command's own "cannot enter directory".
-        if (result.exitCode == 4) return fsError(FsErrorKind.NOT_FOUND, "No such directory")
-        if (!result.ok) {
-            return fsError(FsErrorKind.NO_ACCESS, result.stderr.ifBlank { "Shizuku could not list this" }, FsRemedy.REQUEST_SHIZUKU)
-        }
-        return FsResult.Ok(ShizukuFs.parseListing(result.stdout))
+        // A single directory still goes through the batched command, so there is one way
+        // to list a directory and one way to be wrong about it.
+        return listMany(listOf(path)).first()
     }
 
     /**

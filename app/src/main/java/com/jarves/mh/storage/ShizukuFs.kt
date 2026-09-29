@@ -49,10 +49,7 @@ object ShizukuFs {
               echo "#MH${'$'}i"
               i=${'$'}((i+1))
               cd "${'$'}d" 2>/dev/null || { echo "#MHX"; continue; }
-              for f in * .[!.]*; do
-                [ -e "${'$'}f" ] || continue
-                stat -c '%f|%s|%Y|%n' "${'$'}f" 2>/dev/null || true
-              done
+              find . -maxdepth 1 -printf '%y|%m|%s|%T@|%f\n' 2>/dev/null
             done
         """.trimIndent().replace("__PATHS__", list)
     }
@@ -88,7 +85,9 @@ object ShizukuFs {
             BatchedListing(
                 index = index,
                 missing = index in missing || index !in blocks,
-                entries = parseListing(blocks[index].orEmpty().joinToString("\n")),
+                // find reports the directory it was pointed at as the first line, and
+                // that is the directory already known, not an entry inside it.
+                entries = parseFindListing(blocks[index].orEmpty().drop(1)),
             )
         }
     }
@@ -158,6 +157,40 @@ object ShizukuFs {
             readable = mode?.let { (it and 0b100_100_100) != 0 } ?: true,
         )
     }
+
+    /**
+     * Reads one `find -printf` line: type, permissions, size, mtime, name.
+     *
+     * The mtime carries a fractional part, which is dropped: the listing shows a day, and
+     * a Long keeps the entry free of types the routing tests cannot build.
+     */
+    fun parseFindLine(line: String): FsEntry? {
+        val parts = line.trim().split('|', limit = 5)
+        if (parts.size < 5) return null
+        val type = parts[0].trim()
+        val name = parts[4]
+        if (name.isEmpty() || name == ".") return null
+        val isDirectory = type == "d"
+        val size = parts[2].trim().toLongOrNull() ?: 0L
+        val modified = parts[3].trim().substringBefore('.').toLongOrNull() ?: 0L
+        // Octal permissions, so the read bit is what decides the padlock, the same way
+        // the stat parser decides it.
+        val permissions = parts[1].trim().toIntOrNull(8) ?: 0
+        return FsEntry(
+            name = name,
+            relativePath = name,
+            isDirectory = isDirectory,
+            sizeBytes = if (isDirectory) 0L else size,
+            lastModifiedMillis = modified,
+            readable = permissions and 0o444 != 0,
+        )
+    }
+
+    fun parseFindListing(lines: List<String>): List<FsEntry> = lines.asSequence()
+        .mapNotNull { parseFindLine(it) }
+        .sortedWith(compareByDescending<FsEntry> { it.isDirectory }.thenBy { it.name.lowercase() })
+        .take(FsLimits.MAX_LISTED_ENTRIES)
+        .toList()
 
     fun parseListing(output: String): List<FsEntry> = output.lineSequence()
         .mapNotNull { parseStatLine(it) }
