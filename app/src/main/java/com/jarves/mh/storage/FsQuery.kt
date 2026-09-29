@@ -18,18 +18,16 @@ object FsQuery {
     const val SEARCH_MAX_DIRECTORIES = 400
 
     fun sort(entries: List<FsEntry>, by: FsSort, ascending: Boolean = true): List<FsEntry> {
-        val key: (FsEntry) -> Comparable<*> = when (by) {
+        val comparator: Comparator<FsEntry> = when (by) {
             // Name ignores case so a phone's mixed-case names do not sort A, a, B, b.
-            FsSort.NAME -> { entry -> entry.name.lowercase() }
-            FsSort.DATE -> { entry -> entry.lastModifiedMillis }
-            FsSort.SIZE -> { entry -> entry.sizeBytes }
+            FsSort.NAME -> compareBy(String.CASE_INSENSITIVE_ORDER) { entry: FsEntry -> entry.name }
+            FsSort.DATE -> compareBy { entry: FsEntry -> entry.lastModifiedMillis }
+            FsSort.SIZE -> compareBy { entry: FsEntry -> entry.sizeBytes }
         }
         // Each group is sorted on its own. Sorting the combined list by name would put a
         // file called "alpha.txt" between two directories and break the grouping.
-        fun order(group: List<FsEntry>): List<FsEntry> {
-            val sorted = group.sortedBy(key)
-            return if (ascending) sorted else sorted.reversed()
-        }
+        fun order(group: List<FsEntry>): List<FsEntry> =
+            group.sortedWith(if (ascending) comparator else comparator.reversed())
 
         return order(entries.filter { it.isDirectory }) + order(entries.filterNot { it.isDirectory })
     }
