@@ -95,6 +95,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -219,6 +220,7 @@ import com.jarves.mh.runtime.RuntimeExecutionService.Companion.ACTION_KEEPALIVE
 import com.jarves.mh.runtime.RuntimeExecutionService.Companion.EXTRA_PROJECT_NAME
 import com.jarves.mh.runtime.RuntimeInstaller
 import com.jarves.mh.runtime.RuntimeSetupService
+import com.jarves.mh.storage.FsRemedy
 import com.jarves.mh.runtime.StudioServerManager
 import com.jarves.mh.runtime.supportsArm64Runtime
 import com.jarves.mh.runtime.AntigravityAuthStatus
@@ -251,9 +253,10 @@ import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.ExtendedFloatingActionButton
 
-private enum class RootScreen(@StringRes val labelRes: Int, val icon: ImageVector) {
+internal enum class RootScreen(@StringRes val labelRes: Int, val icon: ImageVector) {
     PROJECTS(R.string.nav_projects, Icons.Default.Folder),
     AGENT(R.string.nav_agent, Icons.Default.SmartToy),
+    FILES(R.string.nav_files, Icons.Default.FolderOpen),
     SETTINGS(R.string.nav_settings, Icons.Default.Settings),
 }
 private enum class WorkspaceTab(@StringRes val labelRes: Int, val icon: ImageVector) {
@@ -2063,6 +2066,19 @@ private fun RootScreenHost(
 ) {
     var screen by rememberSaveable { mutableStateOf(RootScreen.PROJECTS) }
     var showQuickTerminal by rememberSaveable { mutableStateOf(false) }
+    val fileContext = LocalContext.current
+    fun allFilesSettingsIntent(): android.content.Intent =
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            android.content.Intent(
+                android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                android.net.Uri.parse("package:${fileContext.packageName}"),
+            )
+        } else {
+            android.content.Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:${fileContext.packageName}"),
+            )
+        }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
     Scaffold(
@@ -2150,6 +2166,36 @@ private fun RootScreenHost(
                     onHideBrokenChange = viewModel::setHideBrokenModels,
                     onAutoScanChange = viewModel::setAutoScanEnabled,
                     onDeleteModelCatalog = viewModel::deleteModelCatalog,
+                )
+                RootScreen.FILES -> FilesScreen(
+                    roots = state.fsRoots,
+                    unavailable = state.fsUnavailable,
+                    activeRoot = state.fsRoot,
+                    path = state.fsPath,
+                    entries = state.fsEntries,
+                    loading = state.fsLoading,
+                    error = state.fsError,
+                    openName = state.fsOpenName,
+                    openContent = state.fsOpenContent,
+                    openLoading = state.fsOpenLoading,
+                    onOpenRoot = viewModel::openFileRoot,
+                    onNavigate = viewModel::navigateFiles,
+                    onGoUp = viewModel::goUpFiles,
+                    onRefreshRoots = viewModel::refreshFileRoots,
+                    onPickFolder = viewModel::addSafTree,
+                    onOpenEntry = viewModel::openFileEntry,
+                    onCloseFile = viewModel::closeOpenFile,
+                    onCreateDirectory = viewModel::createFilesDirectory,
+                    onRename = viewModel::renameFileEntry,
+                    onDelete = viewModel::deleteFileEntry,
+                    onRemedy = { remedy ->
+                        when (remedy) {
+                            FsRemedy.PICK_FOLDER -> Unit
+                            FsRemedy.GRANT_ALL_FILES ->
+                                runCatching { fileContext.startActivity(allFilesSettingsIntent()) }
+                            FsRemedy.REQUEST_SHIZUKU -> viewModel.requestShizukuAccess()
+                        }
+                    },
                 )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,
@@ -4282,7 +4328,7 @@ private fun ChatSwitcherDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FileViewerScreen(
+internal fun FileViewerScreen(
     filePath: String,
     content: String?,
     loading: Boolean,
@@ -5345,7 +5391,7 @@ private fun FilesTab(files: List<WorkspaceEntry>, loading: Boolean, onRefresh: (
     }
 }
 
-private fun formatFileSize(bytes: Long): String = when {
+internal fun formatFileSize(bytes: Long): String = when {
     bytes < 1_024 -> "$bytes B"
     bytes < 1_048_576 -> "%.1f KB".format(bytes / 1_024.0)
     else -> "%.1f MB".format(bytes / 1_048_576.0)

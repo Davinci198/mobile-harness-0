@@ -178,6 +178,16 @@ data class AppUiState(
         running = false,
         granted = false,
     ),
+    val fsRoots: List<com.jarves.mh.storage.DeviceRoot> = emptyList(),
+    val fsUnavailable: List<com.jarves.mh.storage.FsError> = emptyList(),
+    val fsRoot: com.jarves.mh.storage.DeviceRoot? = null,
+    val fsPath: String = "",
+    val fsEntries: List<com.jarves.mh.storage.FsEntry> = emptyList(),
+    val fsLoading: Boolean = false,
+    val fsError: com.jarves.mh.storage.FsError? = null,
+    val fsOpenName: String? = null,
+    val fsOpenContent: String? = null,
+    val fsOpenLoading: Boolean = false,
     val apiPingStatus: ApiPingStatus = ApiPingStatus.IDLE,
     val apiPingMessage: String? = null,
     val projects: List<Project> = emptyList(),
@@ -304,6 +314,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     private val dshRuntime = DshRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val installer = RuntimeInstaller(application)
+    private val fsFactory = com.jarves.mh.storage.DeviceFsFactory(application)
     private val changeHistory = ProjectAgentChangeHistory(application.filesDir)
     private val openCodeRuntime = OpenCodeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val hermesRuntime = HermesRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
@@ -393,6 +404,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         syncShizukuBridge()
+        refreshFileRoots()
         // GitHub's official CLI owns its OAuth credential. Remove credentials from
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
@@ -1059,6 +1071,160 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             installer = installer,
             shouldRun = current.accessLevel == com.jarves.mh.tools.AccessLevel.DEBUGGER && current.shizuku.usable,
         )
+    }
+
+    /**
+     * The device file browser. The root decides which backend serves it, so the same
+     * screen walks the sandbox, a granted folder, shared storage or the Shizuku shell
+     * without the UI knowing the difference.
+     */
+    fun refreshFileRoots() {
+        val trees = readSafTrees()
+        val roots = fsFactory.availableRoots(trees)
+        _state.update {
+            it.copy(
+                fsRoots = roots,
+                fsUnavailable = fsFactory.unavailableRoots(trees),
+                fsRoot = it.fsRoot?.takeIf { root -> roots.any { existing -> existing.label == root.label } } ?: roots.firstOrNull(),
+            )
+        }
+        _state.value.fsRoot?.let { openFileRoot(it) }
+    }
+
+    fun openFileRoot(root: com.jarves.mh.storage.DeviceRoot) {
+        _state.update { it.copy(fsRoot = root, fsPath = "", fsEntries = emptyList(), fsError = null) }
+        loadDirectory("")
+    }
+
+    fun navigateFiles(path: String) {
+        _state.update { it.copy(fsPath = path, fsError = null) }
+        loadDirectory(path)
+    }
+
+    fun goUpFiles() {
+        com.jarves.mh.storage.FsPaths.parentOf(_state.value.fsPath)?.let { navigateFiles(it) }
+    }
+
+    /** Opens a directory or loads a text preview, depending on the entry. */
+    fun openFileEntry(entry: com.jarves.mh.storage.FsEntry) {
+        if (entry.isDirectory) {
+            navigateFiles(com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name))
+            return
+        }
+        val root = _state.value.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        _state.update { it.copy(fsOpenName = entry.name, fsOpenContent = null, fsOpenLoading = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val result = backend.readText(path)) {
+                is com.jarves.mh.storage.FsResult.Ok ->
+                    _state.update { it.copy(fsOpenContent = result.value, fsOpenLoading = false) }
+                is com.jarves.mh.storage.FsResult.Err ->
+                    _state.update { it.copy(fsOpenName = null, fsOpenLoading = false, fsError = result.error) }
+            }
+        }
+    }
+
+    fun closeOpenFile() {
+        _state.update { it.copy(fsOpenName = null, fsOpenContent = null, fsOpenLoading = false) }
+    }
+
+    fun createFilesDirectory(name: String) {
+        val root = _state.value.fsRoot ?: return
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, name)
+        mutateThenReload("Could not create the folder") { it.createDirectory(path) }
+    }
+
+    fun renameFileEntry(entry: com.jarves.mh.storage.FsEntry, newName: String) {
+        val root = _state.value.fsRoot ?: return
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        mutateThenReload("Rename failed") { it.rename(path, newName) }
+    }
+
+    fun deleteFileEntry(entry: com.jarves.mh.storage.FsEntry) {
+        val root = _state.value.fsRoot ?: return
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        mutateThenReload("Could not delete") { it.delete(path, recursive = entry.isDirectory) }
+    }
+
+    /**
+     * Stores a folder the user picked. The permission grant is persisted so the tree keeps
+     * working after a reboot; without it the URI is useless, so both are dropped together.
+     */
+    fun addSafTree(uri: android.net.Uri, label: String) {
+        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { getApplication<Application>().contentResolver.takePersistableUriPermission(uri, flags) }
+        val trees = readSafTrees().toMutableList()
+        val entry = uri.toString() to label
+        if (entry !in trees) trees += entry
+        preferences.safTrees = org.json.JSONArray().apply { trees.forEach { put(JSONObject().put("uri", it.first).put("label", it.second)) } }.toString()
+        refreshFileRoots()
+    }
+
+    fun removeSafTree(treeUri: String) {
+        runCatching { getApplication<Application>().contentResolver.releasePersistableUriPermission(android.net.Uri.parse(treeUri), android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+        val trees = readSafTrees().filterNot { it.first == treeUri }
+        preferences.safTrees = org.json.JSONArray().apply { trees.forEach { put(JSONObject().put("uri", it.first).put("label", it.second)) } }.toString()
+        refreshFileRoots()
+    }
+
+    private fun readSafTrees(): List<Pair<String, String>> = runCatching {
+        val array = org.json.JSONArray(preferences.safTrees)
+        (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            val uri = item.optString("uri").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            uri to item.optString("label").ifBlank { uri.substringAfterLast('/').ifBlank { uri } }
+        }
+    }.getOrDefault(emptyList())
+
+    private fun loadDirectory(path: String) {
+        val root = _state.value.fsRoot ?: return
+        val backend = fsFactory.open(root)
+        if (backend == null) {
+            _state.update {
+                it.copy(
+                    fsEntries = emptyList(),
+                    fsError = com.jarves.mh.storage.FsError(
+                        com.jarves.mh.storage.FsErrorKind.NO_ACCESS,
+                        s(R.string.files_error_root_unavailable),
+                    ),
+                )
+            }
+            return
+        }
+        _state.update { it.copy(fsLoading = true, fsError = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val result = backend.list(path)) {
+                is com.jarves.mh.storage.FsResult.Ok ->
+                    _state.update { it.copy(fsEntries = result.value, fsLoading = false, fsError = null) }
+                is com.jarves.mh.storage.FsResult.Err ->
+                    _state.update { it.copy(fsEntries = emptyList(), fsLoading = false, fsError = result.error) }
+            }
+        }
+    }
+
+    private fun mutateThenReload(
+        failureMessage: String,
+        action: suspend (com.jarves.mh.storage.DeviceFs) -> com.jarves.mh.storage.FsResult<Unit>,
+    ) {
+        val root = _state.value.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val result = action(backend)) {
+                is com.jarves.mh.storage.FsResult.Ok -> Unit
+                is com.jarves.mh.storage.FsResult.Err -> _state.update {
+                    it.copy(
+                        fsError = com.jarves.mh.storage.FsError(
+                            com.jarves.mh.storage.FsErrorKind.FAILED,
+                            result.error.message.ifBlank { failureMessage },
+                            result.error.remedy,
+                        ),
+                    )
+                }
+            }
+            loadDirectory(_state.value.fsPath)
+        }
     }
 
     fun setAccessLevel(level: com.jarves.mh.tools.AccessLevel) {

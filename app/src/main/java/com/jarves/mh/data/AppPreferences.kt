@@ -153,6 +153,15 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("access_level", "STANDARD") ?: "STANDARD"
         set(value) { preferences.edit().putString("access_level", value).apply() }
 
+    /**
+     * Storage Access Framework trees the user granted, as JSON `[{uri,label}]`. The URI is
+     * only useful together with a persisted permission grant, so the two are stored and
+     * dropped together.
+     */
+    var safTrees: String
+        get() = preferences.getString("saf_trees", "[]") ?: "[]"
+        set(value) { preferences.edit().putString("saf_trees", value).apply() }
+
     var legacySeededCredentialRemoved: Boolean
         get() = preferences.getBoolean("legacy_seeded_credential_removed", false)
         set(value) { preferences.edit().putBoolean("legacy_seeded_credential_removed", value).apply() }
