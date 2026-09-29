@@ -1,7 +1,7 @@
 package com.jarves.mh.storage
 
-import android.util.Base64
 import com.jarves.mh.runtime.ShizukuBridge
+import java.util.Base64
 
 /**
  * The device filesystem through the Shizuku shell.
@@ -64,7 +64,7 @@ class ShizukuFileSystem(
             return fsError(FsErrorKind.FAILED, "File is too large to write")
         }
         // Base64 because the content is arbitrary text that must not reach the shell line.
-        val encoded = Base64.encodeToString(content.toByteArray(), Base64.NO_WRAP)
+        val encoded = Base64.getEncoder().encodeToString(content.toByteArray())
         val command = if (append) {
             ShizukuFs.appendTextCommand(absolute(path), encoded)
         } else {

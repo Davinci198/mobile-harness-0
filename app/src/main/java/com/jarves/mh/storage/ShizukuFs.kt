@@ -50,9 +50,14 @@ object ShizukuFs {
 
     fun renameCommand(path: String, newName: String): String {
         val from = quote(path)
-        val parent = quote(path.substringBeforeLast('/', ""))
-        val to = quote(if (path.contains('/')) "$parent/$newName" else newName)
-        return "mv -- $from $to 2>/dev/null"
+        // The parent must not be quoted before being spliced in: quoting the result twice
+        // produces a command the shell reads as three separate arguments.
+        val target = if (path.contains('/')) {
+            path.substring(0, path.lastIndexOf('/') + 1) + newName
+        } else {
+            newName
+        }
+        return "mv -- $from $(quote(target)) 2>/dev/null"
     }
 
     fun createDirectoryCommand(path: String): String = "mkdir -p -- $(quote(path)) 2>/dev/null"

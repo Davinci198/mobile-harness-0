@@ -30,6 +30,17 @@ class ShizukuFsTest {
     }
 
     @Test
+    fun renameQuotesTheTargetExactlyOnce() {
+        // Quoting the parent and then quoting the joined result would hand the shell
+        // three arguments where it expects two.
+        val command = ShizukuFs.renameCommand("/data/local/tmp/old name", "new name")
+        assertEquals("mv -- '/data/local/tmp/old name' '/data/local/tmp/new name' 2>/dev/null", command)
+
+        val topLevel = ShizukuFs.renameCommand("old.txt", "new.txt")
+        assertEquals("mv -- 'old.txt' 'new.txt' 2>/dev/null", topLevel)
+    }
+
+    @Test
     fun theListingIncludesDotfiles() {
         val command = ShizukuFs.listCommand("/data/local/tmp")
         // Without the .[!.]* pass, dotfiles are invisible and the tree looks broken.
@@ -84,7 +95,8 @@ class ShizukuFsTest {
             41f9|0|100|alpha
         """.trimIndent()
         val names = ShizukuFs.parseListing(output).map { it.name }
-        assertEquals(listOf("Beta", "alpha", "alpha.txt", "zeta.txt"), names)
+        // Directories first, then case-insensitive: "alpha" sorts before "Beta".
+        assertEquals(listOf("alpha", "Beta", "alpha.txt", "zeta.txt"), names)
     }
 
     @Test
