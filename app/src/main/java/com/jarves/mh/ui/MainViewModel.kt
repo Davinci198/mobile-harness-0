@@ -83,6 +83,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1152,7 +1154,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Stores a folder the user picked. The permission grant is persisted so the tree keeps
      * working after a reboot; without it the URI is useless, so both are dropped together.
      */
-    fun addSafTree(uri: android.net.Uri, @Suppress("UNUSED_PARAMETER") label: String) {        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+    fun addSafTree(uri: android.net.Uri) {        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
             android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         runCatching { getApplication<Application>().contentResolver.takePersistableUriPermission(uri, flags) }
         val trees = readSafTrees().toMutableList()
@@ -1186,7 +1188,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
             val uri = item.optString("uri").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            uri to item.optString("label").ifBlank { uri.substringAfterLast('/').ifBlank { uri } }
+            // The name is derived from the URI every time rather than trusted from
+            // storage, so a tree granted before the label was prettified still shows a
+            // name instead of its encoded document id.
+            uri to prettifyTreeLabel(android.net.Uri.parse(uri))
         }
     }.getOrDefault(emptyList())
 
@@ -1231,17 +1236,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadCategories(backend: com.jarves.mh.storage.DeviceFs, root: com.jarves.mh.storage.DeviceRoot) {
         _state.update { it.copy(fsLoading = true, fsError = null, fsEntries = emptyList()) }
         viewModelScope.launch(Dispatchers.IO) {
-            val categories = com.jarves.mh.storage.FsCategories.definitionsFor(root).mapNotNull { (kind, path) ->
-                when (val listing = backend.list(path)) {
-                    is com.jarves.mh.storage.FsResult.Ok -> com.jarves.mh.storage.FsCategory(
-                        kind = kind,
-                        label = categoryLabel(kind),
-                        path = path,
-                        count = listing.value.size,
-                    )
+            val definitions = com.jarves.mh.storage.FsCategories.definitionsFor(root)
+            // Counted side by side: on the device root a dozen categories would otherwise
+            // mean a dozen sequential shell round trips, and the grid stays empty until
+            // the last one lands.
+            val categories = coroutineScope {
+                definitions.map { (kind, path) ->
+                    async {
+                        when (val listing = backend.list(path)) {
+                            is com.jarves.mh.storage.FsResult.Ok -> com.jarves.mh.storage.FsCategory(
+                                kind = kind,
+                                label = categoryLabel(kind),
+                                path = path,
+                                count = listing.value.size,
+                            )
 
-                    is com.jarves.mh.storage.FsResult.Err -> null
-                }
+                            is com.jarves.mh.storage.FsResult.Err -> null
+                        }
+                    }
+                }.mapNotNull { it.await() }
             }
             _state.update { it.copy(fsCategories = categories, fsLoading = false) }
         }

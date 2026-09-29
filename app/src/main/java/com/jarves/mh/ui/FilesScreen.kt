@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Chat
@@ -43,7 +44,6 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -76,6 +76,7 @@ import com.jarves.mh.storage.FsRemedy
 import com.jarves.mh.ui.theme.PocketAccent
 import com.jarves.mh.ui.theme.PocketMuted
 import androidx.compose.material3.ExperimentalMaterial3Api as ExperimentalMaterial3
+import androidx.compose.material3.FilterChip
 
 /**
  * Browses the whole device, not just the project's workspace.
@@ -254,7 +255,10 @@ private fun RootSwitcher(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         roots.forEach { root ->
-            AssistChip(
+            // A plain chip gave no way to tell which root you are in, which matters when
+            // two of them show the same-looking folders.
+            FilterChip(
+                selected = root == active,
                 onClick = { onSelect(root) },
                 label = { Text(root.label, fontSize = 12.sp) },
                 leadingIcon = {
@@ -266,9 +270,11 @@ private fun RootSwitcher(
                 },
             )
         }
-        AssistChip(
+        FilterChip(
+            selected = false,
             onClick = onAddFolder,
             label = { Text(stringResource(R.string.files_add_folder), fontSize = 12.sp) },
+            leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
         )
     }
 }
