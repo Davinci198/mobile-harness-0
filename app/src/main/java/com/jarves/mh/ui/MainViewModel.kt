@@ -172,6 +172,12 @@ data class AppUiState(
     val colorTheme: com.jarves.mh.ui.theme.AppColorTheme = com.jarves.mh.ui.theme.AppColorTheme.VIOLET,
     val customAccent: Int = 0xFF7C5CFC.toInt(),
     val customBackground: Int = 0xFF0F0F10.toInt(),
+    val accessLevel: com.jarves.mh.tools.AccessLevel = com.jarves.mh.tools.AccessLevel.STANDARD,
+    val shizuku: com.jarves.mh.runtime.ShizukuStatus = com.jarves.mh.runtime.ShizukuStatus(
+        installed = false,
+        running = false,
+        granted = false,
+    ),
     val apiPingStatus: ApiPingStatus = ApiPingStatus.IDLE,
     val apiPingMessage: String? = null,
     val projects: List<Project> = emptyList(),
@@ -370,6 +376,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .getOrDefault(com.jarves.mh.ui.theme.AppColorTheme.VIOLET),
             customAccent = preferences.customAccent,
             customBackground = preferences.customBackground,
+            accessLevel = com.jarves.mh.tools.AccessLevel.fromString(preferences.accessLevel),
+            shizuku = com.jarves.mh.runtime.ShizukuBridge.status(getApplication()),
             projects = preferences.loadProjects(),
             githubAuthStatus = GitHubAuthStatus.DISCONNECTED,
             githubLogin = preferences.githubLogin.takeIf(String::isNotBlank),
@@ -384,6 +392,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     init {
+        syncShizukuBridge()
         // GitHub's official CLI owns its OAuth credential. Remove credentials from
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
@@ -1030,6 +1039,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resetColorTheme() {
         preferences.colorTheme = "violet"
         _state.update { it.copy(colorTheme = com.jarves.mh.ui.theme.AppColorTheme.VIOLET) }
+    }
+
+    /**
+     * Only tiers that have a working backend can become active, so an unavailable tier
+     * would leave the app claiming power it does not have.
+     */
+    /**
+     * The guest host-shell bridge follows the access level, the Shizuku grant and the
+     * per-tool permission: it only runs when all three say it should, and it is torn
+     * down (script included) as soon as one of them stops saying so.
+     */
+    private fun syncShizukuBridge() {
+        val current = _state.value
+        val forbidden = toolPermissionStore.resolve(com.jarves.mh.runtime.ShizukuExecHost.TOOL) ==
+            com.jarves.mh.tools.ToolPermissionLevel.FORBID
+        com.jarves.mh.runtime.ShizukuExecHost.setForbidden(forbidden)
+        com.jarves.mh.runtime.ShizukuExecHost.sync(
+            installer = installer,
+            shouldRun = current.accessLevel == com.jarves.mh.tools.AccessLevel.DEBUGGER && current.shizuku.usable,
+        )
+    }
+
+    fun setAccessLevel(level: com.jarves.mh.tools.AccessLevel) {
+        val statuses = com.jarves.mh.tools.accessLevelStatuses(
+            shizukuInstalled = _state.value.shizuku.installed,
+            shizukuRunning = _state.value.shizuku.running,
+            shizukuGranted = _state.value.shizuku.granted,
+        )
+        if (statuses[level]?.available != true) return
+        preferences.accessLevel = level.name
+        _state.update { it.copy(accessLevel = level) }
+        syncShizukuBridge()
+    }
+
+    fun refreshShizuku() {
+        val status = com.jarves.mh.runtime.ShizukuBridge.status(getApplication())
+        _state.update { current ->
+            val next = current.copy(shizuku = status)
+            // If the tier in use stopped being available, fall back rather than lie.
+            if (next.accessLevel != com.jarves.mh.tools.AccessLevel.STANDARD &&
+                com.jarves.mh.tools.accessLevelStatuses(status.installed, status.running, status.granted)
+                    .getValue(next.accessLevel).available
+            ) {
+                next
+            } else {
+                preferences.accessLevel = com.jarves.mh.tools.AccessLevel.STANDARD.name
+                next.copy(accessLevel = com.jarves.mh.tools.AccessLevel.STANDARD)
+            }
+        }
+        syncShizukuBridge()
+    }
+
+    fun requestShizukuAccess() {
+        com.jarves.mh.runtime.ShizukuBridge.requestPermission { refreshShizuku() }
+    }
+
+    fun installBundledShizuku() {
+        com.jarves.mh.runtime.BundledShizuku.promptInstall(getApplication())
+        refreshShizuku()
     }
 
     fun getSavedApiKey(kind: ProviderKind): String = vault.get(kind.name).orEmpty()
@@ -1845,6 +1913,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (level == null) overrides.remove(tool) else overrides[tool] = level
             current.copy(toolPermissionOverrides = overrides)
         }
+        if (tool == com.jarves.mh.runtime.ShizukuExecHost.TOOL) syncShizukuBridge()
     }
 
     fun refreshAntigravityModels() {

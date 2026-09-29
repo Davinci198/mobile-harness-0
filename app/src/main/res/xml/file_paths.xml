@@ -2,4 +2,5 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <files-path name="workspaces" path="workspaces/" />
     <files-path name="updates" path="updates/" />
+    <files-path name="shizuku" path="shizuku/" />
 </paths>

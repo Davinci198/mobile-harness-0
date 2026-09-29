@@ -148,6 +148,11 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getInt("custom_background", 0xFF0F0F10.toInt())
         set(value) { preferences.edit().putInt("custom_background", value).apply() }
 
+    /** Persisted as the enum name; unknown values fall back to STANDARD. */
+    var accessLevel: String
+        get() = preferences.getString("access_level", "STANDARD") ?: "STANDARD"
+        set(value) { preferences.edit().putString("access_level", value).apply() }
+
     var legacySeededCredentialRemoved: Boolean
         get() = preferences.getBoolean("legacy_seeded_credential_removed", false)
         set(value) { preferences.edit().putBoolean("legacy_seeded_credential_removed", value).apply() }

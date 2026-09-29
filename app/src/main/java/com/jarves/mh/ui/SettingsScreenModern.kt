@@ -124,13 +124,16 @@ import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.ui.theme.AppColorTheme
 import com.jarves.mh.ui.theme.AppThemeMode
+import com.jarves.mh.tools.AccessLevel
+import com.jarves.mh.tools.AccessLevelDetail
+import com.jarves.mh.tools.accessLevelStatuses
 import com.jarves.mh.ui.theme.ColorPicker
 import com.jarves.mh.ui.theme.PalettePreview
 import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketAccent
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { APPEARANCE, VOICE, TOOLS, PERMISSIONS, BACKGROUND, RUNTIME, UPDATE_CHANNEL }
+private enum class SettingsSection { APPEARANCE, ACCESS, VOICE, TOOLS, PERMISSIONS, BACKGROUND, RUNTIME, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -140,6 +143,9 @@ fun SettingsScreen(
     onDiscoverModels: suspend (ProviderProfile, String) -> ModelDiscoveryResult,
     onValidateProvider: suspend (ProviderProfile, String, List<DiscoveredModel>) -> ConnectionValidation,
     onSetThemeMode: (AppThemeMode) -> Unit,
+    onSetAccessLevel: (AccessLevel) -> Unit,
+    onRequestShizukuAccess: () -> Unit,
+    onInstallShizuku: () -> Unit,
     onSetColorTheme: (AppColorTheme) -> Unit,
     onSetCustomColors: (Int, Int) -> Unit,
     onResetColorTheme: () -> Unit,
@@ -498,6 +504,16 @@ fun SettingsScreen(
                         if (index != DevStack.entries.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     }
                 }
+            }
+
+            item {
+                AccessLevelSection(
+                    current = state.accessLevel,
+                    shizuku = state.shizuku,
+                    onSelect = onSetAccessLevel,
+                    onRequestAccess = onRequestShizukuAccess,
+                    onInstall = onInstallShizuku,
+                )
             }
 
             item {
@@ -1242,6 +1258,135 @@ private fun ColorThemeChoice(title: String, swatch: List<Color>, selected: Boole
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+@Composable
+private fun AccessLevelSection(
+    current: AccessLevel,
+    shizuku: com.jarves.mh.runtime.ShizukuStatus,
+    onSelect: (AccessLevel) -> Unit,
+    onRequestAccess: () -> Unit,
+    onInstall: () -> Unit,
+) {
+    val statuses = accessLevelStatuses(
+        shizukuInstalled = shizuku.installed,
+        shizukuRunning = shizuku.running,
+        shizukuGranted = shizuku.granted,
+    )
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
+    SettingsAccordion(
+        title = stringResource(R.string.settings_access_title),
+        subtitle = stringResource(accessLevelTitleRes(current)),
+        icon = Icons.Default.Security,
+        expanded = expanded,
+        onClick = { expanded = !expanded },
+    ) {
+        Text(
+            stringResource(R.string.settings_access_desc),
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(10.dp))
+        AccessLevel.entries.forEach { level ->
+            val status = statuses.getValue(level)
+            AccessLevelRow(
+                level = level,
+                detail = status.detail,
+                active = level == current,
+                enabled = status.available,
+                onClick = { onSelect(level) },
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        val debugger = statuses.getValue(AccessLevel.DEBUGGER)
+        if (debugger.detail == AccessLevelDetail.NEEDS_PERMISSION) {
+            ShizukuActionButton(stringResource(R.string.settings_access_request), onRequestAccess)
+        } else if (debugger.detail == AccessLevelDetail.NOT_RUNNING) {
+            ShizukuActionButton(stringResource(R.string.settings_access_request), onRequestAccess)
+        } else if (debugger.detail == AccessLevelDetail.UNSUPPORTED && !shizuku.installed) {
+            ShizukuActionButton(stringResource(R.string.settings_access_install), onInstall)
+        }
+    }
+}
+
+private fun accessLevelTitleRes(level: AccessLevel): Int = when (level) {
+    AccessLevel.STANDARD -> R.string.settings_access_standard_title
+    AccessLevel.ACCESSIBILITY -> R.string.settings_access_accessibility_title
+    AccessLevel.DEBUGGER -> R.string.settings_access_debugger_title
+    AccessLevel.ADMIN -> R.string.settings_access_admin_title
+}
+
+@Composable
+private fun AccessLevelRow(
+    level: AccessLevel,
+    detail: AccessLevelDetail,
+    active: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = if (active) PocketAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(
+            if (active) 1.5.dp else 1.dp,
+            when {
+                active -> PocketAccent
+                enabled -> MaterialTheme.colorScheme.outlineVariant
+                else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            },
+        ),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(accessLevelTitleRes(level)),
+                    fontSize = 13.sp,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    stringResource(accessLevelDescRes(level)),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(accessLevelStatusRes(detail)),
+                    fontSize = 10.sp,
+                    color = if (detail == AccessLevelDetail.READY) PocketGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SelectionDot(selected = active)
+        }
+    }
+}
+
+private fun accessLevelDescRes(level: AccessLevel): Int = when (level) {
+    AccessLevel.STANDARD -> R.string.settings_access_standard_desc
+    AccessLevel.ACCESSIBILITY -> R.string.settings_access_accessibility_desc
+    AccessLevel.DEBUGGER -> R.string.settings_access_debugger_desc
+    AccessLevel.ADMIN -> R.string.settings_access_admin_desc
+}
+
+private fun accessLevelStatusRes(detail: AccessLevelDetail): Int = when (detail) {
+    AccessLevelDetail.READY -> R.string.settings_access_ready
+    AccessLevelDetail.NEEDS_PERMISSION -> R.string.settings_access_needs_permission
+    AccessLevelDetail.NOT_RUNNING -> R.string.settings_access_not_running
+    AccessLevelDetail.UNSUPPORTED -> R.string.settings_access_unsupported
+}
+
+@Composable
+private fun ShizukuActionButton(label: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
