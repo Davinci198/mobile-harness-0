@@ -18,6 +18,27 @@ class ShizukuFsTest {
     }
 
     @Test
+    fun noCommandLeavesAnUnexpandedTemplateBehind() {
+        // Kotlin only substitutes $identifier and ${expression}: a bare $(...) is literal
+        // text, so it would reach the shell as "$(quote(path))" and the path would never
+        // be quoted at all. Nothing in a command may contain a dollar sign.
+        val commands = listOf(
+            ShizukuFs.statCommand("/data/plain dir"),
+            ShizukuFs.createDirectoryCommand("/data/plain dir"),
+            ShizukuFs.readTextCommand("/data/plain dir", 10),
+            ShizukuFs.deleteCommand("/data/plain dir", recursive = true),
+            ShizukuFs.renameCommand("/data/plain dir", "other dir"),
+            ShizukuFs.writeTextCommand("/data/plain dir", "QQ=="),
+            ShizukuFs.listCommand("/data/plain dir"),
+        )
+        for (command in commands) {
+            // A bare $name is fine (the listing loop uses $f), but "$(...)" can only be a
+            // template that failed to expand.
+            assertFalse(command, command.contains("$("))
+        }
+    }
+
+    @Test
     fun statCommandQuotesThePath() {
         assertEquals("stat -c '%f|%s|%Y|%n' '/data/plain dir' 2>/dev/null || true", ShizukuFs.statCommand("/data/plain dir"))
     }

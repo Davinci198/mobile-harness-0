@@ -85,7 +85,7 @@ class ShizukuFileSystem(
         if (path.isBlank()) return fsError(FsErrorKind.FAILED, "The root itself cannot be deleted")
         if (!recursive) {
             // Refuse a non-empty directory rather than silently recursing.
-            val check = run("ls -A -- $(ShizukuFs.quote(absolute(path))) 2>/dev/null | head -1", SHORT_TIMEOUT_MS)
+            val check = run("ls -A -- ${ShizukuFs.quote(absolute(path))} 2>/dev/null | head -1", SHORT_TIMEOUT_MS)
             if (check.ok && check.stdout.isNotBlank()) {
                 return fsError(FsErrorKind.FAILED, "Directory is not empty")
             }

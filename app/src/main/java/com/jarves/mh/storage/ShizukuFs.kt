@@ -30,23 +30,23 @@ object ShizukuFs {
     }
 
     fun statCommand(path: String): String =
-        "stat -c '%f|%s|%Y|%n' $(quote(path)) 2>/dev/null || true"
+        "stat -c '%f|%s|%Y|%n' ${quote(path)} 2>/dev/null || true"
 
     /**
      * `cat` with a byte cap, so a huge or endless file cannot pin the pipe open. The cap
      * is enforced by the reader too, but stopping early here also frees the process.
      */
     fun readTextCommand(path: String, maxBytes: Long): String =
-        "head -c ${maxBytes.coerceAtLeast(0L)} $(quote(path)) 2>/dev/null"
+        "head -c ${maxBytes.coerceAtLeast(0L)} ${quote(path)} 2>/dev/null"
 
     fun writeTextCommand(path: String, base64: String): String =
-        "printf '%s' $(quote(base64)) | base64 -d > $(quote(path))"
+        "printf '%s' ${quote(base64)} | base64 -d > ${quote(path)}"
 
     fun appendTextCommand(path: String, base64: String): String =
-        "printf '%s' $(quote(base64)) | base64 -d >> $(quote(path))"
+        "printf '%s' ${quote(base64)} | base64 -d >> ${quote(path)}"
 
     fun deleteCommand(path: String, recursive: Boolean): String =
-        "rm -rf -- $(quote(path)) 2>/dev/null || rm -f -- $(quote(path)) 2>/dev/null"
+        "rm -rf -- ${quote(path)} 2>/dev/null || rm -f -- ${quote(path)} 2>/dev/null"
 
     fun renameCommand(path: String, newName: String): String {
         val from = quote(path)
@@ -57,10 +57,10 @@ object ShizukuFs {
         } else {
             newName
         }
-        return "mv -- $from $(quote(target)) 2>/dev/null"
+        return "mv -- $from ${quote(target)} 2>/dev/null"
     }
 
-    fun createDirectoryCommand(path: String): String = "mkdir -p -- $(quote(path)) 2>/dev/null"
+    fun createDirectoryCommand(path: String): String = "mkdir -p -- ${quote(path)} 2>/dev/null"
 
     fun joinPath(base: String, child: String): String {
         val left = base.trimEnd('/')
