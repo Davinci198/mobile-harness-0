@@ -92,6 +92,8 @@ object ShizukuFs {
         }
     }
 
+    /** Kotlin has no octal literals, so 0444 is spelled out: the three read bits. */
+    private const val ANY_READ = 0x124
     private const val MARKER = "#MH"
     private const val FAILED_MARKER = "#MHX"
 
@@ -182,7 +184,7 @@ object ShizukuFs {
             isDirectory = isDirectory,
             sizeBytes = if (isDirectory) 0L else size,
             lastModifiedMillis = modified,
-            readable = permissions and 0o444 != 0,
+            readable = permissions and ANY_READ != 0,
         )
     }
 
