@@ -13,10 +13,53 @@ import java.io.File
 
 /** Installs a locally-built APK through Android's package manager, without ADB. */
 object AndroidAppInstaller {
-    fun install(context: Context, apk: File) {
+    /**
+     * Installs [apk], quietly when Shizuku access is granted and through the system
+     * installer otherwise. The quiet path drives `pm install-create` / `install-write` /
+     * `install-commit` as the shell user, streaming the APK over the pipe because that
+     * user cannot read the app's private files.
+     */
+    suspend fun install(context: Context, apk: File) {
         require(apk.isFile && apk.extension.equals("apk", ignoreCase = true) && apk.length() > 0L) {
             "A valid APK was not produced: ${apk.name}"
         }
+        if (ShizukuBridge.hasPermission() && installSilently(apk)) return
+        installWithSystemInstaller(context, apk)
+    }
+
+    /**
+     * Returns false when Shizuku could not carry the install, so the caller can fall back
+     * rather than leave the user with nothing.
+     */
+    private suspend fun installSilently(apk: File): Boolean {
+        val size = apk.length()
+        val created = ShizukuBridge.execute("pm install-create -S $size")
+        val sessionId = ShizukuPermissions.parseSessionId(created.stdout)
+        if (sessionId == null) return false
+
+        val written = ShizukuBridge.executeWithInput(
+            "pm install-write -S $size $sessionId ${apk.name} -",
+            apk.readBytes(),
+            timeoutMs = WRITE_TIMEOUT_MS,
+        )
+        if (!ShizukuPermissions.isSuccess(written)) {
+            abandon(sessionId)
+            return false
+        }
+
+        val committed = ShizukuBridge.execute("pm install-commit $sessionId")
+        if (!ShizukuPermissions.isSuccess(committed)) {
+            abandon(sessionId)
+            return false
+        }
+        return true
+    }
+
+    private suspend fun abandon(sessionId: Int) {
+        ShizukuBridge.execute("pm install-abandon $sessionId", timeoutMs = SHORT_TIMEOUT_MS)
+    }
+
+    private fun installWithSystemInstaller(context: Context, apk: File) {
         if (isMiuiDevice()) {
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", apk)
             context.startActivity(
@@ -73,6 +116,9 @@ object AndroidAppInstaller {
     }
 
     const val ACTION_INSTALL_RESULT = "com.jarves.mh.action.APK_INSTALL_RESULT"
+
+    private const val WRITE_TIMEOUT_MS = 120_000L
+    private const val SHORT_TIMEOUT_MS = 15_000L
 
     private fun isMiuiDevice(): Boolean = android.os.Build.MANUFACTURER.lowercase() in
         setOf("xiaomi", "redmi", "poco")

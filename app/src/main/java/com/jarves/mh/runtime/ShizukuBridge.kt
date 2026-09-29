@@ -8,6 +8,7 @@ import android.os.ParcelFileDescriptor
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -163,6 +164,45 @@ object ShizukuBridge {
                     sink.append(line)
                 }
             }
+        }
+    }
+
+    /**
+     * Like [execute] but also feeds [input] to the command's stdin. `pm install-write`
+     * needs this: the shell user cannot read the app's private files, so the APK has to
+     * travel over the pipe.
+     */
+    suspend fun executeWithInput(
+        command: String,
+        input: ByteArray,
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    ): ShizukuCommandResult {
+        val process = if (hasPermission()) {
+            runCatching { service()?.newProcess(arrayOf("sh", "-c", command), null, null) }.getOrNull()
+        } else {
+            null
+        }
+        if (process == null) {
+            return ShizukuCommandResult(-1, "", "Shizuku is not available or access was not granted")
+        }
+        return withContext(Dispatchers.IO) {
+            val stdout = StringBuilder()
+            val stderr = StringBuilder()
+            val outThread = thread { drain(process.inputStream, stdout) }
+            val errThread = thread { drain(process.errorStream, stderr) }
+            val writer = thread {
+                runCatching {
+                    FileOutputStream(process.outputStream.fileDescriptor).use { it.write(input) }
+                }
+            }
+            runCatching { writer.join(timeoutMs) }
+            runCatching { outThread.join(READ_JOIN_MS) }
+            runCatching { errThread.join(READ_JOIN_MS) }
+            ShizukuCommandResult(
+                exitCode = -1,
+                stdout = stdout.toString(),
+                stderr = stderr.toString(),
+            )
         }
     }
 
