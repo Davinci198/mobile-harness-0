@@ -25,6 +25,16 @@ interface DeviceFs {
     suspend fun rename(path: String, newName: String): FsResult<Unit>
 
     suspend fun createDirectory(path: String): FsResult<Unit>
+
+    /**
+     * Lists several directories at once, returning one result per input path, in order.
+     *
+     * Backends that answer in-process just loop; the shell backend overrides this,
+     * because a root with a dozen categories would otherwise cost a dozen command
+     * spawns where one would do.
+     */
+    suspend fun listMany(paths: List<String>): List<FsResult<List<FsEntry>>> =
+        paths.map { list(it) }
 }
 
 /** Shared helpers so the four backends stay thin. */

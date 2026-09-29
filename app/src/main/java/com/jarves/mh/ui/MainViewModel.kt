@@ -1313,24 +1313,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch(Dispatchers.IO) {
             coroutineScope {
-                definitions.map { (kind, path) ->
-                    async {
-                        // The bytes come out of the listing the count already needed, so a
-                        // tile shows "size (count)" without a second round trip.
-                        when (val listing = backend.list(path)) {
-                            is com.jarves.mh.storage.FsResult.Ok -> Triple(
-                                kind,
-                                path,
-                                listing.value.size to listing.value
-                                    .filterNot { it.isDirectory }
-                                    .sumOf { it.sizeBytes },
-                            )
+                // One call for every category. Backends that answer in-process do the
+                // work in a loop; the shell backend turns the whole set into one command,
+                // which is the difference between waiting once and waiting a dozen times.
+                val listings = backend.listMany(definitions.map { it.second })
+                definitions.mapIndexed { position, definition -> definition to listings[position] }
+                    .forEach { (definition, listing) ->
+                    val (kind, path) = definition
+                    val tally = when (listing) {
+                        is com.jarves.mh.storage.FsResult.Ok -> listing.value.size to listing.value
+                            .filterNot { it.isDirectory }
+                            .sumOf { it.sizeBytes }
 
-                            is com.jarves.mh.storage.FsResult.Err -> Triple(kind, path, -1 to -1L)
-                        }
+                        is com.jarves.mh.storage.FsResult.Err -> -1 to -1L
                     }
-                }.forEach { deferred ->
-                    val (kind, path, tally) = deferred.await()
                     val (count, bytes) = tally
                     if (count < 0) {
                         // Not there, or not readable: drop the tile rather than lie.
@@ -1366,18 +1362,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .take(MAX_COUNTED_FOLDERS)
         if (folders.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            folders.forEach { folder ->
-                val full = com.jarves.mh.storage.FsPaths.join(path, folder.name)
-                val count = backend.list(full).valueOrNull()?.size
-                if (count != null) {
-                    _state.update { current ->
-                        current.copy(
-                            fsEntries = current.fsEntries.map { entry ->
-                                if (entry.name == folder.name && entry.childCount < 0) entry.copy(childCount = count) else entry
-                            },
-                        )
-                    }
-                }
+            val paths = folders.map { com.jarves.mh.storage.FsPaths.join(path, it.name) }
+            val listings = backend.listMany(paths)
+            val counts = paths.indices.map { position ->
+                folders[position].name to listings[position].valueOrNull()?.size
+            }
+            _state.update { current ->
+                current.copy(
+                    fsEntries = current.fsEntries.map { entry ->
+                        val found = counts.firstOrNull { it.first == entry.name }?.second
+                        if (found != null && entry.childCount < 0) entry.copy(childCount = found) else entry
+                    },
+                )
             }
         }
     }

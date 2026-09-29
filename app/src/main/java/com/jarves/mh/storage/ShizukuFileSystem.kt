@@ -35,6 +35,27 @@ class ShizukuFileSystem(
         return FsResult.Ok(ShizukuFs.parseListing(result.stdout))
     }
 
+    /**
+     * One command for the whole set. The device root is a dozen categories, and a
+     * command per category is a dozen process spawns where one is enough.
+     */
+    override suspend fun listMany(paths: List<String>): List<FsResult<List<FsEntry>>> {
+        if (paths.isEmpty()) return emptyList()
+        val commands = paths.map { absolute(it) }
+        val result = run(ShizukuFs.listManyCommand(commands), LIST_TIMEOUT_MS * commands.size.coerceAtMost(6))
+        if (!result.ok) {
+            return paths.map {
+                fsError(FsErrorKind.NO_ACCESS, result.stderr.ifBlank { "Shizuku could not list this" }, FsRemedy.REQUEST_SHIZUKU)
+            }
+        }
+        return ShizukuFs.parseBatched(result.stdout, commands.size).map { block ->
+            when {
+                block.missing -> fsError(FsErrorKind.NOT_FOUND, "No such directory")
+                else -> FsResult.Ok(block.entries)
+            }
+        }
+    }
+
     override suspend fun stat(path: String): FsResult<FsEntry> {
         if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")
         val result = run(ShizukuFs.statCommand(absolute(path)), SHORT_TIMEOUT_MS)

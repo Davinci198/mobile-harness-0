@@ -29,6 +29,73 @@ object ShizukuFs {
         """.trimIndent()
     }
 
+    /**
+     * Lists every directory in one command, marking each block with its index.
+     *
+     * The device root is a dozen categories, and a command per category turns one wait
+     * into a dozen. A stat line always begins with the file mode in hex, so a line that
+     * starts with the marker cannot be confused with an entry.
+     */
+    fun listManyCommand(directories: List<String>): String {
+        if (directories.isEmpty()) return "true"
+        // The paths go straight into the for list, quoted. Putting them in a variable
+        // would be shorter, but the shell splits an expanded variable on spaces without
+        // honouring quotes that came from the expansion, so "/sdcard/My Files" would
+        // arrive as two arguments.
+        val list = directories.joinToString(" ") { quote(it) }
+        return """
+            i=0
+            for d in __PATHS__; do
+              echo "#MH${'$'}i"
+              i=${'$'}((i+1))
+              cd "${'$'}d" 2>/dev/null || { echo "#MHX"; continue; }
+              for f in * .[!.]*; do
+                [ -e "${'$'}f" ] || continue
+                stat -c '%f|%s|%Y|%n' "${'$'}f" 2>/dev/null || true
+              done
+            done
+        """.trimIndent().replace("__PATHS__", list)
+    }
+
+    /** One directory's block out of a batched listing. */
+    data class BatchedListing(val index: Int, val missing: Boolean, val entries: List<FsEntry>)
+
+    /**
+     * Splits batched output back into one listing per input path. Blocks that never
+     * arrived, because a later command overran the output cap, come back as missing
+     * rather than silently as empty.
+     */
+    fun parseBatched(output: String, expected: Int): List<BatchedListing> {
+        val blocks = LinkedHashMap<Int, MutableList<String>>()
+        var missing = mutableSetOf<Int>()
+        var current: Int? = null
+        for (line in output.lineSequence()) {
+            if (line.startsWith(MARKER)) {
+                val digits = line.drop(MARKER.length).toIntOrNull()
+                if (digits != null) {
+                    current = digits
+                    blocks.getOrPut(digits) { mutableListOf() }
+                    continue
+                }
+                if (line == FAILED_MARKER) {
+                    current?.let { missing += it }
+                    continue
+                }
+            }
+            current?.let { blocks.getOrPut(it) { mutableListOf() } }?.add(line)
+        }
+        return (0 until expected).map { index ->
+            BatchedListing(
+                index = index,
+                missing = index in missing || index !in blocks,
+                entries = parseListing(blocks[index].orEmpty().joinToString("\n")),
+            )
+        }
+    }
+
+    private const val MARKER = "#MH"
+    private const val FAILED_MARKER = "#MHX"
+
     fun statCommand(path: String): String =
         "stat -c '%f|%s|%Y|%n' ${quote(path)} 2>/dev/null || true"
 
