@@ -191,6 +191,13 @@ data class AppUiState(
     val fsOpenName: String? = null,
     val fsOpenContent: String? = null,
     val fsOpenLoading: Boolean = false,
+    val fsView: com.jarves.mh.storage.FsViewMode = com.jarves.mh.storage.FsViewMode.LIST,
+    val fsSort: com.jarves.mh.storage.FsSort = com.jarves.mh.storage.FsSort.NAME,
+    val fsSortAscending: Boolean = true,
+    val fsQuery: String = "",
+    val fsSearchResults: List<com.jarves.mh.storage.FsEntry> = emptyList(),
+    val fsSearching: Boolean = false,
+    val fsSelectedPath: String? = null,
     val apiPingStatus: ApiPingStatus = ApiPingStatus.IDLE,
     val apiPingMessage: String? = null,
     val projects: List<Project> = emptyList(),
@@ -1217,11 +1224,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             loadCategories(backend, root)
             return
         }
-        _state.update { it.copy(fsLoading = true, fsError = null, fsCategories = emptyList()) }
+        val sort = _state.value.fsSort
+        val ascending = _state.value.fsSortAscending
+        _state.update {
+            it.copy(
+                fsLoading = true,
+                fsError = null,
+                fsCategories = emptyList(),
+                fsSelectedPath = null,
+                fsQuery = "",
+                fsSearchResults = emptyList(),
+            )
+        }
         viewModelScope.launch(Dispatchers.IO) {
             when (val result = backend.list(path)) {
                 is com.jarves.mh.storage.FsResult.Ok ->
-                    _state.update { it.copy(fsEntries = result.value, fsLoading = false, fsError = null) }
+                    _state.update {
+                        it.copy(
+                            fsEntries = com.jarves.mh.storage.FsQuery.sort(result.value, sort, ascending),
+                            fsLoading = false,
+                            fsError = null,
+                        )
+                    }
                 is com.jarves.mh.storage.FsResult.Err ->
                     _state.update { it.copy(fsEntries = emptyList(), fsLoading = false, fsError = result.error) }
             }
@@ -1234,29 +1258,133 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * empty one is still shown, because "nothing here" is information too.
      */
     private fun loadCategories(backend: com.jarves.mh.storage.DeviceFs, root: com.jarves.mh.storage.DeviceRoot) {
-        _state.update { it.copy(fsLoading = true, fsError = null, fsEntries = emptyList()) }
+        val definitions = com.jarves.mh.storage.FsCategories.definitionsFor(root)
+        // The tiles go up first with no counts and each count lands as it arrives: on the
+        // device root a dozen shell round trips would otherwise leave the screen empty.
+        _state.update {
+            it.copy(
+                fsLoading = false,
+                fsError = null,
+                fsEntries = emptyList(),
+                fsCategories = definitions.map { (kind, path) ->
+                    com.jarves.mh.storage.FsCategory(
+                        kind = kind,
+                        label = categoryLabel(kind),
+                        path = path,
+                        count = -1,
+                    )
+                },
+            )
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            val definitions = com.jarves.mh.storage.FsCategories.definitionsFor(root)
-            // Counted side by side: on the device root a dozen categories would otherwise
-            // mean a dozen sequential shell round trips, and the grid stays empty until
-            // the last one lands.
-            val categories = coroutineScope {
+            coroutineScope {
                 definitions.map { (kind, path) ->
                     async {
-                        when (val listing = backend.list(path)) {
-                            is com.jarves.mh.storage.FsResult.Ok -> com.jarves.mh.storage.FsCategory(
-                                kind = kind,
-                                label = categoryLabel(kind),
-                                path = path,
-                                count = listing.value.size,
+                        val count = when (val listing = backend.list(path)) {
+                            is com.jarves.mh.storage.FsResult.Ok -> listing.value.size
+                            is com.jarves.mh.storage.FsResult.Err -> -1
+                        }
+                        Triple(kind, path, count)
+                    }
+                }.forEach { deferred ->
+                    val (kind, path, count) = deferred.await()
+                    if (count < 0) {
+                        // Not there, or not readable: drop the tile rather than lie.
+                        _state.update { current ->
+                            current.copy(fsCategories = current.fsCategories.filterNot { it.kind == kind && it.path == path })
+                        }
+                    } else {
+                        _state.update { current ->
+                            current.copy(
+                                fsCategories = current.fsCategories.map { category ->
+                                    if (category.kind == kind && category.path == path) category.copy(count = count) else category
+                                },
                             )
-
-                            is com.jarves.mh.storage.FsResult.Err -> null
                         }
                     }
-                }.mapNotNull { it.await() }
+                }
             }
-            _state.update { it.copy(fsCategories = categories, fsLoading = false) }
+        }
+    }
+
+    fun setFilesView(mode: com.jarves.mh.storage.FsViewMode) {
+        _state.update { it.copy(fsView = mode) }
+        resortEntries()
+    }
+
+    fun setFilesSort(sort: com.jarves.mh.storage.FsSort, ascending: Boolean) {
+        _state.update { it.copy(fsSort = sort, fsSortAscending = ascending) }
+        resortEntries()
+    }
+
+    private fun resortEntries() {
+        val current = _state.value
+        _state.update {
+            it.copy(
+                fsEntries = com.jarves.mh.storage.FsQuery.sort(it.fsEntries, current.fsSort, current.fsSortAscending),
+                fsSearchResults = com.jarves.mh.storage.FsQuery.sort(it.fsSearchResults, current.fsSort, current.fsSortAscending),
+            )
+        }
+    }
+
+    fun selectFileEntry(entry: com.jarves.mh.storage.FsEntry) {
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        _state.update { if (it.fsSelectedPath == path) it.copy(fsSelectedPath = null) else it.copy(fsSelectedPath = path) }
+    }
+
+    fun clearFileSelection() {
+        _state.update { it.copy(fsSelectedPath = null) }
+    }
+
+    /**
+     * Searches the current directory and a bounded number of levels below it. On a device
+     * root every level costs a shell round trip, so the depth and the directory count are
+     * capped and the results grow as they are found.
+     */
+    fun openSearchResult(entry: com.jarves.mh.storage.FsEntry) {
+        if (entry.isDirectory) {
+            // A hit already carries its full root-relative path, so it opens where it was found.
+            navigateFiles(entry.relativePath)
+            return
+        }
+        openFileEntry(entry.copy(relativePath = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)))
+    }
+
+    fun searchFiles(query: String) {
+        val root = _state.value.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        val basePath = _state.value.fsPath
+        _state.update { it.copy(fsQuery = query, fsSearchResults = emptyList(), fsSearching = query.isNotBlank()) }
+        if (query.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val found = mutableListOf<com.jarves.mh.storage.FsEntry>()
+            val visited = mutableSetOf<String>()
+            suspend fun walk(path: String, depth: Int) {
+                if (depth > com.jarves.mh.storage.FsQuery.SEARCH_MAX_DEPTH) return
+                if (visited.size >= com.jarves.mh.storage.FsQuery.SEARCH_MAX_DIRECTORIES) return
+                if (found.size >= com.jarves.mh.storage.FsQuery.SEARCH_MAX_RESULTS) return
+                visited += path
+                val listing = backend.list(path).valueOrNull() ?: return
+                listing.forEach { entry ->
+                    if (com.jarves.mh.storage.FsQuery.matches(entry.name, query)) {
+                        // Carrying the full root-relative path means tapping a hit can open
+                        // it, instead of guessing a path relative to the search's own base.
+                        found += entry.copy(relativePath = com.jarves.mh.storage.FsPaths.join(path, entry.name))
+                        if (found.size >= com.jarves.mh.storage.FsQuery.SEARCH_MAX_RESULTS) return
+                    }
+                }
+                listing.filter { it.isDirectory }.forEach { child ->
+                    walk(com.jarves.mh.storage.FsPaths.join(path, child.name), depth + 1)
+                }
+            }
+            walk(basePath, 0)
+            val current = _state.value
+            _state.update {
+                it.copy(
+                    fsSearchResults = com.jarves.mh.storage.FsQuery.sort(found, current.fsSort, current.fsSortAscending),
+                    fsSearching = false,
+                )
+            }
         }
     }
 

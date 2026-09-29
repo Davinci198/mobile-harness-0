@@ -2,10 +2,15 @@ package com.jarves.mh.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,34 +24,43 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CreateNewFolder
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DriveFileRenameOutline
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -56,13 +70,18 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -72,21 +91,29 @@ import com.jarves.mh.storage.FsCategory
 import com.jarves.mh.storage.FsCategoryKind
 import com.jarves.mh.storage.FsEntry
 import com.jarves.mh.storage.FsError
+import com.jarves.mh.storage.FsPaths
 import com.jarves.mh.storage.FsRemedy
+import com.jarves.mh.storage.FsSort
+import com.jarves.mh.storage.FsViewMode
 import com.jarves.mh.ui.theme.PocketAccent
 import com.jarves.mh.ui.theme.PocketMuted
-import androidx.compose.material3.ExperimentalMaterial3Api as ExperimentalMaterial3
-import androidx.compose.material3.FilterChip
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Browses the whole device, not just the project's workspace.
  *
- * The root picks the backend, so the same screen walks the app sandbox, a folder granted
- * through the system picker, shared storage or the Shizuku shell without the UI knowing
- * the difference. What it cannot reach is shown as a reason plus the step to fix it,
- * rather than an empty list that looks like an empty disk.
+ * The root picks the backend, so one screen walks the app sandbox, a folder granted
+ * through the system picker, shared storage, or the Shizuku shell. At the top of a root it
+ * reads as storage: a grid of well-known places. Inside a directory it is a list or a grid
+ * of files, and what it cannot reach is a reason plus the step that fixes it, rather than
+ * an empty list that looks like an empty disk.
+ *
+ * Rows stay clean: tap opens, long press selects and raises the action bar. A row full of
+ * icons is what makes a file manager feel like a settings screen.
  */
-@OptIn(ExperimentalMaterial3::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun FilesScreen(
     roots: List<DeviceRoot>,
@@ -95,6 +122,13 @@ fun FilesScreen(
     path: String,
     entries: List<FsEntry>,
     categories: List<FsCategory>,
+    searchResults: List<FsEntry>,
+    searching: Boolean,
+    query: String,
+    selectedPath: String?,
+    view: FsViewMode,
+    sort: FsSort,
+    sortAscending: Boolean,
     loading: Boolean,
     error: FsError?,
     openName: String?,
@@ -103,98 +137,152 @@ fun FilesScreen(
     onOpenRoot: (DeviceRoot) -> Unit,
     onNavigate: (String) -> Unit,
     onGoUp: () -> Unit,
+    onGoHome: () -> Unit,
     onRefreshRoots: () -> Unit,
-    onPickFolder: (android.net.Uri, String) -> Unit,
+    onPickFolder: (android.net.Uri) -> Unit,
     onOpenEntry: (FsEntry) -> Unit,
+    onOpenSearchResult: (FsEntry) -> Unit,
     onCloseFile: () -> Unit,
     onCreateDirectory: (String) -> Unit,
     onRename: (FsEntry, String) -> Unit,
     onDelete: (FsEntry) -> Unit,
     onRemedy: (FsRemedy) -> Unit,
+    onQueryChange: (String) -> Unit,
+    onSetView: (FsViewMode) -> Unit,
+    onSetSort: (FsSort, Boolean) -> Unit,
+    onSelect: (FsEntry) -> Unit,
+    onClearSelection: () -> Unit,
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
     val folderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
-        onResult = { uri ->
-            if (uri != null) {
-                val label = uri.toString().substringAfterLast('/').substringAfterLast(':').ifBlank { uri.toString() }
-                onPickFolder(uri, label)
-            }
-        },
+        onResult = { uri -> uri?.let(onPickFolder) },
     )
 
     if (openName != null) {
-        FileViewerScreen(
-            filePath = openName,
-            content = openContent,
-            loading = openLoading,
-            onClose = onCloseFile,
-        )
+        FileViewerScreen(filePath = openName, content = openContent, loading = openLoading, onClose = onCloseFile)
         return
     }
 
     var dialog by remember { mutableStateOf<FsDialog?>(null) }
+    var searchOpen by remember { mutableStateOf(false) }
+    var sortMenu by remember { mutableStateOf(false) }
+
+    // A selection left behind by a navigation would point at a file that is no longer on screen.
+    LaunchedEffect(path) { onClearSelection() }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text(stringResource(R.string.files_browser_title), fontSize = 17.sp)
-                        if (!path.isEmpty()) {
-                            Text(path, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                        Text(activeRoot?.label ?: stringResource(R.string.files_browser_title), fontSize = 16.sp)
+                        Text(
+                            text = path.ifEmpty { stringResource(R.string.files_root_hint) },
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onGoUp, enabled = path.isNotEmpty()) {
+                    IconButton(onClick = if (path.isEmpty()) onGoHome else onGoUp) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.files_up))
                     }
                 },
                 actions = {
-                    IconButton(onClick = onRefreshRoots) { Icon(Icons.Default.Refresh, stringResource(R.string.files_refresh)) }
-                    IconButton(onClick = { dialog = FsDialog.NewFolder }) { Icon(Icons.Default.CreateNewFolder, stringResource(R.string.files_new_folder)) }
+                    IconButton(onClick = { searchOpen = !searchOpen }) {
+                        Icon(Icons.Default.Search, stringResource(R.string.files_search))
+                    }
+                    IconButton(onClick = { onSetView(if (view == FsViewMode.LIST) FsViewMode.GRID else FsViewMode.LIST) }) {
+                        Icon(
+                            imageVector = if (view == FsViewMode.LIST) Icons.Default.GridView else Icons.Default.ViewList,
+                            contentDescription = stringResource(R.string.files_view_toggle),
+                        )
+                    }
+                    Box {
+                        IconButton(onClick = { sortMenu = true }) {
+                            Icon(Icons.Default.Sort, stringResource(R.string.files_sort))
+                        }
+                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                            FsSort.entries.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(sortLabel(option)), fontSize = 13.sp) },
+                                    onClick = {
+                                        // Picking the field already in use flips its direction.
+                                        val ascending = if (option == sort) !sortAscending else true
+                                        onSetSort(option, ascending)
+                                        sortMenu = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    if (path.isNotEmpty()) {
+                        IconButton(onClick = { dialog = FsDialog.NewFolder }) {
+                            Icon(Icons.Default.CreateNewFolder, stringResource(R.string.files_new_folder))
+                        }
+                    }
+                    IconButton(onClick = onRefreshRoots) {
+                        Icon(Icons.Default.Refresh, stringResource(R.string.files_refresh))
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
+        bottomBar = {
+            val selected = entries.firstOrNull { entry ->
+                selectedPath != null && FsPaths.join(path, entry.name) == selectedPath
+            }
+            if (selected != null) {
+                SelectionBar(
+                    name = selected.name,
+                    onRename = { dialog = FsDialog.Rename(selected) },
+                    onDelete = { dialog = FsDialog.Delete(selected) },
+                    onClose = onClearSelection,
+                )
+            }
+        },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            RootSwitcher(roots = roots, active = activeRoot, onSelect = onOpenRoot, onAddFolder = { folderLauncher.launch(null) })
+            if (searchOpen) {
+                SearchField(query = query, searching = searching, onQueryChange = onQueryChange)
+            }
+
+            if (path.isNotEmpty()) {
+                PlacesBar(roots, activeRoot, onSelect = onOpenRoot, onAddFolder = { folderLauncher.launch(null) })
+            }
 
             error?.let { FsErrorBanner(it, onRemedy = onRemedy) }
-            if (unavailable.isNotEmpty() && roots.size <= 1) {
+            if (error == null && unavailable.isNotEmpty() && roots.size <= 1) {
                 unavailable.firstOrNull()?.let { FsErrorBanner(it, onRemedy = onRemedy) }
             }
 
+            if (searchOpen && query.isNotBlank()) {
+                SearchResults(results = searchResults, view = view, onOpen = onOpenSearchResult, onSelect = onSelect)
+                return@Column
+            }
+
+            val atRoot = path.isEmpty()
             when {
                 loading && entries.isEmpty() && categories.isEmpty() ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
 
-                // At the root of a root the grid reads as storage; once inside, a path
-                // turns into a plain list, because a grid of file names is unreadable.
-                path.isEmpty() && categories.isNotEmpty() -> LazyVerticalGrid(
-                    columns = GridCells.Fixed(4),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    items(categories, key = { "${it.kind}-${it.path}" }) { category ->
-                        CategoryTile(category, onClick = { onNavigate(category.path) })
-                    }
-                }
+                atRoot && categories.isNotEmpty() -> CategoryGrid(categories, onOpen = onNavigate)
 
                 entries.isEmpty() && error == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(stringResource(R.string.files_empty), color = PocketMuted, fontSize = 13.sp)
                 }
 
+                view == FsViewMode.GRID -> EntryGrid(entries, path, selectedPath, onOpen = onOpenEntry, onSelect = onSelect)
+
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     items(entries, key = { it.relativePath }) { entry ->
                         FileRow(
                             entry = entry,
+                            selected = selectedPath != null && FsPaths.join(path, entry.name) == selectedPath,
                             onOpen = { onOpenEntry(entry) },
-                            onRename = { dialog = FsDialog.Rename(entry) },
-                            onDelete = { dialog = FsDialog.Delete(entry) },
+                            onSelect = { onSelect(entry) },
                         )
                     }
                 }
@@ -240,65 +328,123 @@ private sealed interface FsDialog {
     data class Delete(val entry: FsEntry) : FsDialog
 }
 
+private fun sortLabel(sort: FsSort): Int = when (sort) {
+    FsSort.NAME -> R.string.files_sort_name
+    FsSort.DATE -> R.string.files_sort_date
+    FsSort.SIZE -> R.string.files_sort_size
+}
+
 @Composable
-private fun RootSwitcher(
-    roots: List<DeviceRoot>,
-    active: DeviceRoot?,
-    onSelect: (DeviceRoot) -> Unit,
-    onAddFolder: () -> Unit,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        roots.forEach { root ->
-            // A plain chip gave no way to tell which root you are in, which matters when
-            // two of them show the same-looking folders.
-            FilterChip(
-                selected = root == active,
-                onClick = { onSelect(root) },
-                label = { Text(root.label, fontSize = 12.sp) },
-                leadingIcon = {
-                    Icon(
-                        if (root is DeviceRoot.SafTree) Icons.Default.FolderOpen else Icons.Default.Folder,
-                        null,
-                        Modifier.size(16.dp),
-                    )
-                },
-            )
-        }
-        FilterChip(
-            selected = false,
-            onClick = onAddFolder,
-            label = { Text(stringResource(R.string.files_add_folder), fontSize = 12.sp) },
-            leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
+private fun SearchField(query: String, searching: Boolean, onQueryChange: (String) -> Unit) {
+    Column(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(Icons.Default.Clear, stringResource(R.string.files_search_clear), Modifier.size(18.dp))
+                    }
+                }
+            },
+            textStyle = TextStyle(fontSize = 14.sp),
+            modifier = Modifier.fillMaxWidth(),
         )
+        if (searching) {
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
     }
 }
 
 @Composable
-private fun CategoryTile(category: FsCategory, onClick: () -> Unit) {
-    Column(
-        Modifier
-            .clickable(onClick = onClick)
-            .padding(vertical = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+private fun SearchResults(results: List<FsEntry>, view: FsViewMode, onOpen: (FsEntry) -> Unit, onSelect: (FsEntry) -> Unit) {
+    if (results.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(stringResource(R.string.files_no_results), color = PocketMuted, fontSize = 13.sp)
+        }
+        return
+    }
+    if (view == FsViewMode.GRID) {
+        EntryGrid(results, "", null, onOpen, onSelect)
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(results, key = { "res-" + it.relativePath }) { entry ->
+            FileRow(entry, selected = false, onOpen = { onOpen(entry) }, onSelect = { onSelect(entry) })
+        }
+    }
+}
+
+@Composable
+private fun PlacesBar(roots: List<DeviceRoot>, active: DeviceRoot?, onSelect: (DeviceRoot) -> Unit, onAddFolder: () -> Unit) {
+    Column {
+        Text(
+            stringResource(R.string.files_places),
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            roots.forEach { root ->
+                FilterChip(
+                    selected = root == active,
+                    onClick = { onSelect(root) },
+                    label = { Text(root.label, fontSize = 12.sp) },
+                    leadingIcon = { Icon(Icons.Default.Folder, null, Modifier.size(16.dp)) },
+                )
+            }
+            FilterChip(
+                selected = false,
+                onClick = onAddFolder,
+                label = { Text(stringResource(R.string.files_add_folder), fontSize = 12.sp) },
+                leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
+            )
+            FilterChip(
+                selected = false,
+                onClick = { roots.firstOrNull()?.let(onSelect) },
+                label = { Text(stringResource(R.string.files_go_home), fontSize = 12.sp) },
+                leadingIcon = { Icon(Icons.Default.Home, null, Modifier.size(16.dp)) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CategoryGrid(categories: List<FsCategory>, onOpen: (String) -> Unit) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        items(categories, key = { "${it.kind}-${it.path}" }) { category ->
+            CategoryTile(category, onClick = { onOpen(category.path) })
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategoryTile(category: FsCategory, onClick: () -> Unit) {
+    Column(Modifier.padding(vertical = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
-            modifier = Modifier.size(width = 62.dp, height = 56.dp),
-            shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+            modifier = Modifier.size(width = 76.dp, height = 68.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            onClick = onClick,
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    categoryIcon(category.kind),
-                    null,
-                    Modifier.size(28.dp),
-                    tint = PocketAccent,
-                )
+                Icon(categoryIcon(category.kind), null, Modifier.size(32.dp), tint = PocketAccent)
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -307,17 +453,23 @@ private fun CategoryTile(category: FsCategory, onClick: () -> Unit) {
             fontSize = 12.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            textAlign = TextAlign.Center,
         )
         Text(
-            stringResource(R.string.files_cat_count, category.count),
+            // A count of -1 means it has not come back yet. Saying so keeps the tile from
+            // jumping under the finger when the number lands a moment later.
+            if (category.count < 0) {
+                stringResource(R.string.files_counting)
+            } else {
+                stringResource(R.string.files_cat_count, category.count)
+            },
             fontSize = 11.sp,
             color = PocketMuted,
         )
     }
 }
 
-private fun categoryIcon(kind: FsCategoryKind): androidx.compose.ui.graphics.vector.ImageVector = when (kind) {
+private fun categoryIcon(kind: FsCategoryKind): ImageVector = when (kind) {
     FsCategoryKind.STORAGE -> Icons.Default.SmartToy
     FsCategoryKind.DOWNLOADS -> Icons.Default.Download
     FsCategoryKind.IMAGES -> Icons.Default.Image
@@ -325,42 +477,119 @@ private fun categoryIcon(kind: FsCategoryKind): androidx.compose.ui.graphics.vec
     FsCategoryKind.VIDEO -> Icons.Default.Movie
     FsCategoryKind.DOCUMENTS -> Icons.Default.Description
     FsCategoryKind.APPS -> Icons.Default.Apps
-    FsCategoryKind.SYSTEM, FsCategoryKind.DATA, FsCategoryKind.VENDOR, FsCategoryKind.PRODUCT -> Icons.Default.Memory
+    FsCategoryKind.SYSTEM,
+    FsCategoryKind.DATA,
+    FsCategoryKind.VENDOR,
+    FsCategoryKind.PRODUCT,
+    -> Icons.Default.Memory
     FsCategoryKind.WORKSPACES -> Icons.Default.Folder
     FsCategoryKind.CHATS -> Icons.Default.Chat
-    FsCategoryKind.RUNTIME, FsCategoryKind.SETUP -> Icons.Default.Build
+    FsCategoryKind.RUNTIME -> Icons.Default.Build
+    FsCategoryKind.SETUP -> Icons.Default.Download
     FsCategoryKind.TERMINAL -> Icons.Default.Terminal
     FsCategoryKind.OTHER -> Icons.Default.Folder
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FileRow(entry: FsEntry, onOpen: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
+private fun FileRow(entry: FsEntry, selected: Boolean, onOpen: () -> Unit, onSelect: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onOpen)
+            .background(if (selected) PocketAccent.copy(alpha = 0.12f) else Color.Transparent)
+            // Long press selects, the way a file manager does, so the row itself stays clean.
+            .combinedClickable(onClick = onOpen, onLongClick = onSelect)
             .padding(horizontal = 16.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            when {
+            imageVector = when {
                 entry.isDirectory -> Icons.Default.Folder
                 !entry.readable -> Icons.Default.Lock
-                else -> Icons.Default.Folder
+                else -> Icons.Default.Description
             },
-            null,
-            Modifier.size(20.dp),
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
             tint = if (entry.isDirectory) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(entry.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (!entry.isDirectory) {
-                Text(formatFileSize(entry.sizeBytes), fontSize = 11.sp, color = PocketMuted)
+                Text(entrySubtitle(entry), fontSize = 11.sp, color = PocketMuted)
             }
         }
-        IconButton(onClick = onRename) { Icon(Icons.Default.DriveFileRenameOutline, stringResource(R.string.files_rename), Modifier.size(18.dp)) }
-        IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, stringResource(R.string.files_delete), Modifier.size(18.dp)) }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun EntryGrid(entries: List<FsEntry>, path: String, selectedPath: String?, onOpen: (FsEntry) -> Unit, onSelect: (FsEntry) -> Unit) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(entries, key = { it.relativePath }) { entry ->
+            Column(
+                Modifier
+                    .background(
+                        if (selectedPath != null && FsPaths.join(path, entry.name) == selectedPath) {
+                            PocketAccent.copy(alpha = 0.12f)
+                        } else {
+                            Color.Transparent
+                        },
+                    )
+                    .combinedClickable(onClick = { onOpen(entry) }, onLongClick = { onSelect(entry) })
+                    .padding(4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    imageVector = if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Description,
+                    contentDescription = null,
+                    modifier = Modifier.size(30.dp),
+                    tint = if (entry.isDirectory) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(entry.name, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+private fun entrySubtitle(entry: FsEntry): String {
+    val size = formatFileSize(entry.sizeBytes)
+    if (entry.lastModifiedMillis <= 0L) return size
+    return "$size · ${formatEntryDate(entry.lastModifiedMillis)}"
+}
+
+private fun formatEntryDate(millis: Long): String =
+    SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(millis))
+
+@Composable
+private fun SelectionBar(name: String, onRename: () -> Unit, onDelete: () -> Unit, onClose: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surface) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                name,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(start = 6.dp),
+            )
+            TextButton(onClick = onRename) {
+                Icon(Icons.Default.DriveFileRenameOutline, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(stringResource(R.string.files_rename), fontSize = 12.sp)
+            }
+            TextButton(onClick = onDelete) {
+                Icon(Icons.Default.Delete, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.width(4.dp))
+                Text(stringResource(R.string.files_delete), fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+            }
+            IconButton(onClick = onClose) { Icon(Icons.Default.Clear, stringResource(R.string.files_clear_selection), Modifier.size(18.dp)) }
+        }
     }
 }
 
@@ -368,18 +597,13 @@ private fun FileRow(entry: FsEntry, onOpen: () -> Unit, onRename: () -> Unit, on
 private fun FsErrorBanner(error: FsError, onRemedy: (FsRemedy) -> Unit) {
     Surface(
         Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
     ) {
-        Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(error.message, fontSize = 12.sp, modifier = Modifier.weight(1f))
             error.remedy?.let { remedy ->
-                TextButton(onClick = { onRemedy(remedy) }) {
-                    Text(stringResource(remedyLabel(remedy)), fontSize = 12.sp)
-                }
+                TextButton(onClick = { onRemedy(remedy) }) { Text(stringResource(remedyLabel(remedy)), fontSize = 12.sp) }
             }
         }
     }
@@ -392,25 +616,12 @@ private fun remedyLabel(remedy: FsRemedy): Int = when (remedy) {
 }
 
 @Composable
-private fun TextPromptDialog(
-    title: String,
-    label: String,
-    initial: String = "",
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
+private fun TextPromptDialog(title: String, label: String, initial: String = "", onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
     var value by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it },
-                singleLine = true,
-                label = { Text(label) },
-            )
-        },
+        text = { OutlinedTextField(value = value, onValueChange = { value = it }, singleLine = true, label = { Text(label) }) },
         confirmButton = {
             TextButton(onClick = { if (value.isNotBlank()) onConfirm(value.trim()) }, enabled = value.isNotBlank()) {
                 Text(stringResource(R.string.files_save))
