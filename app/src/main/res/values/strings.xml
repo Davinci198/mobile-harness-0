@@ -132,12 +132,10 @@
     <string name="settings_access_standard_desc">Basic app operation permissions, no special permissions required</string>
     <string name="settings_access_accessibility_title">Accessibility permissions</string>
     <string name="settings_access_accessibility_desc">Enables screen content analysis and operation simulation via accessibility service</string>
-    <string name="settings_access_debugger_title">Debug permissions</string>
-    <string name="settings_access_debugger_desc">Allows ADB-level access to the system for advanced operations through the Shizuku service</string>
+    <string name="settings_access_debugger_title">Debug permissions (Shizuku)</string>
+    <string name="settings_access_debugger_desc">Gives the app a shell on this device through the Shizuku service, running as the system shell user — not root, and without a superuser installed</string>
     <string name="settings_access_admin_title">Admin permissions</string>
     <string name="settings_access_admin_desc">Allows the app to access more system functions, such as location services</string>
-    <string name="settings_access_root_title">Root permissions</string>
-    <string name="settings_access_root_desc">Full user-space access inside the app sandbox, where agents and tools run</string>
     <string name="settings_access_ready">Granted</string>
     <string name="settings_access_needs_permission">Access not granted yet</string>
     <string name="settings_access_not_running">Shizuku is installed but not running</string>

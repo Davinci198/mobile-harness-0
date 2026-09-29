@@ -1,34 +1,34 @@
 package com.jarves.mh.tools
 
 /**
- * Privilege tiers, ordered by how much power they grant.
- *
- * The tiers are ordered by how much power they grant, and each one needs a backend:
+ * Privilege tiers, ordered by how much power they grant. Each one needs a backend:
  * - STANDARD: ordinary app permissions, no special grant
  * - ACCESSIBILITY: screen reading and input simulation through an accessibility service
- * - DEBUGGER: ADB-level access through Shizuku
+ * - DEBUGGER: a shell on the device itself, through Shizuku, running as the `shell` user
  * - ADMIN: device administrator
- * - ROOT: superuser
  *
- * This app only ships backends for STANDARD (plain app APIs) and ROOT (the proot
- * sandbox guest, which is user space, not a real superuser). DEBUGGER becomes available
- * once Shizuku grants access; ACCESSIBILITY and ADMIN have no backend here yet and are
- * reported as unsupported until a backend exists for them.
+ * There is no root tier: this app has no superuser on the device, and Shizuku hands out a
+ * shell user rather than root. The sandbox guest runs as ordinary user space, which is
+ * not a device capability either, so it is not offered as a tier.
+ *
+ * Only STANDARD and DEBUGGER have a backend here. ACCESSIBILITY and ADMIN report as
+ * unsupported until one exists for them.
  */
 enum class AccessLevel {
     STANDARD,
     ACCESSIBILITY,
     DEBUGGER,
-    ADMIN,
-    ROOT;
+    ADMIN;
 
     companion object {
-        /** Unknown or missing values fall back to the least privileged tier. */
+        /**
+         * Unknown or missing values fall back to the least privileged tier. The retired
+         * ROOT value maps onto DEBUGGER, since Shizuku is what took its place.
+         */
         fun fromString(value: String?): AccessLevel = when (value?.trim()?.uppercase()) {
             "ACCESSIBILITY" -> ACCESSIBILITY
-            "DEBUGGER" -> DEBUGGER
+            "DEBUGGER", "SHIZUKU", "ROOT" -> DEBUGGER
             "ADMIN" -> ADMIN
-            "ROOT" -> ROOT
             else -> STANDARD
         }
     }
@@ -67,9 +67,6 @@ fun accessLevelStatuses(shizukuInstalled: Boolean, shizukuRunning: Boolean, shiz
     AccessLevel.entries.associateWith { level ->
         when (level) {
             AccessLevel.STANDARD -> AccessLevelStatus(level, true, AccessLevelDetail.READY)
-
-            // The proot sandbox is a full Linux userland, so the sandbox tier is live.
-            AccessLevel.ROOT -> AccessLevelStatus(level, true, AccessLevelDetail.READY)
 
             AccessLevel.DEBUGGER -> when {
                 shizukuGranted -> AccessLevelStatus(level, true, AccessLevelDetail.READY)

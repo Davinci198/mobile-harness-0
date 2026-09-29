@@ -1316,7 +1316,6 @@ private fun accessLevelTitleRes(level: AccessLevel): Int = when (level) {
     AccessLevel.ACCESSIBILITY -> R.string.settings_access_accessibility_title
     AccessLevel.DEBUGGER -> R.string.settings_access_debugger_title
     AccessLevel.ADMIN -> R.string.settings_access_admin_title
-    AccessLevel.ROOT -> R.string.settings_access_root_title
 }
 
 @Composable
@@ -1375,7 +1374,6 @@ private fun accessLevelDescRes(level: AccessLevel): Int = when (level) {
     AccessLevel.ACCESSIBILITY -> R.string.settings_access_accessibility_desc
     AccessLevel.DEBUGGER -> R.string.settings_access_debugger_desc
     AccessLevel.ADMIN -> R.string.settings_access_admin_desc
-    AccessLevel.ROOT -> R.string.settings_access_root_desc
 }
 
 private fun accessLevelStatusRes(detail: AccessLevelDetail): Int = when (detail) {

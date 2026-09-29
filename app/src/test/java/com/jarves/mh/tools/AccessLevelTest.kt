@@ -12,13 +12,26 @@ class AccessLevelTest {
         assertEquals(AccessLevel.ACCESSIBILITY, AccessLevel.fromString("ACCESSIBILITY"))
         assertEquals(AccessLevel.DEBUGGER, AccessLevel.fromString("DEBUGGER"))
         assertEquals(AccessLevel.ADMIN, AccessLevel.fromString("ADMIN"))
-        assertEquals(AccessLevel.ROOT, AccessLevel.fromString("ROOT"))
+    }
+
+    @Test
+    fun theRetiredRootValueBecomesDebugger() {
+        // Root was dropped as a tier: there is no superuser on the device, and Shizuku
+        // is what took its place. Anything already saved must not fall back to nothing.
+        assertEquals(AccessLevel.DEBUGGER, AccessLevel.fromString("ROOT"))
+        assertEquals(AccessLevel.DEBUGGER, AccessLevel.fromString("SHIZUKU"))
+    }
+
+    @Test
+    fun thereIsNoRootTier() {
+        assertFalse(AccessLevel.entries.any { it.name == "ROOT" })
     }
 
     @Test
     fun fromStringIsForgivingAboutCaseAndSpacing() {
-        assertEquals(AccessLevel.ROOT, AccessLevel.fromString("root"))
+        assertEquals(AccessLevel.ADMIN, AccessLevel.fromString("admin"))
         assertEquals(AccessLevel.DEBUGGER, AccessLevel.fromString("  Debugger "))
+        assertEquals(AccessLevel.ACCESSIBILITY, AccessLevel.fromString("accessibility\n"))
     }
 
     @Test
@@ -36,11 +49,11 @@ class AccessLevelTest {
     }
 
     @Test
-    fun standardAndSandboxAreAlwaysReady() {
+    fun standardIsAlwaysReadyAndNothingElseIsWithoutShizuku() {
         val none = accessLevelStatuses(shizukuInstalled = false, shizukuRunning = false, shizukuGranted = false)
-        for (level in listOf(AccessLevel.STANDARD, AccessLevel.ROOT)) {
-            assertTrue("$level should be ready", none.getValue(level).available)
-            assertEquals(AccessLevelDetail.READY, none.getValue(level).detail)
+        assertTrue(none.getValue(AccessLevel.STANDARD).available)
+        for (level in AccessLevel.entries.filter { it != AccessLevel.STANDARD }) {
+            assertFalse("$level must not be available without Shizuku", none.getValue(level).available)
         }
     }
 
