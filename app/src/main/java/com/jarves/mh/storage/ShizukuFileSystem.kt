@@ -60,6 +60,9 @@ class ShizukuFileSystem(
 
     override suspend fun writeText(path: String, content: String, append: Boolean): FsResult<Unit> {
         if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")
+        // Appending is implemented with >> below, but it is not offered: the caller has to
+        // ask for it explicitly rather than get a silently truncated file.
+        if (append) return fsError(FsErrorKind.FAILED, "Appending is not supported through this backend")
         if (content.toByteArray().size > FsLimits.MAX_TEXT_READ_BYTES) {
             return fsError(FsErrorKind.FAILED, "File is too large to write")
         }

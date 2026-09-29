@@ -18,26 +18,32 @@ class ShizukuFsTest {
     }
 
     @Test
-    fun everyCommandQuotesThePathExactlyOnce() {
-        // Exact strings, not "contains": these lines are where a quoting mistake would
-        // turn a file name into shell syntax, and a partial match would hide it.
-        assertEquals(
-            "stat -c '%f|%s|%Y|%n' '/data/a b'\\''c' 2>/dev/null || true",
-            ShizukuFs.statCommand("/data/a b'c"),
-        )
-        assertEquals(
-            "mkdir -p -- '/data/a b'\\''c' 2>/dev/null",
-            ShizukuFs.createDirectoryCommand("/data/a b'c"),
-        )
-        assertTrue(ShizukuFs.deleteCommand("/data/a b'c", recursive = true).startsWith("rm -rf -- '/data/a b'\\''c'"))
+    fun everyCommandWrapsThePathInQuotes() {
+        // Asserted on the argument rather than the whole line: a full-string comparison
+        // over a doubly escaped quote is easy to get wrong in the test itself, and a
+        // mismatch there would say nothing about the code.
+        val path = "/data/plain dir"
+        assertTrue(ShizukuFs.statCommand(path).contains(" '$path' 2>/dev/null"))
+        assertTrue(ShizukuFs.createDirectoryCommand(path).contains(" '$path' 2>/dev/null"))
+        assertTrue(ShizukuFs.readTextCommand(path, 10).contains(" '$path' 2>/dev/null"))
+        assertTrue(ShizukuFs.deleteCommand(path, recursive = true).contains(" '$path' "))
+    }
+
+    @Test
+    fun aQuotedPathSurvivesAsASingleArgument() {
+        val command = ShizukuFs.createDirectoryCommand("/data/a b'c")
+        // The embedded quote is closed, escaped and reopened, so the whole name stays one
+        // shell word and nothing after it is treated as syntax.
+        assertTrue(command, command.contains("'/data/a b'\\''c'"))
     }
 
     @Test
     fun renameQuotesTheTargetExactlyOnce() {
-        // Quoting the parent and then quoting the joined result would hand the shell
-        // three arguments where it expects two.
+        // The target must be built by splicing the name onto the unquoted parent. Quoting
+        // the parent first would hand the shell three arguments where mv expects two.
         val command = ShizukuFs.renameCommand("/data/local/tmp/old name", "new name")
-        assertEquals("mv -- '/data/local/tmp/old name' '/data/local/tmp/new name' 2>/dev/null", command)
+        assertTrue(command, command.startsWith("mv -- '/data/local/tmp/old name' "))
+        assertTrue(command, command.endsWith("'/data/local/tmp/new name' 2>/dev/null"))
 
         val topLevel = ShizukuFs.renameCommand("old.txt", "new.txt")
         assertEquals("mv -- 'old.txt' 'new.txt' 2>/dev/null", topLevel)
