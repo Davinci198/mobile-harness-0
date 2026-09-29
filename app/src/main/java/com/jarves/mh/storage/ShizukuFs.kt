@@ -1,0 +1,93 @@
+package com.jarves.mh.storage
+
+/**
+ * Builds the shell commands the Shizuku backend runs, and parses what comes back.
+ *
+ * Split out from the backend so the quoting and the parsing can be unit-tested without a
+ * device: quoting is where a file manager is easiest to get wrong, because a file name is
+ * attacker-controlled input that ends up in a command line.
+ */
+object ShizukuFs {
+    /**
+     * Wraps a path for `sh -c`. Single quotes suppress every expansion, and an embedded
+     * quote is closed, escaped and reopened — the only sequence that cannot break out.
+     */
+    fun quote(path: String): String = "'" + path.replace("'", "'\\''") + "'"
+
+    /**
+     * One line per entry, emitting `mode|size|mtime|name`. The name comes last so a file
+     * whose name contains the delimiter still parses: only the first three fields split.
+     */
+    fun listCommand(directory: String): String {
+        val here = quote(directory)
+        return """
+            cd $here 2>/dev/null || exit 4
+            for f in * .[!.]*; do
+              [ -e "${'$'}f" ] || continue
+              stat -c '%f|%s|%Y|%n' "${'$'}f" 2>/dev/null || true
+            done
+        """.trimIndent()
+    }
+
+    fun statCommand(path: String): String =
+        "stat -c '%f|%s|%Y|%n' $(quote(path)) 2>/dev/null || true"
+
+    /**
+     * `cat` with a byte cap, so a huge or endless file cannot pin the pipe open. The cap
+     * is enforced by the reader too, but stopping early here also frees the process.
+     */
+    fun readTextCommand(path: String, maxBytes: Long): String =
+        "head -c ${maxBytes.coerceAtLeast(0L)} $(quote(path)) 2>/dev/null"
+
+    fun writeTextCommand(path: String, base64: String): String =
+        "printf '%s' $(quote(base64)) | base64 -d > $(quote(path))"
+
+    fun appendTextCommand(path: String, base64: String): String =
+        "printf '%s' $(quote(base64)) | base64 -d >> $(quote(path))"
+
+    fun deleteCommand(path: String, recursive: Boolean): String =
+        "rm -rf -- $(quote(path)) 2>/dev/null || rm -f -- $(quote(path)) 2>/dev/null"
+
+    fun renameCommand(path: String, newName: String): String {
+        val from = quote(path)
+        val parent = quote(path.substringBeforeLast('/', ""))
+        val to = quote(if (path.contains('/')) "$parent/$newName" else newName)
+        return "mv -- $from $to 2>/dev/null"
+    }
+
+    fun createDirectoryCommand(path: String): String = "mkdir -p -- $(quote(path)) 2>/dev/null"
+
+    fun joinPath(base: String, child: String): String {
+        val left = base.trimEnd('/')
+        val right = child.trimStart('/')
+        return if (left.isEmpty()) "/$right" else "$left/$right"
+    }
+
+    /** Parses one `stat -c '%f|%s|%Y|%n'` line, or null when it is not one. */
+    fun parseStatLine(line: String): FsEntry? {
+        val parts = line.trim().split('|', limit = 4)
+        if (parts.size < 4) return null
+        val mode = parts[0].trim()
+        val size = parts[1].trim().toLongOrNull() ?: return null
+        val mtime = parts[2].trim().toLongOrNull() ?: 0L
+        val name = parts[3]
+        if (name.isEmpty()) return null
+        val isDirectory = mode.startsWith("4")
+        return FsEntry(
+            name = name,
+            relativePath = name,
+            isDirectory = isDirectory,
+            sizeBytes = if (isDirectory) 0L else size,
+            lastModifiedMillis = if (mtime <= 0L) 0L else mtime * 1000L,
+            readable = mode.startsWith("4") || (mode.length > 3 && mode[3] != '-'),
+        )
+    }
+
+    fun parseListing(output: String): List<FsEntry> = output.lineSequence()
+        .mapNotNull { parseStatLine(it) }
+        // Directories first, then case-insensitive by name, the same order the local
+        // backend uses so the two do not disagree on screen.
+        .sortedWith(compareByDescending<FsEntry> { it.isDirectory }.thenBy { it.name.lowercase() })
+        .take(FsLimits.MAX_LISTED_ENTRIES)
+        .toList()
+}
