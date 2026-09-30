@@ -921,7 +921,7 @@ private fun BottomBar(
                 modifier = Modifier.weight(1f).padding(start = 6.dp),
             )
             BarAction(Icons.Default.SelectAll, stringResource(R.string.files_select_all), onSelectAll)
-            BarAction(Icons.AutoMirrored.Filled.ContentCopy, stringResource(R.string.files_copy), onCopy)
+            BarAction(Icons.AutoMirrored.Filled.ContentCopy, stringResource(R.string.files_copy_action), onCopy)
             BarAction(Icons.Default.ContentCut, stringResource(R.string.files_cut), onCut)
             BarAction(Icons.Default.ContentPaste, stringResource(R.string.files_paste), onPaste)
             BarAction(Icons.Default.Archive, stringResource(R.string.files_archive), onArchive)
