@@ -30,9 +30,31 @@ class FsCategoriesTest {
     @Test
     fun theDeviceRootLeadsWithTheSystemLayout() {
         val paths = FsCategories.definitionsFor(DeviceRoot.Shizuku("t", "/")).map { it.second }
-        assertEquals("system", paths.first())
-        assertTrue(paths.contains("data"))
-        assertTrue(paths.contains("Download"))
+        assertEquals("data", paths.first())
+        assertTrue(paths.contains("storage"))
+        assertTrue(paths.contains("sdcard/Download"))
+    }
+
+    @Test
+    fun sharedStorageIsReachedThroughTheMountNotTheFilesystemRoot() {
+        // The device root starts at /, where there is no DCIM: shared storage hangs off
+        // /sdcard. Written as bare "DCIM" every one of these tiles is read as missing and
+        // dropped from the grid, which is how six of the twelve tiles vanished.
+        val paths = FsCategories.definitionsFor(DeviceRoot.Shizuku("t", "/")).map { it.second }
+        assertEquals(
+            listOf("sdcard/Download", "sdcard/DCIM", "sdcard/Music", "sdcard/Movies", "sdcard/Documents", "sdcard/Android"),
+            paths.filter { it.startsWith("sdcard/") },
+        )
+    }
+
+    @Test
+    fun theWriteOncePartitionsAreNotOffered() {
+        // A write to /system, /vendor or /product does not come back, so those tiles are
+        // not shown at all. /data and /storage stay: they hold the app data and the mount.
+        val paths = FsCategories.definitionsFor(DeviceRoot.Shizuku("t", "/")).map { it.second }
+        assertEquals(setOf("system", "vendor", "product"), FsCategories.HIDDEN_DEVICE_PATHS)
+        assertTrue(paths.none { it in FsCategories.HIDDEN_DEVICE_PATHS })
+        assertTrue(paths.containsAll(listOf("data", "storage", "sdcard")))
     }
 
     @Test
