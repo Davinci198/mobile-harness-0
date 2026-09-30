@@ -6,6 +6,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -208,22 +210,52 @@ fun FilesScreen(
                     IconButton(onClick = { searchOpen = !searchOpen }) {
                         Icon(Icons.Default.Search, stringResource(R.string.files_search))
                     }
-                    IconButton(onClick = { onSetView(if (view == FsViewMode.LIST) FsViewMode.GRID else FsViewMode.LIST) }) {
-                        Icon(
-                            imageVector = if (view == FsViewMode.LIST) Icons.Default.GridView else Icons.Default.ViewList,
-                            contentDescription = stringResource(R.string.files_view_toggle),
+                    // Segmented, the way the reference puts it: two round buttons where
+                    // the active one is a white disc, so the mode is obvious at a glance.
+                    Row(
+                        Modifier
+                            .padding(horizontal = 4.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(2.dp),
+                    ) {
+                        ViewModeButton(
+                            icon = Icons.Default.GridView,
+                            active = view == FsViewMode.GRID,
+                            label = stringResource(R.string.files_view_grid),
+                            onClick = { onSetView(FsViewMode.GRID) },
+                        )
+                        ViewModeButton(
+                            icon = Icons.Default.ViewList,
+                            active = view == FsViewMode.LIST,
+                            label = stringResource(R.string.files_view_list),
+                            onClick = { onSetView(FsViewMode.LIST) },
                         )
                     }
                     Box {
-                        IconButton(onClick = { sortMenu = true }) {
-                            Icon(Icons.Default.Sort, stringResource(R.string.files_sort))
+                        TextButton(onClick = { sortMenu = true }) {
+                            Text(
+                                stringResource(R.string.files_sort_label, stringResource(sortLabel(sort))),
+                                fontSize = 13.sp,
+                            )
+                            Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
                         }
                         DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                             FsSort.entries.forEach { option ->
                                 DropdownMenuItem(
-                                    text = { Text(stringResource(sortLabel(option)), fontSize = 13.sp) },
+                                    text = {
+                                        Text(
+                                            stringResource(sortLabel(option)) +
+                                                if (option == sort) {
+                                                    if (sortAscending) " ↑" else " ↓"
+                                                } else {
+                                                    ""
+                                                },
+                                            fontSize = 13.sp,
+                                        )
+                                    },
                                     onClick = {
-                                        // Picking the field already in use flips its direction.
+                                        // Picking the one already in use flips its direction.
                                         val ascending = if (option == sort) !sortAscending else true
                                         onSetSort(option, ascending)
                                         sortMenu = false
@@ -341,10 +373,35 @@ private sealed interface FsDialog {
     data class Delete(val entry: FsEntry) : FsDialog
 }
 
+@Composable
+private fun ViewModeButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    active: Boolean,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (active) Color.White else Color.Transparent)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            modifier = Modifier.size(16.dp),
+            tint = if (active) Color.Black else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 private fun sortLabel(sort: FsSort): Int = when (sort) {
     FsSort.NAME -> R.string.files_sort_name
     FsSort.DATE -> R.string.files_sort_date
     FsSort.SIZE -> R.string.files_sort_size
+    FsSort.TYPE -> R.string.files_sort_type
 }
 
 @Composable
@@ -354,6 +411,7 @@ private fun SearchField(query: String, searching: Boolean, onQueryChange: (Strin
             value = query,
             onValueChange = onQueryChange,
             singleLine = true,
+            shape = RoundedCornerShape(50),
             leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
             trailingIcon = {
                 if (query.isNotEmpty()) {
@@ -595,9 +653,9 @@ private fun categoryIcon(kind: FsCategoryKind): ImageVector = when (kind) {
 }
 
 /**
- * The listing as a card: a header row naming the columns, then one line per entry with a
- * coloured badge. It reads as a table of files rather than as a settings list, which is
- * what a file manager is.
+ * The listing as a card: a header row naming the four columns, one line per entry, and a
+ * strip underneath saying what is loaded and what is selected. The columns are laid out
+ * the same way the reference lays them out, so the eye runs down one column at a time.
  */
 @Composable
 private fun FileTable(
@@ -610,19 +668,19 @@ private fun FileTable(
     val selected = selectedPath ?: ""
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         item(key = "header") {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     stringResource(R.string.files_col_name),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
@@ -630,6 +688,15 @@ private fun FileTable(
                     stringResource(R.string.files_col_date),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.files_col_type),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -642,12 +709,29 @@ private fun FileTable(
                 onSelect = { onSelect(entry) },
             )
         }
+        item(key = "status") {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.files_status, entries.size, selected.count { it }),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileRow(entry: FsEntry, selected: Boolean, onOpen: () -> Unit, onSelect: () -> Unit) {
+    val type = FsFileTypes.of(entry)
     Row(
         Modifier
             .fillMaxWidth()
@@ -658,31 +742,57 @@ private fun FileRow(entry: FsEntry, selected: Boolean, onOpen: () -> Unit, onSel
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TypeBadge(FsFileTypes.of(entry))
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
+        // The name cell holds the badge and the name and nothing else: the size and the
+        // date get columns of their own, so a long name never pushes the numbers around.
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            TypeBadge(type)
+            Spacer(Modifier.width(12.dp))
             Text(
                 entry.name,
                 fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onBackground,
             )
-            // The size belongs under the name on a narrow screen; the date sits on the
-            // right, so the eye runs down a column instead of across a row.
-            if (!entry.isDirectory) {
-                Text(formatFileSize(entry.sizeBytes), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
         }
-        if (entry.lastModifiedMillis > 0L) {
-            Text(
-                formatEntryDate(entry.lastModifiedMillis),
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
+        Text(
+            if (entry.lastModifiedMillis > 0L) formatEntryDate(entry.lastModifiedMillis) else "",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+        Spacer(Modifier.width(8.dp))
+        TypePill(type)
     }
+}
+
+/** The type, as a word, in a rounded pill: "Imagine", "PDF", "Arhivă". */
+@Composable
+private fun TypePill(type: FsFileType) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Text(
+            stringResource(typeLabel(type)),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+    }
+}
+
+private fun typeLabel(type: FsFileType): Int = when (type) {
+    FsFileType.FOLDER -> R.string.files_type_folder
+    FsFileType.IMAGE -> R.string.files_type_image
+    FsFileType.VIDEO -> R.string.files_type_video
+    FsFileType.AUDIO -> R.string.files_type_audio
+    FsFileType.PDF -> R.string.files_type_pdf
+    FsFileType.APK -> R.string.files_type_apk
+    FsFileType.ARCHIVE -> R.string.files_type_archive
+    FsFileType.DOC -> R.string.files_type_doc
+    FsFileType.OTHER -> R.string.files_type_other
 }
 
 /**

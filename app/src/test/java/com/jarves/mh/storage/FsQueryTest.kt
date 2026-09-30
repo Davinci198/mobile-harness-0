@@ -48,6 +48,29 @@ class FsQueryTest {
     }
 
     @Test
+    fun sortingByTypeGroupsTheSameKindTogether() {
+        val listing = listOf(
+            entry("notes.pdf"),
+            entry("a.txt"),
+            entry("photo.jpg"),
+            entry("b.md"),
+        )
+
+        val types = FsQuery.sort(listing, FsSort.TYPE).map { FsFileTypes.ofName(it.name) }
+
+        assertEquals(
+            listOf(FsFileType.DOC, FsFileType.DOC, FsFileType.PDF, FsFileType.IMAGE),
+            types,
+        )
+    }
+
+    @Test
+    fun sortingByTypeStillKeepsDirectoriesFirst() {
+        val listing = listOf(entry("clip.mp4"), entry("Pictures", dir = true), entry("a.txt"))
+        assertEquals(true, FsQuery.sort(listing, FsSort.TYPE).first().isDirectory)
+    }
+
+    @Test
     fun searchIsCaseInsensitiveAndMatchesAnywhere() {
         assertTrue(FsQuery.matches("Download", "down"))
         assertTrue(FsQuery.matches("pr9-full.txt", "FULL"))
