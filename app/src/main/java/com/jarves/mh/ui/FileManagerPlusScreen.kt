@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.AlertDialog
@@ -255,10 +256,15 @@ fun FileManagerPlusScreen(
                             onSetView(FsViewMode.LIST)
                         }
                     }
+                    // The sort field lives on the button rather than in its label: spelled
+                    // out, "Sortează: Nume" leaves the title no room and it gets cut to
+                    // "File...". The menu still names the field.
                     Box {
-                        TextButton(onClick = { sortMenu = true }) {
-                            Text(stringResource(R.string.files_sort_label, stringResource(sortLabel(sort))), fontSize = 13.sp)
-                            Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
+                        IconButton(onClick = { sortMenu = true }) {
+                            Icon(
+                                Icons.Default.Sort,
+                                stringResource(R.string.files_sort_label, stringResource(sortLabel(sort))),
+                            )
                         }
                         DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                             FsSort.entries.forEach { option ->
