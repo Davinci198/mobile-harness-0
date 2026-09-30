@@ -83,6 +83,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -178,6 +180,36 @@ data class AppUiState(
         running = false,
         granted = false,
     ),
+    val fsRoots: List<com.jarves.mh.storage.DeviceRoot> = emptyList(),
+    val fsUnavailable: List<com.jarves.mh.storage.FsError> = emptyList(),
+    val fsRoot: com.jarves.mh.storage.DeviceRoot? = null,
+    val fsPath: String = "",
+    val fsCategories: List<com.jarves.mh.storage.FsCategory> = emptyList(),
+    val fsEntries: List<com.jarves.mh.storage.FsEntry> = emptyList(),
+    val fsLoading: Boolean = false,
+    val fsError: com.jarves.mh.storage.FsError? = null,
+    val fsOpenName: String? = null,
+    val fsOpenContent: String? = null,
+    val fsOpenLoading: Boolean = false,
+    val fsView: com.jarves.mh.storage.FsViewMode = com.jarves.mh.storage.FsViewMode.LIST,
+    val fsSort: com.jarves.mh.storage.FsSort = com.jarves.mh.storage.FsSort.NAME,
+    val fsSortAscending: Boolean = true,
+    val fsQuery: String = "",
+    val fsSearchResults: List<com.jarves.mh.storage.FsEntry> = emptyList(),
+    val fsSearching: Boolean = false,
+    val fsSelectedPath: String? = null,
+    /** Free and total bytes of the volume behind the active root, or -1 when unknown. */
+    val fsStorageFree: Long = -1L,
+    val fsStorageTotal: Long = -1L,
+    /** Every entry the user has picked, as root-relative paths. */
+    val fsSelection: Set<String> = emptySet(),
+    val fsClipboard: com.jarves.mh.storage.FsClipboard = com.jarves.mh.storage.FsClipboard(),
+    /** The entry shown in the side panel, or null when the panel is closed. */
+    val fsPreviewPath: String? = null,
+    /** The fullscreen image being looked at, and where it sits in the listing. */
+    val fsLightboxPath: String? = null,
+    /** One line of feedback, the way the reference keeps it under the listing. */
+    val fsStatus: String = "",
     val apiPingStatus: ApiPingStatus = ApiPingStatus.IDLE,
     val apiPingMessage: String? = null,
     val projects: List<Project> = emptyList(),
@@ -290,6 +322,15 @@ data class AppUiState(
     val appUpdateError: String? = null,
 )
 
+/** How many folders in a listing get their item count filled in. */
+private const val MAX_COUNTED_FOLDERS = 40
+
+/** How deep an archive follows a folder, so a whole disk cannot be pulled in. */
+private const val MAX_ARCHIVE_DEPTH = 6
+
+/** A single file may not be bigger than this inside an archive. */
+private val perFileCap: Long = com.jarves.mh.storage.FsLimits.MAX_ARCHIVE_BYTES / 2
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun s(id: Int, vararg args: Any?): String = getApplication<Application>().getString(id, *args)
 
@@ -304,6 +345,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     private val dshRuntime = DshRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val installer = RuntimeInstaller(application)
+    private val fsFactory = com.jarves.mh.storage.DeviceFsFactory(application)
     private val changeHistory = ProjectAgentChangeHistory(application.filesDir)
     private val openCodeRuntime = OpenCodeRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
     private val hermesRuntime = HermesRuntimeBridge(application) { profile -> vault.get(profile.kind.name) }
@@ -393,6 +435,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         syncShizukuBridge()
+        refreshFileRoots()
         // GitHub's official CLI owns its OAuth credential. Remove credentials from
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
@@ -1059,6 +1102,650 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             installer = installer,
             shouldRun = current.accessLevel == com.jarves.mh.tools.AccessLevel.DEBUGGER && current.shizuku.usable,
         )
+    }
+
+    /**
+     * The device file browser. The root decides which backend serves it, so the same
+     * screen walks the sandbox, a granted folder, shared storage or the Shizuku shell
+     * without the UI knowing the difference.
+     */
+    fun refreshFileRoots() {
+        val trees = readSafTrees()
+        val roots = fsFactory.availableRoots(trees)
+        _state.update {
+            it.copy(
+                fsRoots = roots,
+                fsUnavailable = fsFactory.unavailableRoots(trees),
+                fsRoot = it.fsRoot?.takeIf { root -> roots.any { existing -> existing.label == root.label } } ?: roots.firstOrNull(),
+            )
+        }
+        _state.value.fsRoot?.let { openFileRoot(it) }
+    }
+
+    fun openFileRoot(root: com.jarves.mh.storage.DeviceRoot) {
+        _state.update {
+            it.copy(
+                fsRoot = root,
+                fsPath = "",
+                fsEntries = emptyList(),
+                fsError = null,
+                fsStorageFree = -1L,
+                fsStorageTotal = -1L,
+            )
+        }
+        readStorageUsage()
+        loadDirectory("")
+    }
+
+    /**
+     * What is left on the volume behind the active root, the way a file manager puts it
+     * under the storage tile. Reading it is a single statfs call, unlike a directory walk.
+     */
+    private fun readStorageUsage() {
+        val root = _state.value.fsRoot ?: return
+        if (root !is com.jarves.mh.storage.DeviceRoot.AllFiles && root !is com.jarves.mh.storage.DeviceRoot.Shizuku) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val path = android.os.Environment.getDataDirectory().path
+            val usage = runCatching {
+                val stat = android.os.StatFs(path)
+                stat.availableBytes to stat.totalBytes
+            }.getOrNull() ?: return@launch
+            _state.update { it.copy(fsStorageFree = usage.first, fsStorageTotal = usage.second) }
+        }
+    }
+
+    fun navigateFiles(path: String) {
+        _state.update { it.copy(fsPath = path, fsError = null) }
+        loadDirectory(path)
+    }
+
+    fun goUpFiles() {
+        com.jarves.mh.storage.FsPaths.parentOf(_state.value.fsPath)?.let { navigateFiles(it) }
+    }
+
+    /** Opens a directory or loads a text preview, depending on the entry. */
+    fun openFileEntry(entry: com.jarves.mh.storage.FsEntry) {
+        if (entry.isDirectory) {
+            navigateFiles(com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name))
+            return
+        }
+        val root = _state.value.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        _state.update { it.copy(fsOpenName = entry.name, fsOpenContent = null, fsOpenLoading = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val result = backend.readText(path)) {
+                is com.jarves.mh.storage.FsResult.Ok ->
+                    _state.update { it.copy(fsOpenContent = result.value, fsOpenLoading = false) }
+                is com.jarves.mh.storage.FsResult.Err ->
+                    _state.update { it.copy(fsOpenName = null, fsOpenLoading = false, fsError = result.error) }
+            }
+        }
+    }
+
+    fun closeOpenFile() {
+        _state.update { it.copy(fsOpenName = null, fsOpenContent = null, fsOpenLoading = false) }
+    }
+
+    fun createFilesDirectory(name: String) {
+        val root = _state.value.fsRoot ?: return
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, name)
+        mutateThenReload("Could not create the folder") { it.createDirectory(path) }
+    }
+
+    fun renameFileEntry(entry: com.jarves.mh.storage.FsEntry, newName: String) {
+        val root = _state.value.fsRoot ?: return
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        mutateThenReload("Rename failed") { it.rename(path, newName) }
+    }
+
+    fun deleteFileEntry(entry: com.jarves.mh.storage.FsEntry) {
+        val root = _state.value.fsRoot ?: return
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        mutateThenReload("Could not delete") { it.delete(path, recursive = entry.isDirectory) }
+    }
+
+    /**
+     * Stores a folder the user picked. The permission grant is persisted so the tree keeps
+     * working after a reboot; without it the URI is useless, so both are dropped together.
+     */
+    fun addSafTree(uri: android.net.Uri) {        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { getApplication<Application>().contentResolver.takePersistableUriPermission(uri, flags) }
+        val trees = readSafTrees().toMutableList()
+        val entry = uri.toString() to prettifyTreeLabel(uri)
+        if (entry !in trees) trees += entry
+        preferences.safTrees = org.json.JSONArray().apply { trees.forEach { put(JSONObject().put("uri", it.first).put("label", it.second)) } }.toString()
+        refreshFileRoots()
+    }
+
+    fun removeSafTree(treeUri: String) {
+        runCatching { getApplication<Application>().contentResolver.releasePersistableUriPermission(android.net.Uri.parse(treeUri), android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+        val trees = readSafTrees().filterNot { it.first == treeUri }
+        preferences.safTrees = org.json.JSONArray().apply { trees.forEach { put(JSONObject().put("uri", it.first).put("label", it.second)) } }.toString()
+        refreshFileRoots()
+    }
+
+    /**
+     * Turns a tree URI into something a person recognises. The document id is
+     * `primary:Download/Foo` in its encoded form, which is noise on a chip.
+     */
+    private fun prettifyTreeLabel(uri: android.net.Uri): String {
+        val documentId = runCatching { android.provider.DocumentsContract.getTreeDocumentId(uri) }.getOrNull()
+        val decoded = documentId?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull() }
+        val tail = decoded?.substringAfterLast('/')?.ifBlank { null }
+            ?: decoded?.substringAfter(':')?.ifBlank { null }
+        return tail ?: documentId ?: uri.toString()
+    }
+
+    private fun readSafTrees(): List<Pair<String, String>> = runCatching {
+        val array = org.json.JSONArray(preferences.safTrees)
+        (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            val uri = item.optString("uri").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            // The name is derived from the URI every time rather than trusted from
+            // storage, so a tree granted before the label was prettified still shows a
+            // name instead of its encoded document id.
+            uri to prettifyTreeLabel(android.net.Uri.parse(uri))
+        }
+    }.getOrDefault(emptyList())
+
+    private fun loadDirectory(path: String) {
+        val root = _state.value.fsRoot ?: return
+        val backend = fsFactory.open(root)
+        if (backend == null) {
+            _state.update {
+                it.copy(
+                    fsEntries = emptyList(),
+                    fsCategories = emptyList(),
+                    fsError = com.jarves.mh.storage.FsError(
+                        com.jarves.mh.storage.FsErrorKind.NO_ACCESS,
+                        s(R.string.files_error_root_unavailable),
+                    ),
+                )
+            }
+            return
+        }
+        // At the root of a root the screen shows category tiles instead of a flat list, so
+        // the count per tile is what has to be worked out.
+        if (path.isEmpty()) {
+            loadCategories(backend, root)
+            return
+        }
+        val sort = _state.value.fsSort
+        val ascending = _state.value.fsSortAscending
+        _state.update {
+            it.copy(
+                fsLoading = true,
+                fsError = null,
+                fsCategories = emptyList(),
+                fsSelectedPath = null,
+                fsQuery = "",
+                fsSearchResults = emptyList(),
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val result = backend.list(path)) {
+                is com.jarves.mh.storage.FsResult.Ok -> {
+                    _state.update {
+                        it.copy(
+                            fsEntries = com.jarves.mh.storage.FsQuery.sort(result.value, sort, ascending),
+                            fsLoading = false,
+                            fsError = null,
+                        )
+                    }
+                    fillChildCounts(backend, path)
+                }
+                is com.jarves.mh.storage.FsResult.Err ->
+                    _state.update { it.copy(fsEntries = emptyList(), fsLoading = false, fsError = result.error) }
+            }
+        }
+    }
+
+    /**
+     * Counts what lives in each category. A category that cannot be read is dropped rather
+     * than shown as empty, so the grid never advertises a folder that is not there; an
+     * empty one is still shown, because "nothing here" is information too.
+     */
+    private fun loadCategories(backend: com.jarves.mh.storage.DeviceFs, root: com.jarves.mh.storage.DeviceRoot) {
+        val definitions = com.jarves.mh.storage.FsCategories.definitionsFor(root)
+        // The tiles go up first with no counts and each count lands as it arrives: on the
+        // device root a dozen shell round trips would otherwise leave the screen empty.
+        _state.update {
+            it.copy(
+                fsLoading = false,
+                fsError = null,
+                fsEntries = emptyList(),
+                fsCategories = definitions.map { (kind, path) ->
+                    com.jarves.mh.storage.FsCategory(
+                        kind = kind,
+                        label = categoryLabel(kind),
+                        path = path,
+                        count = -1,
+                    )
+                },
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            coroutineScope {
+                // One call for every category. Backends that answer in-process do the
+                // work in a loop; the shell backend turns the whole set into one command,
+                // which is the difference between waiting once and waiting a dozen times.
+                val listings = backend.listMany(definitions.map { it.second })
+                definitions.mapIndexed { position, definition -> definition to listings[position] }
+                    .forEach { (definition, listing) ->
+                    val (kind, path) = definition
+                    val tally = when (listing) {
+                        is com.jarves.mh.storage.FsResult.Ok -> listing.value.size to listing.value
+                            .filterNot { it.isDirectory }
+                            .sumOf { it.sizeBytes }
+
+                        is com.jarves.mh.storage.FsResult.Err -> -1 to -1L
+                    }
+                    val (count, bytes) = tally
+                    if (count < 0) {
+                        // Not there, or not readable: drop the tile rather than lie.
+                        _state.update { current ->
+                            current.copy(fsCategories = current.fsCategories.filterNot { it.kind == kind && it.path == path })
+                        }
+                    } else {
+                        _state.update { current ->
+                            current.copy(
+                                fsCategories = current.fsCategories.map { category ->
+                                    if (category.kind == kind && category.path == path) {
+                                        category.copy(count = count, bytes = bytes)
+                                    } else {
+                                        category
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Fills in how much sits inside each folder, which is what a file manager writes under
+     * the name. It is a listing per folder, so it runs after the folder itself is on screen
+     * and stops at a cap: on the Shizuku root a full pass would be dozens of shell round
+     * trips, which is worse than the number is worth.
+     */
+    private fun fillChildCounts(backend: com.jarves.mh.storage.DeviceFs, path: String) {
+        val folders = _state.value.fsEntries.filter { it.isDirectory && it.childCount < 0 }
+            .take(MAX_COUNTED_FOLDERS)
+        if (folders.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val paths = folders.map { com.jarves.mh.storage.FsPaths.join(path, it.name) }
+            val listings = backend.listMany(paths)
+            val counts = paths.indices.map { position ->
+                folders[position].name to listings[position].valueOrNull()?.size
+            }
+            _state.update { current ->
+                current.copy(
+                    fsEntries = current.fsEntries.map { entry ->
+                        val found = counts.firstOrNull { it.first == entry.name }?.second
+                        if (found != null && entry.childCount < 0) entry.copy(childCount = found) else entry
+                    },
+                )
+            }
+        }
+    }
+
+    // ---- selection, clipboard, archive, preview -------------------------------
+
+    private fun selectedEntries(): List<com.jarves.mh.storage.FsEntry> {
+        val state = _state.value
+        return state.fsEntries.filter { com.jarves.mh.storage.FsPaths.join(state.fsPath, it.name) in state.fsSelection }
+    }
+
+    fun toggleSelection(entry: com.jarves.mh.storage.FsEntry) {
+        val relative = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        _state.update { current ->
+            val next = current.fsSelection.toMutableSet()
+            if (!next.add(relative)) next.remove(relative)
+            current.copy(fsSelection = next, fsStatus = listingStatus(next.size))
+        }
+    }
+
+    fun selectAllEntries() {
+        val state = _state.value
+        val all = state.fsEntries.map { com.jarves.mh.storage.FsPaths.join(state.fsPath, it.name) }.toSet()
+        _state.update { it.copy(fsSelection = all, fsStatus = listingStatus(all.size)) }
+    }
+
+    fun clearSelection() {
+        _state.update { it.copy(fsSelection = emptySet(), fsStatus = "") }
+    }
+
+    private fun listingStatus(selected: Int): String =
+        "${_state.value.fsEntries.size} elemente • $selected selectate"
+
+    fun stageClipboard(operation: com.jarves.mh.storage.FsClipboardOperation) {
+        val items = _state.value.fsSelection.toList()
+        if (items.isEmpty()) return
+        val board = com.jarves.mh.storage.FsClipboardRules.put(items, operation)
+        _state.update { it.copy(fsClipboard = board, fsStatus = clipboardStatus(board)) }
+    }
+
+    private fun clipboardStatus(board: com.jarves.mh.storage.FsClipboard): String {
+        val verb = if (board.operation == com.jarves.mh.storage.FsClipboardOperation.CUT) "Mutare" else "Copiere"
+        return "${board.items.size} în clipboard • $verb"
+    }
+
+    /**
+     * Pastes the staged paths into [path]. A cut only removes the original once the copy
+     * has landed, so a failure halfway leaves the files where they were rather than
+     * deleting them on the way out.
+     */
+    fun pasteInto(path: String) {
+        val state = _state.value
+        val board = state.fsClipboard
+        if (board.isEmpty) return
+        val targets = com.jarves.mh.storage.FsClipboardRules.pasteInto(board, path, "") ?: run {
+            _state.update { it.copy(fsStatus = "Nu se poate lipi aici") }
+            return
+        }
+        val root = state.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            var moved = 0
+            targets.forEach { target ->
+                val wanted = com.jarves.mh.storage.FsPaths.nameOf(target)
+                val source = board.items.firstOrNull { com.jarves.mh.storage.FsPaths.nameOf(it) == wanted } ?: return@forEach
+                when (val copied = backend.copy(source, target)) {
+                    is com.jarves.mh.storage.FsResult.Ok -> {
+                        moved++
+                        if (board.operation == com.jarves.mh.storage.FsClipboardOperation.CUT) {
+                            backend.delete(source, recursive = true)
+                        }
+                    }
+
+                    is com.jarves.mh.storage.FsResult.Err -> {
+                        _state.update { it.copy(fsStatus = copied.error.message) }
+                        return@forEach
+                    }
+                }
+            }
+            _state.update {
+                it.copy(
+                    fsClipboard = com.jarves.mh.storage.FsClipboard(),
+                    fsSelection = emptySet(),
+                    fsStatus = "$moved transferuri",
+                )
+            }
+            loadDirectory(path)
+        }
+    }
+
+    /**
+     * Zips the selection into one file.
+     *
+     * The archive is built in memory and written in a single call, because that is the
+     * most any backend can promise: a command pipe cannot be appended to and a SAF
+     * document cannot be streamed. That caps the size, which the cap states out loud
+     * rather than failing halfway.
+     */
+    fun archiveSelection() {
+        val state = _state.value
+        val picked = selectedEntries()
+        if (picked.isEmpty()) return
+        val root = state.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val files = mutableListOf<com.jarves.mh.storage.FsEntry>()
+            var refused = false
+
+            suspend fun walk(relative: String, depth: Int) {
+                if (depth > MAX_ARCHIVE_DEPTH || files.size >= com.jarves.mh.storage.FsLimits.MAX_ARCHIVE_ENTRIES) return
+                val listing = backend.list(relative).valueOrNull() ?: return
+                listing.forEach { entry ->
+                    if (entry.isDirectory) {
+                        walk(com.jarves.mh.storage.FsPaths.join(relative, entry.name), depth + 1)
+                    } else {
+                        if (entry.sizeBytes > perFileCap) refused = true else files += entry
+                    }
+                }
+            }
+
+            picked.forEach { entry ->
+                if (entry.isDirectory) {
+                    walk(com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name), 1)
+                } else {
+                    if (entry.sizeBytes > perFileCap) refused = true else files += entry
+                }
+            }
+            if (refused || files.isEmpty()) {
+                _state.update { it.copy(fsStatus = "Conținut prea mare pentru o arhivă") }
+                return@launch
+            }
+            val bytes = runCatching {
+                val sink = java.io.ByteArrayOutputStream()
+                java.util.zip.ZipOutputStream(sink).use { zipped ->
+                    files.forEach { entry ->
+                        val full = com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)
+                        val data = backend.readBytes(full, perFileCap).valueOrNull() ?: return@forEach
+                        zipped.putNextEntry(java.util.zip.ZipEntry(entry.name))
+                        zipped.write(data)
+                        zipped.closeEntry()
+                    }
+                }
+                sink.toByteArray()
+            }.getOrElse {
+                _state.update { it.copy(fsStatus = "Arhiva nu a putut fi construită") }
+                return@launch
+            }
+            val name = com.jarves.mh.storage.FsArchive.uniqueName(state.fsEntries.map { it.name }.toSet())
+            val target = com.jarves.mh.storage.FsPaths.join(state.fsPath, name)
+            when (val written = backend.writeBytes(target, bytes)) {
+                is com.jarves.mh.storage.FsResult.Ok -> {
+                    _state.update { it.copy(fsSelection = emptySet(), fsStatus = "$name · ${files.size} fișiere") }
+                    loadDirectory(state.fsPath)
+                }
+
+                is com.jarves.mh.storage.FsResult.Err -> _state.update { it.copy(fsStatus = written.error.message) }
+            }
+        }
+    }
+
+    /** Unpacks a zip sitting in [path] into the folder it is in. */
+    fun extractHere(entry: com.jarves.mh.storage.FsEntry) {
+        if (com.jarves.mh.storage.FsFileTypes.of(entry) != com.jarves.mh.storage.FsFileType.ARCHIVE) return
+        val state = _state.value
+        val root = state.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val full = com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)
+            val bytes = when (val read = backend.readBytes(full, com.jarves.mh.storage.FsLimits.MAX_ARCHIVE_BYTES)) {
+                is com.jarves.mh.storage.FsResult.Err -> {
+                    _state.update { it.copy(fsStatus = read.error.message) }
+                    return@launch
+                }
+
+                is com.jarves.mh.storage.FsResult.Ok -> read.value
+            }
+            var written = 0
+            val refused = runCatching {
+                java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes)).use { zipped ->
+                    while (true) {
+                        val member = zipped.nextEntry ?: break
+                        val name = member.name
+                        // A zip is untrusted input: an entry that climbs out of the folder
+                        // is a way to write anywhere the app can.
+                        if (name.startsWith("/") || name.split('/').any { it == ".." }) return@runCatching false
+                        val bytes2 = zipped.readBytes()
+                        if (member.isDirectory) {
+                            backend.createDirectory(com.jarves.mh.storage.FsPaths.join(state.fsPath, name.trimEnd('/')))
+                        } else {
+                            backend.writeBytes(com.jarves.mh.storage.FsPaths.join(state.fsPath, name), bytes2)
+                            written++
+                        }
+                        zipped.closeEntry()
+                    }
+                }
+                true
+            }.getOrElse { false }
+            _state.update {
+                it.copy(fsStatus = if (refused) "Arhiva conține căi nepermise" else "$written fișiere extrase")
+            }
+            loadDirectory(state.fsPath)
+        }
+    }
+
+    fun togglePreview(entry: com.jarves.mh.storage.FsEntry?) {
+        val relative = entry?.let { com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, it.name) }
+        _state.update { it.copy(fsPreviewPath = if (it.fsPreviewPath == relative) null else relative) }
+    }
+
+    fun openLightbox() {
+        val state = _state.value
+        val current = state.fsPreviewPath ?: return
+        state.fsEntries
+            .firstOrNull { com.jarves.mh.storage.FsPaths.join(state.fsPath, it.name) == current }
+            ?.takeIf { com.jarves.mh.storage.FsFileTypes.of(it) == com.jarves.mh.storage.FsFileType.IMAGE }
+            ?.let { entry ->
+                _state.update { it.copy(fsLightboxPath = com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)) }
+            }
+    }
+
+    fun stepLightbox(delta: Int) {
+        val state = _state.value
+        val current = state.fsLightboxPath ?: return
+        val images = state.fsEntries.filter { com.jarves.mh.storage.FsFileTypes.of(it) == com.jarves.mh.storage.FsFileType.IMAGE }
+        if (images.isEmpty()) return
+        val index = images.indexOfFirst { com.jarves.mh.storage.FsPaths.join(state.fsPath, it.name) == current }
+        if (index < 0) return
+        val next = ((index + delta) % images.size + images.size) % images.size
+        _state.update { it.copy(fsLightboxPath = com.jarves.mh.storage.FsPaths.join(state.fsPath, images[next].name)) }
+    }
+
+    fun closeLightbox() {
+        _state.update { it.copy(fsLightboxPath = null) }
+    }
+
+    fun setFilesView(mode: com.jarves.mh.storage.FsViewMode) {
+        _state.update { it.copy(fsView = mode) }
+        resortEntries()
+    }
+
+    fun setFilesSort(sort: com.jarves.mh.storage.FsSort, ascending: Boolean) {
+        _state.update { it.copy(fsSort = sort, fsSortAscending = ascending) }
+        resortEntries()
+    }
+
+    private fun resortEntries() {
+        val current = _state.value
+        _state.update {
+            it.copy(
+                fsEntries = com.jarves.mh.storage.FsQuery.sort(it.fsEntries, current.fsSort, current.fsSortAscending),
+                fsSearchResults = com.jarves.mh.storage.FsQuery.sort(it.fsSearchResults, current.fsSort, current.fsSortAscending),
+            )
+        }
+    }
+
+    fun selectFileEntry(entry: com.jarves.mh.storage.FsEntry) {
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        _state.update { if (it.fsSelectedPath == path) it.copy(fsSelectedPath = null) else it.copy(fsSelectedPath = path) }
+    }
+
+    fun clearFileSelection() {
+        _state.update { it.copy(fsSelectedPath = null) }
+    }
+
+    /**
+     * Searches the current directory and a bounded number of levels below it. On a device
+     * root every level costs a shell round trip, so the depth and the directory count are
+     * capped and the results grow as they are found.
+     */
+    fun openSearchResult(entry: com.jarves.mh.storage.FsEntry) {
+        if (entry.isDirectory) {
+            // A hit already carries its full root-relative path, so it opens where it was found.
+            navigateFiles(entry.relativePath)
+            return
+        }
+        openFileEntry(entry.copy(relativePath = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)))
+    }
+
+    fun searchFiles(query: String) {
+        val root = _state.value.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        val basePath = _state.value.fsPath
+        _state.update { it.copy(fsQuery = query, fsSearchResults = emptyList(), fsSearching = query.isNotBlank()) }
+        if (query.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val found = mutableListOf<com.jarves.mh.storage.FsEntry>()
+            val visited = mutableSetOf<String>()
+            suspend fun walk(path: String, depth: Int) {
+                if (depth > com.jarves.mh.storage.FsQuery.SEARCH_MAX_DEPTH) return
+                if (visited.size >= com.jarves.mh.storage.FsQuery.SEARCH_MAX_DIRECTORIES) return
+                if (found.size >= com.jarves.mh.storage.FsQuery.SEARCH_MAX_RESULTS) return
+                visited += path
+                val listing = backend.list(path).valueOrNull() ?: return
+                listing.forEach { entry ->
+                    if (com.jarves.mh.storage.FsQuery.matches(entry.name, query)) {
+                        // Carrying the full root-relative path means tapping a hit can open
+                        // it, instead of guessing a path relative to the search's own base.
+                        found += entry.copy(relativePath = com.jarves.mh.storage.FsPaths.join(path, entry.name))
+                        if (found.size >= com.jarves.mh.storage.FsQuery.SEARCH_MAX_RESULTS) return
+                    }
+                }
+                listing.filter { it.isDirectory }.forEach { child ->
+                    walk(com.jarves.mh.storage.FsPaths.join(path, child.name), depth + 1)
+                }
+            }
+            walk(basePath, 0)
+            val current = _state.value
+            _state.update {
+                it.copy(
+                    fsSearchResults = com.jarves.mh.storage.FsQuery.sort(found, current.fsSort, current.fsSortAscending),
+                    fsSearching = false,
+                )
+            }
+        }
+    }
+
+    private fun categoryLabel(kind: com.jarves.mh.storage.FsCategoryKind): String = when (kind) {
+        com.jarves.mh.storage.FsCategoryKind.STORAGE -> s(R.string.files_cat_storage)
+        com.jarves.mh.storage.FsCategoryKind.DOWNLOADS -> s(R.string.files_cat_downloads)
+        com.jarves.mh.storage.FsCategoryKind.IMAGES -> s(R.string.files_cat_images)
+        com.jarves.mh.storage.FsCategoryKind.AUDIO -> s(R.string.files_cat_audio)
+        com.jarves.mh.storage.FsCategoryKind.VIDEO -> s(R.string.files_cat_video)
+        com.jarves.mh.storage.FsCategoryKind.DOCUMENTS -> s(R.string.files_cat_documents)
+        com.jarves.mh.storage.FsCategoryKind.APPS -> s(R.string.files_cat_apps)
+        com.jarves.mh.storage.FsCategoryKind.SYSTEM -> s(R.string.files_cat_system)
+        com.jarves.mh.storage.FsCategoryKind.DATA -> s(R.string.files_cat_data)
+        com.jarves.mh.storage.FsCategoryKind.VENDOR -> s(R.string.files_cat_vendor)
+        com.jarves.mh.storage.FsCategoryKind.PRODUCT -> s(R.string.files_cat_product)
+        com.jarves.mh.storage.FsCategoryKind.WORKSPACES -> s(R.string.files_cat_workspaces)
+        com.jarves.mh.storage.FsCategoryKind.CHATS -> s(R.string.files_cat_chats)
+        com.jarves.mh.storage.FsCategoryKind.RUNTIME -> s(R.string.files_cat_runtime)
+        com.jarves.mh.storage.FsCategoryKind.SETUP -> s(R.string.files_cat_setup)
+        com.jarves.mh.storage.FsCategoryKind.TERMINAL -> s(R.string.files_cat_terminal)
+        com.jarves.mh.storage.FsCategoryKind.OTHER -> s(R.string.files_cat_other)
+    }
+
+    private fun mutateThenReload(
+        failureMessage: String,
+        action: suspend (com.jarves.mh.storage.DeviceFs) -> com.jarves.mh.storage.FsResult<Unit>,
+    ) {
+        val root = _state.value.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val result = action(backend)) {
+                is com.jarves.mh.storage.FsResult.Ok -> Unit
+                is com.jarves.mh.storage.FsResult.Err -> _state.update {
+                    it.copy(
+                        fsError = com.jarves.mh.storage.FsError(
+                            com.jarves.mh.storage.FsErrorKind.FAILED,
+                            result.error.message.ifBlank { failureMessage },
+                            result.error.remedy,
+                        ),
+                    )
+                }
+            }
+            loadDirectory(_state.value.fsPath)
+        }
     }
 
     fun setAccessLevel(level: com.jarves.mh.tools.AccessLevel) {

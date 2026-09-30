@@ -95,6 +95,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -219,6 +220,7 @@ import com.jarves.mh.runtime.RuntimeExecutionService.Companion.ACTION_KEEPALIVE
 import com.jarves.mh.runtime.RuntimeExecutionService.Companion.EXTRA_PROJECT_NAME
 import com.jarves.mh.runtime.RuntimeInstaller
 import com.jarves.mh.runtime.RuntimeSetupService
+import com.jarves.mh.storage.FsRemedy
 import com.jarves.mh.runtime.StudioServerManager
 import com.jarves.mh.runtime.supportsArm64Runtime
 import com.jarves.mh.runtime.AntigravityAuthStatus
@@ -251,9 +253,10 @@ import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.ExtendedFloatingActionButton
 
-private enum class RootScreen(@StringRes val labelRes: Int, val icon: ImageVector) {
+internal enum class RootScreen(@StringRes val labelRes: Int, val icon: ImageVector) {
     PROJECTS(R.string.nav_projects, Icons.Default.Folder),
     AGENT(R.string.nav_agent, Icons.Default.SmartToy),
+    FILES(R.string.nav_files, Icons.Default.FolderOpen),
     SETTINGS(R.string.nav_settings, Icons.Default.Settings),
 }
 private enum class WorkspaceTab(@StringRes val labelRes: Int, val icon: ImageVector) {
@@ -2063,6 +2066,19 @@ private fun RootScreenHost(
 ) {
     var screen by rememberSaveable { mutableStateOf(RootScreen.PROJECTS) }
     var showQuickTerminal by rememberSaveable { mutableStateOf(false) }
+    val fileContext = LocalContext.current
+    fun allFilesSettingsIntent(): android.content.Intent =
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            android.content.Intent(
+                android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                android.net.Uri.parse("package:${fileContext.packageName}"),
+            )
+        } else {
+            android.content.Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:${fileContext.packageName}"),
+            )
+        }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
     Scaffold(
@@ -2150,6 +2166,67 @@ private fun RootScreenHost(
                     onHideBrokenChange = viewModel::setHideBrokenModels,
                     onAutoScanChange = viewModel::setAutoScanEnabled,
                     onDeleteModelCatalog = viewModel::deleteModelCatalog,
+                )
+                RootScreen.FILES -> FileManagerPlusScreen(
+                    roots = state.fsRoots,
+                    unavailable = state.fsUnavailable,
+                    activeRoot = state.fsRoot,
+                    path = state.fsPath,
+                    entries = state.fsEntries,
+                    categories = state.fsCategories,
+                    searchResults = state.fsSearchResults,
+                    searching = state.fsSearching,
+                    query = state.fsQuery,
+                    selection = state.fsSelection,
+                    clipboardCount = state.fsClipboard.items.size,
+                    status = state.fsStatus,
+                    storageFree = state.fsStorageFree,
+                    storageTotal = state.fsStorageTotal,
+                    view = state.fsView,
+                    sort = state.fsSort,
+                    sortAscending = state.fsSortAscending,
+                    loading = state.fsLoading,
+                    error = state.fsError,
+                    previewPath = state.fsPreviewPath,
+                    lightboxPath = state.fsLightboxPath,
+                    openName = state.fsOpenName,
+                    openContent = state.fsOpenContent,
+                    openLoading = state.fsOpenLoading,
+                    onOpenRoot = viewModel::openFileRoot,
+                    onNavigate = viewModel::navigateFiles,
+                    onGoUp = viewModel::goUpFiles,
+                    onGoHome = { state.fsRoots.firstOrNull()?.let(viewModel::openFileRoot) },
+                    onRefreshRoots = viewModel::refreshFileRoots,
+                    onPickFolder = { uri -> viewModel.addSafTree(uri) },
+                    onOpenEntry = viewModel::openFileEntry,
+                    onCloseFile = viewModel::closeOpenFile,
+                    onCreateDirectory = viewModel::createFilesDirectory,
+                    onRename = viewModel::renameFileEntry,
+                    onDelete = viewModel::deleteFileEntry,
+                    onExtract = viewModel::extractHere,
+                    onQueryChange = viewModel::searchFiles,
+                    onSetView = viewModel::setFilesView,
+                    onSetSort = viewModel::setFilesSort,
+                    onToggleSelect = viewModel::toggleSelection,
+                    onSelectAll = viewModel::selectAllEntries,
+                    onClearSelection = viewModel::clearSelection,
+                    onCopy = { viewModel.stageClipboard(com.jarves.mh.storage.FsClipboardOperation.COPY) },
+                    onCut = { viewModel.stageClipboard(com.jarves.mh.storage.FsClipboardOperation.CUT) },
+                    onPaste = { viewModel.pasteInto(state.fsPath) },
+                    onArchive = viewModel::archiveSelection,
+                    onShare = { entries -> shareEntries(fileContext, entries) },
+                    onTogglePreview = viewModel::togglePreview,
+                    onOpenLightbox = viewModel::openLightbox,
+                    onStepLightbox = viewModel::stepLightbox,
+                    onCloseLightbox = viewModel::closeLightbox,
+                    onRemedy = { remedy ->
+                        when (remedy) {
+                            FsRemedy.PICK_FOLDER -> Unit
+                            FsRemedy.GRANT_ALL_FILES ->
+                                runCatching { fileContext.startActivity(allFilesSettingsIntent()) }
+                            FsRemedy.REQUEST_SHIZUKU -> viewModel.requestShizukuAccess()
+                        }
+                    },
                 )
                 RootScreen.SETTINGS -> SettingsScreen(
                     state = state,
@@ -4282,7 +4359,7 @@ private fun ChatSwitcherDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FileViewerScreen(
+internal fun FileViewerScreen(
     filePath: String,
     content: String?,
     loading: Boolean,
@@ -5345,7 +5422,7 @@ private fun FilesTab(files: List<WorkspaceEntry>, loading: Boolean, onRefresh: (
     }
 }
 
-private fun formatFileSize(bytes: Long): String = when {
+internal fun formatFileSize(bytes: Long): String = when {
     bytes < 1_024 -> "$bytes B"
     bytes < 1_048_576 -> "%.1f KB".format(bytes / 1_024.0)
     else -> "%.1f MB".format(bytes / 1_048_576.0)
@@ -5862,3 +5939,31 @@ private fun BrandMark(modifier: Modifier = Modifier, compact: Boolean = false) {
         )
     }
 }
+
+
+/**
+ * Shares what the user picked, as the real path it sits at.
+ *
+ * An attachment would need a FileProvider entry for every file the browser can see, and
+ * only the app's own directory can be exposed that way, so this hands over the path and
+ * lets the receiving app deal with it. A made-up share link would be worse: it would look
+ * like a working feature and resolve to nothing.
+ */
+private fun shareEntries(context: android.content.Context, entries: List<com.jarves.mh.storage.FsEntry>) {
+    val picked = entries.take(MAX_SHARED_ENTRIES)
+    if (picked.isEmpty()) return
+    val text = picked.joinToString("\n") { entry ->
+        if (entry.isDirectory) entry.name + "/" else entry.name
+    }
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_TEXT, text)
+        putExtra(android.content.Intent.EXTRA_SUBJECT, picked.first().name)
+    }
+    runCatching {
+        context.startActivity(android.content.Intent.createChooser(intent, null))
+    }
+}
+
+/** Sharing ten thousand files is a way to hang the chooser, so it stops here. */
+private const val MAX_SHARED_ENTRIES = 50
