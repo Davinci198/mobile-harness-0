@@ -66,7 +66,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -109,11 +108,27 @@ import com.jarves.mh.storage.FsPaths
 import com.jarves.mh.storage.FsRemedy
 import com.jarves.mh.storage.FsSort
 import com.jarves.mh.storage.FsViewMode
-import com.jarves.mh.ui.theme.PocketAccent
 import com.jarves.mh.ui.theme.PocketMuted
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/**
+ * The browser's own colours, taken from the design files rather than from the app's theme:
+ * a near-black page, two greys for the raised surfaces, one white for text, amber for the
+ * accent and violet for a selection. Keeping them together means the browser reads as one
+ * surface instead of borrowing a colour from somewhere else in the app.
+ */
+private object FsPalette {
+    val Page = Color(0xFF0F0F10)
+    val Raised = Color(0xFF1E1E22)
+    val RaisedHigh = Color(0xFF232326)
+    val Lower = Color(0xFF1A1A1D)
+    val Text = Color(0xFFF7F7F8)
+    val Muted = Color(0xFF94A3B8)
+    val Accent = Color(0xFFF59E0B)
+    val Select = Color(0xFF8B5CF6)
+}
 
 /**
  * Browses the whole device, not just the project's workspace.
@@ -195,7 +210,7 @@ fun FilesScreen(
                         Text(
                             text = path.ifEmpty { stringResource(R.string.files_root_subtitle) },
                             fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = FsPalette.Muted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -216,7 +231,7 @@ fun FilesScreen(
                         Modifier
                             .padding(horizontal = 4.dp)
                             .clip(RoundedCornerShape(50))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .background(FsPalette.RaisedHigh)
                             .padding(2.dp),
                     ) {
                         ViewModeButton(
@@ -273,7 +288,7 @@ fun FilesScreen(
                         Icon(Icons.Default.Refresh, stringResource(R.string.files_refresh))
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = FsPalette.Page),
             )
         },
         bottomBar = {
@@ -290,7 +305,7 @@ fun FilesScreen(
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.fillMaxSize().padding(padding).background(FsPalette.Page)) {
             if (searchOpen) {
                 SearchField(query = query, searching = searching, onQueryChange = onQueryChange)
             }
@@ -319,18 +334,25 @@ fun FilesScreen(
                     CategoryGrid(categories, storageFree, storageTotal, onOpen = onNavigate)
 
                 entries.isEmpty() && error == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(stringResource(R.string.files_empty), color = PocketMuted, fontSize = 13.sp)
+                    Text(stringResource(R.string.files_empty), color = FsPalette.Muted, fontSize = 13.sp)
                 }
 
                 view == FsViewMode.GRID -> EntryGrid(entries, path, selectedPath, onOpen = onOpenEntry, onSelect = onSelect)
 
-                else -> FileTable(
-                    entries = entries,
-                    path = path,
-                    selectedPath = selectedPath,
-                    onOpen = onOpenEntry,
-                    onSelect = onSelect,
-                )
+                else -> Surface(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = FsPalette.Raised,
+                    border = BorderStroke(1.dp, Color(0xFF27272A)),
+                ) {
+                    FileTable(
+                        entries = entries,
+                        path = path,
+                        selectedPath = selectedPath,
+                        onOpen = onOpenEntry,
+                        onSelect = onSelect,
+                    )
+                }
             }
         }
     }
@@ -392,7 +414,7 @@ private fun ViewModeButton(
             imageVector = icon,
             contentDescription = label,
             modifier = Modifier.size(16.dp),
-            tint = if (active) Color.Black else MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = if (active) Color.Black else FsPalette.Muted,
         )
     }
 }
@@ -434,7 +456,7 @@ private fun SearchField(query: String, searching: Boolean, onQueryChange: (Strin
 private fun SearchResults(results: List<FsEntry>, view: FsViewMode, onOpen: (FsEntry) -> Unit, onSelect: (FsEntry) -> Unit) {
     if (results.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.files_no_results), color = PocketMuted, fontSize = 13.sp)
+            Text(stringResource(R.string.files_no_results), color = FsPalette.Muted, fontSize = 13.sp)
         }
         return
     }
@@ -455,16 +477,16 @@ private fun LocationHeader(path: String, storageFree: Long, storageTotal: Long) 
     Row(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
+            .background(FsPalette.Lower)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Default.Home, null, Modifier.size(20.dp), tint = PocketAccent)
+        Icon(Icons.Default.Home, null, Modifier.size(20.dp), tint = FsPalette.Accent)
         Icon(
             Icons.Default.ChevronRight,
             null,
             Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = FsPalette.Muted,
         )
         Icon(
             Icons.Default.Folder,
@@ -476,7 +498,7 @@ private fun LocationHeader(path: String, storageFree: Long, storageTotal: Long) 
         Text(
             FsPaths.nameOf(path),
             fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = FsPalette.Muted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
@@ -485,8 +507,8 @@ private fun LocationHeader(path: String, storageFree: Long, storageTotal: Long) 
             val usedPercent = ((storageTotal - storageFree) * 100L) / storageTotal
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                color = FsPalette.RaisedHigh,
+                border = BorderStroke(1.dp, Color(0xFF3F3F46)),
             ) {
                 Text(
                     stringResource(R.string.files_used_pct, usedPercent),
@@ -499,41 +521,60 @@ private fun LocationHeader(path: String, storageFree: Long, storageTotal: Long) 
     }
 }
 
+/** A place to go, as a rounded button: the active one is filled with the accent. */
+@Composable
+private fun PlacePill(label: String, active: Boolean, icon: ImageVector, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (active) FsPalette.Accent.copy(alpha = 0.16f) else FsPalette.RaisedHigh)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(14.dp), tint = if (active) FsPalette.Accent else FsPalette.Muted)
+        Spacer(Modifier.width(6.dp))
+        Text(label, fontSize = 13.sp, color = if (active) FsPalette.Text else FsPalette.Muted)
+    }
+}
+
 @Composable
 private fun PlacesBar(roots: List<DeviceRoot>, active: DeviceRoot?, onSelect: (DeviceRoot) -> Unit, onAddFolder: () -> Unit) {
     Column {
         Text(
-            stringResource(R.string.files_places),
+            stringResource(R.string.files_places).uppercase(),
             fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.6.sp,
+            color = FsPalette.Muted,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         )
         Row(
             Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 14.dp, vertical = 4.dp),
+                .padding(horizontal = 14.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             roots.forEach { root ->
-                FilterChip(
-                    selected = root == active,
+                PlacePill(
+                    label = root.label,
+                    active = root == active,
+                    icon = Icons.Default.Folder,
                     onClick = { onSelect(root) },
-                    label = { Text(root.label, fontSize = 12.sp) },
-                    leadingIcon = { Icon(Icons.Default.Folder, null, Modifier.size(16.dp)) },
                 )
             }
-            FilterChip(
-                selected = false,
+            PlacePill(
+                label = stringResource(R.string.files_add_folder),
+                active = false,
+                icon = Icons.Default.Add,
                 onClick = onAddFolder,
-                label = { Text(stringResource(R.string.files_add_folder), fontSize = 12.sp) },
-                leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
             )
-            FilterChip(
-                selected = false,
+            PlacePill(
+                label = stringResource(R.string.files_go_home),
+                active = false,
+                icon = Icons.Default.Home,
                 onClick = { roots.firstOrNull()?.let(onSelect) },
-                label = { Text(stringResource(R.string.files_go_home), fontSize = 12.sp) },
-                leadingIcon = { Icon(Icons.Default.Home, null, Modifier.size(16.dp)) },
             )
         }
     }
@@ -578,7 +619,7 @@ private fun CategoryTile(
             category.label,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
+            color = FsPalette.Text,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
@@ -586,7 +627,7 @@ private fun CategoryTile(
         Text(
             subtitle,
             fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = FsPalette.Muted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
@@ -673,7 +714,8 @@ private fun FileTable(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .background(FsPalette.RaisedHigh)
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -681,7 +723,7 @@ private fun FileTable(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.2.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = FsPalette.Muted,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
@@ -689,7 +731,7 @@ private fun FileTable(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.2.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = FsPalette.Muted,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -697,7 +739,7 @@ private fun FileTable(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.2.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = FsPalette.Muted,
                 )
             }
         }
@@ -720,7 +762,7 @@ private fun FileTable(
                     // The browser holds one selected path at a time, so the count is 0 or 1.
                     stringResource(R.string.files_status, entries.size, if (selected.isEmpty()) 0 else 1),
                     fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = FsPalette.Muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -737,7 +779,7 @@ private fun FileRow(entry: FsEntry, selected: Boolean, onOpen: () -> Unit, onSel
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) Color(0xFF8B5CF6).copy(alpha = 0.16f) else Color.Transparent)
+            .background(if (selected) FsPalette.Select.copy(alpha = 0.14f) else Color.Transparent)
             .combinedClickable(onClick = onOpen, onLongClick = onSelect)
             .height(56.dp)
             .padding(horizontal = 12.dp),
@@ -754,13 +796,13 @@ private fun FileRow(entry: FsEntry, selected: Boolean, onOpen: () -> Unit, onSel
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = FsPalette.Text,
             )
         }
         Text(
             if (entry.lastModifiedMillis > 0L) formatEntryDate(entry.lastModifiedMillis) else "",
             fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = FsPalette.Muted,
             maxLines = 1,
         )
         Spacer(Modifier.width(8.dp))
@@ -773,8 +815,9 @@ private fun FileRow(entry: FsEntry, selected: Boolean, onOpen: () -> Unit, onSel
 private fun TypePill(type: FsFileType) {
     Surface(
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = FsPalette.RaisedHigh,
+        border = BorderStroke(1.dp, Color(0xFF3F3F46)),
+        modifier = Modifier,
     ) {
         Text(
             stringResource(typeLabel(type)),
@@ -856,7 +899,7 @@ private fun EntryGrid(entries: List<FsEntry>, path: String, selectedPath: String
                 Modifier
                     .background(
                         if (selectedPath != null && FsPaths.join(path, entry.name) == selectedPath) {
-                            PocketAccent.copy(alpha = 0.12f)
+                            FsPalette.Select.copy(alpha = 0.14f)
                         } else {
                             Color.Transparent
                         },
@@ -869,7 +912,7 @@ private fun EntryGrid(entries: List<FsEntry>, path: String, selectedPath: String
                     imageVector = if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Description,
                     contentDescription = null,
                     modifier = Modifier.size(30.dp),
-                    tint = if (entry.isDirectory) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (entry.isDirectory) FsPalette.Accent else FsPalette.Muted,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(entry.name, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
@@ -885,7 +928,7 @@ private fun formatEntryDate(millis: Long): String =
 
 @Composable
 private fun SelectionBar(name: String, onRename: () -> Unit, onDelete: () -> Unit, onClose: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surface) {
+    Surface(color = FsPalette.Lower) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 name,
