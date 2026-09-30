@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
@@ -165,6 +166,7 @@ fun FileManagerPlusScreen(
     onPickFolder: (android.net.Uri) -> Unit,
     onOpenEntry: (FsEntry) -> Unit,
     onCloseFile: () -> Unit,
+    onOpenElsewhere: () -> Unit,
     onCreateDirectory: (String) -> Unit,
     onRename: (FsEntry, String) -> Unit,
     onDelete: (FsEntry) -> Unit,
@@ -226,6 +228,7 @@ fun FileManagerPlusScreen(
             content = openContent,
             loading = openLoading,
             onClose = onCloseFile,
+            onOpenElsewhere = onOpenElsewhere,
         )
         return
     }
@@ -1133,7 +1136,13 @@ private fun FmpPromptDialog(title: String, initial: String = "", onConfirm: (Str
 /** A plain look at a text file, the way a file manager previews one. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TextViewer(name: String, content: String?, loading: Boolean, onClose: () -> Unit) {
+private fun TextViewer(
+    name: String,
+    content: String?,
+    loading: Boolean,
+    onClose: () -> Unit,
+    onOpenElsewhere: () -> Unit,
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -1141,6 +1150,15 @@ private fun TextViewer(name: String, content: String?, loading: Boolean, onClose
                 navigationIcon = {
                     IconButton(onClick = onClose) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.files_close))
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenElsewhere) {
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            stringResource(R.string.files_open_with),
+                            tint = FmpColors.Muted,
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = FmpColors.Page),

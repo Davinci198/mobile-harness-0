@@ -404,6 +404,7 @@
     <string name="files_paste">Lipește</string>
     <string name="files_archive">Arhivează</string>
     <string name="files_share">Partajează</string>
+    <string name="files_open_with">Deschide cu altă aplicație</string>
     <string name="files_preview">PREVIZUALIZARE</string>
     <string name="files_open_fullscreen">Deschide pe ecran întreg</string>
     <string name="files_next">Următoarea</string>

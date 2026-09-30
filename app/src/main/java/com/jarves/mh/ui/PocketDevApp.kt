@@ -2201,6 +2201,7 @@ private fun RootScreenHost(
                     onPickFolder = { uri -> viewModel.addSafTree(uri) },
                     onOpenEntry = viewModel::openFileEntry,
                     onCloseFile = viewModel::closeOpenFile,
+                    onOpenElsewhere = viewModel::openFileElsewhere,
                     onCreateDirectory = viewModel::createFilesDirectory,
                     onRename = viewModel::renameFileEntry,
                     onDelete = viewModel::deleteFileEntry,
