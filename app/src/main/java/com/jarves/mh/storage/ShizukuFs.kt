@@ -189,7 +189,7 @@ object ShizukuFs {
         val type = parts[0].trim()
         val name = parts[4]
         if (name.isEmpty() || name == ".") return null
-        val isDirectory = type == "d"
+        val isDirectory = type == "D"
         val size = parts[2].trim().toLongOrNull() ?: 0L
         val modified = parts[3].trim().substringBefore('.').toLongOrNull() ?: 0L
         // Octal permissions, so the read bit is what decides the padlock, the same way

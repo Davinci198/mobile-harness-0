@@ -132,7 +132,8 @@ class ShizukuBatchedListingTest {
         // work inside one process.
         val command = ShizukuFs.listManyCommand(listOf("/data", "/system"))
 
-        assertTrue(command.contains("find . -maxdepth 1 -printf"))
+        assertTrue(command.contains("find . -maxdepth 1"))
+        assertTrue(command.contains("-maxdepth 1 \\( -type d -printf"))
         assertTrue("no per-entry stat", !command.contains("stat -c"))
     }
 
