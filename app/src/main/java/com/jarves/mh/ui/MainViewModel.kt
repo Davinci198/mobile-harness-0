@@ -201,6 +201,15 @@ data class AppUiState(
     /** Free and total bytes of the volume behind the active root, or -1 when unknown. */
     val fsStorageFree: Long = -1L,
     val fsStorageTotal: Long = -1L,
+    /** Every entry the user has picked, as root-relative paths. */
+    val fsSelection: Set<String> = emptySet(),
+    val fsClipboard: com.jarves.mh.storage.FsClipboard = com.jarves.mh.storage.FsClipboard(),
+    /** The entry shown in the side panel, or null when the panel is closed. */
+    val fsPreviewPath: String? = null,
+    /** The fullscreen image being looked at, and where it sits in the listing. */
+    val fsLightboxPath: String? = null,
+    /** One line of feedback, the way the reference keeps it under the listing. */
+    val fsStatus: String = "",
     val apiPingStatus: ApiPingStatus = ApiPingStatus.IDLE,
     val apiPingMessage: String? = null,
     val projects: List<Project> = emptyList(),
@@ -315,6 +324,12 @@ data class AppUiState(
 
 /** How many folders in a listing get their item count filled in. */
 private const val MAX_COUNTED_FOLDERS = 40
+
+/** How deep an archive follows a folder, so a whole disk cannot be pulled in. */
+private const val MAX_ARCHIVE_DEPTH = 6
+
+/** A single file may not be bigger than this inside an archive. */
+private val perFileCap: Long = com.jarves.mh.storage.FsLimits.MAX_ARCHIVE_BYTES / 2
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun s(id: Int, vararg args: Any?): String = getApplication<Application>().getString(id, *args)
@@ -1376,6 +1391,237 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         }
+    }
+
+    // ---- selection, clipboard, archive, preview -------------------------------
+
+    private fun selectedEntries(): List<com.jarves.mh.storage.FsEntry> {
+        val state = _state.value
+        return state.fsEntries.filter { com.jarves.mh.storage.FsPaths.join(state.fsPath, it.name) in state.fsSelection }
+    }
+
+    fun toggleSelection(entry: com.jarves.mh.storage.FsEntry) {
+        val relative = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        _state.update { current ->
+            val next = current.fsSelection.toMutableSet()
+            if (!next.add(relative)) next.remove(relative)
+            current.copy(fsSelection = next, fsStatus = listingStatus(next.size))
+        }
+    }
+
+    fun selectAllEntries() {
+        val state = _state.value
+        val all = state.fsEntries.map { com.jarves.mh.storage.FsPaths.join(state.fsPath, it.name) }.toSet()
+        _state.update { it.copy(fsSelection = all, fsStatus = listingStatus(all.size)) }
+    }
+
+    fun clearSelection() {
+        _state.update { it.copy(fsSelection = emptySet(), fsStatus = "") }
+    }
+
+    private fun listingStatus(selected: Int): String =
+        "${_state.value.fsEntries.size} elemente • $selected selectate"
+
+    fun stageClipboard(operation: com.jarves.mh.storage.FsClipboardOperation) {
+        val items = _state.value.fsSelection.toList()
+        if (items.isEmpty()) return
+        val board = com.jarves.mh.storage.FsClipboardRules.put(items, operation)
+        _state.update { it.copy(fsClipboard = board, fsStatus = clipboardStatus(board)) }
+    }
+
+    private fun clipboardStatus(board: com.jarves.mh.storage.FsClipboard): String {
+        val verb = if (board.operation == com.jarves.mh.storage.FsClipboardOperation.CUT) "Mutare" else "Copiere"
+        return "${board.items.size} în clipboard • $verb"
+    }
+
+    /**
+     * Pastes the staged paths into [path]. A cut only removes the original once the copy
+     * has landed, so a failure halfway leaves the files where they were rather than
+     * deleting them on the way out.
+     */
+    fun pasteInto(path: String) {
+        val state = _state.value
+        val board = state.fsClipboard
+        if (board.isEmpty) return
+        val targets = com.jarves.mh.storage.FsClipboardRules.pasteInto(board, path, "") ?: run {
+            _state.update { it.copy(fsStatus = "Nu se poate lipi aici") }
+            return
+        }
+        val root = state.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            var moved = 0
+            targets.forEach { target ->
+                val wanted = com.jarves.mh.storage.FsPaths.nameOf(target)
+                val source = board.items.firstOrNull { com.jarves.mh.storage.FsPaths.nameOf(it) == wanted } ?: return@forEach
+                when (val copied = backend.copy(source, target)) {
+                    is com.jarves.mh.storage.FsResult.Ok -> {
+                        moved++
+                        if (board.operation == com.jarves.mh.storage.FsClipboardOperation.CUT) {
+                            backend.delete(source, recursive = true)
+                        }
+                    }
+
+                    is com.jarves.mh.storage.FsResult.Err -> {
+                        _state.update { it.copy(fsStatus = copied.error.message) }
+                        return@forEach
+                    }
+                }
+            }
+            _state.update {
+                it.copy(
+                    fsClipboard = com.jarves.mh.storage.FsClipboard(),
+                    fsSelection = emptySet(),
+                    fsStatus = "$moved transferuri",
+                )
+            }
+            loadDirectory(path)
+        }
+    }
+
+    /**
+     * Zips the selection into one file.
+     *
+     * The archive is built in memory and written in a single call, because that is the
+     * most any backend can promise: a command pipe cannot be appended to and a SAF
+     * document cannot be streamed. That caps the size, which the cap states out loud
+     * rather than failing halfway.
+     */
+    fun archiveSelection() {
+        val state = _state.value
+        val picked = selectedEntries()
+        if (picked.isEmpty()) return
+        val root = state.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val files = mutableListOf<com.jarves.mh.storage.FsEntry>()
+            var refused = false
+
+            suspend fun walk(relative: String, depth: Int) {
+                if (depth > MAX_ARCHIVE_DEPTH || files.size >= com.jarves.mh.storage.FsLimits.MAX_ARCHIVE_ENTRIES) return
+                val listing = backend.list(relative).valueOrNull() ?: return
+                listing.forEach { entry ->
+                    if (entry.isDirectory) {
+                        walk(com.jarves.mh.storage.FsPaths.join(relative, entry.name), depth + 1)
+                    } else {
+                        if (entry.sizeBytes > perFileCap) refused = true else files += entry
+                    }
+                }
+            }
+
+            picked.forEach { entry ->
+                if (entry.isDirectory) {
+                    walk(com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name), 1)
+                } else {
+                    if (entry.sizeBytes > perFileCap) refused = true else files += entry
+                }
+            }
+            if (refused || files.isEmpty()) {
+                _state.update { it.copy(fsStatus = "Conținut prea mare pentru o arhivă") }
+                return@launch
+            }
+            val bytes = runCatching {
+                val sink = java.io.ByteArrayOutputStream()
+                java.util.zip.ZipOutputStream(sink).use { zipped ->
+                    files.forEach { entry ->
+                        val full = com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)
+                        val data = backend.readBytes(full, perFileCap).valueOrNull() ?: return@forEach
+                        zipped.putNextEntry(java.util.zip.ZipEntry(entry.name))
+                        zipped.write(data)
+                        zipped.closeEntry()
+                    }
+                }
+                sink.toByteArray()
+            }.getOrElse {
+                _state.update { it.copy(fsStatus = "Arhiva nu a putut fi construită") }
+                return@launch
+            }
+            val name = com.jarves.mh.storage.FsArchive.uniqueName(state.fsEntries.map { it.name }.toSet())
+            val target = com.jarves.mh.storage.FsPaths.join(state.fsPath, name)
+            when (val written = backend.writeBytes(target, bytes)) {
+                is com.jarves.mh.storage.FsResult.Ok -> {
+                    _state.update { it.copy(fsSelection = emptySet(), fsStatus = "$name · ${files.size} fișiere") }
+                    loadDirectory(state.fsPath)
+                }
+
+                is com.jarves.mh.storage.FsResult.Err -> _state.update { it.copy(fsStatus = written.error.message) }
+            }
+        }
+    }
+
+    /** Unpacks a zip sitting in [path] into the folder it is in. */
+    fun extractHere(entry: com.jarves.mh.storage.FsEntry) {
+        if (com.jarves.mh.storage.FsFileTypes.of(entry) != com.jarves.mh.storage.FsFileType.ARCHIVE) return
+        val state = _state.value
+        val root = state.fsRoot ?: return
+        val backend = fsFactory.open(root) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val full = com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)
+            val bytes = when (val read = backend.readBytes(full, com.jarves.mh.storage.FsLimits.MAX_ARCHIVE_BYTES)) {
+                is com.jarves.mh.storage.FsResult.Err -> {
+                    _state.update { it.copy(fsStatus = read.error.message) }
+                    return@launch
+                }
+
+                is com.jarves.mh.storage.FsResult.Ok -> read.value
+            }
+            var written = 0
+            val refused = runCatching {
+                java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes)).use { zipped ->
+                    while (true) {
+                        val member = zipped.nextEntry ?: break
+                        val name = member.name
+                        // A zip is untrusted input: an entry that climbs out of the folder
+                        // is a way to write anywhere the app can.
+                        if (name.startsWith("/") || name.split('/').any { it == ".." }) return@runCatching false
+                        val bytes2 = zipped.readBytes()
+                        if (member.isDirectory) {
+                            backend.createDirectory(com.jarves.mh.storage.FsPaths.join(state.fsPath, name.trimEnd('/')))
+                        } else {
+                            backend.writeBytes(com.jarves.mh.storage.FsPaths.join(state.fsPath, name), bytes2)
+                            written++
+                        }
+                        zipped.closeEntry()
+                    }
+                }
+                true
+            }.getOrElse { false }
+            _state.update {
+                it.copy(fsStatus = if (refused) "Arhiva conține căi nepermise" else "$written fișiere extrase")
+            }
+            loadDirectory(state.fsPath)
+        }
+    }
+
+    fun togglePreview(entry: com.jarves.mh.storage.FsEntry?) {
+        val relative = entry?.let { com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, it.name) }
+        _state.update { it.copy(fsPreviewPath = if (it.fsPreviewPath == relative) null else relative) }
+    }
+
+    fun openLightbox() {
+        val state = _state.value
+        val current = state.fsPreviewPath ?: return
+        state.fsEntries
+            .firstOrNull { com.jarves.mh.storage.FsPaths.join(state.fsPath, it.name) == current }
+            ?.takeIf { com.jarves.mh.storage.FsFileTypes.of(it) == com.jarves.mh.storage.FsFileType.IMAGE }
+            ?.let { entry ->
+                _state.update { it.copy(fsLightboxPath = com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)) }
+            }
+    }
+
+    fun stepLightbox(delta: Int) {
+        val state = _state.value
+        val current = state.fsLightboxPath ?: return
+        val images = state.fsEntries.filter { com.jarves.mh.storage.FsFileTypes.of(it) == com.jarves.mh.storage.FsFileType.IMAGE }
+        if (images.isEmpty()) return
+        val index = images.indexOfFirst { com.jarves.mh.storage.FsPaths.join(state.fsPath, it.name) == current }
+        if (index < 0) return
+        val next = ((index + delta) % images.size + images.size) % images.size
+        _state.update { it.copy(fsLightboxPath = com.jarves.mh.storage.FsPaths.join(state.fsPath, images[next].name)) }
+    }
+
+    fun closeLightbox() {
+        _state.update { it.copy(fsLightboxPath = null) }
     }
 
     fun setFilesView(mode: com.jarves.mh.storage.FsViewMode) {

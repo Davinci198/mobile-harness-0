@@ -109,6 +109,57 @@ class SafFileSystem(
         )
     }
 
+    override suspend fun readBytes(path: String, maxBytes: Long): FsResult<ByteArray> {
+        val uri = documentUri(path) ?: return fsError(FsErrorKind.FAILED, "Path escapes the folder")
+        return runCatching {
+            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: error("The provider refused to open this file")
+            if (bytes.size > maxBytes) error("File is too large")
+            FsResult.Ok(bytes)
+        }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be read") }
+    }
+
+    override suspend fun writeBytes(path: String, bytes: ByteArray): FsResult<Unit> {
+        val uri = documentUri(path) ?: return fsError(FsErrorKind.FAILED, "Path escapes the folder")
+        return runCatching {
+            resolver.openOutputStream(uri, "wt")?.use { it.write(bytes) }
+                ?: error("The provider refused to open this file")
+            FsResult.Ok(Unit)
+        }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be written") }
+    }
+
+    override suspend fun copy(fromPath: String, toPath: String, recursive: Boolean): FsResult<Unit> {
+        // SAF has no copy of its own, so a folder is walked and each file is moved across
+        // whole. That is slower than a filesystem rename but it is what the contract allows.
+        val source = documentUri(fromPath) ?: return fsError(FsErrorKind.FAILED, "Path escapes the folder")
+        val name = FsPaths.nameOf(toPath)
+        val mime = column(source, DocumentsContract.Document.COLUMN_MIME_TYPE)
+        if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+            if (!recursive) return fsError(FsErrorKind.FAILED, "It is a directory")
+            val children = list(fromPath).valueOrNull() ?: emptyList()
+            when (val made = createDirectory(toPath)) {
+                is FsResult.Ok -> Unit
+                is FsResult.Err -> return made
+            }
+            children.forEach { child ->
+                copy(
+                    FsPaths.join(fromPath, child.name),
+                    FsPaths.join(toPath, child.name),
+                    recursive,
+                )
+            }
+            return FsResult.Ok(Unit)
+        }
+        if (name.isEmpty()) return fsError(FsErrorKind.FAILED, "It needs a name")
+        return when (val bytes = readBytes(fromPath, FsLimits.MAX_ARCHIVE_BYTES)) {
+            is FsResult.Err -> bytes
+            is FsResult.Ok -> when (val written = writeBytes(toPath, bytes.value)) {
+                is FsResult.Err -> written
+                is FsResult.Ok -> FsResult.Ok(Unit)
+            }
+        }
+    }
+
     override suspend fun writeText(path: String, content: String, append: Boolean): FsResult<Unit> {
         // Appending through SAF is provider-specific and rarely supported, so say so
         // instead of silently truncating the file.

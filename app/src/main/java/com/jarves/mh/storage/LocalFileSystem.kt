@@ -27,6 +27,23 @@ interface DeviceFs {
     suspend fun createDirectory(path: String): FsResult<Unit>
 
     /**
+     * Bytes in and out, which text alone cannot carry: an archive is binary, and so is an
+     * image. Backends that can only move text refuse rather than pretending.
+     */
+    suspend fun readBytes(path: String, maxBytes: Long): FsResult<ByteArray> =
+        fsError(FsErrorKind.FAILED, "This location cannot read binary files")
+
+    suspend fun writeBytes(path: String, bytes: ByteArray): FsResult<Unit> =
+        fsError(FsErrorKind.FAILED, "This location cannot write binary files")
+
+    /**
+     * Copies a file or a whole folder, recursively. A copy is what a paste is made of, so
+     * it has to work for folders too, not just single files.
+     */
+    suspend fun copy(fromPath: String, toPath: String, recursive: Boolean = true): FsResult<Unit> =
+        fsError(FsErrorKind.FAILED, "This location cannot copy")
+
+    /**
      * Lists several directories at once, returning one result per input path, in order.
      *
      * Backends that answer in-process just loop; the shell backend overrides this,
@@ -131,6 +148,26 @@ class LocalFileSystem(
             .getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be read") }
     }
 
+    override suspend fun readBytes(path: String, maxBytes: Long): FsResult<ByteArray> {
+        val file = resolve(path) ?: return fsError(FsErrorKind.FAILED, "Path escapes the root")
+        if (!file.exists()) return fsError(FsErrorKind.NOT_FOUND, "No such file")
+        if (file.isDirectory) return fsError(FsErrorKind.FAILED, "It is a directory")
+        if (file.length() > maxBytes) return fsError(FsErrorKind.FAILED, "File is too large")
+        return runCatching { FsResult.Ok(file.readBytes()) }
+            .getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be read") }
+    }
+
+    override suspend fun writeBytes(path: String, bytes: ByteArray): FsResult<Unit> {
+        if (!writeAllowed) return fsError(FsErrorKind.READ_ONLY, "This location is read only")
+        val file = resolve(path) ?: return fsError(FsErrorKind.FAILED, "Path escapes the root")
+        if (file.isDirectory) return fsError(FsErrorKind.FAILED, "It is a directory")
+        return runCatching {
+            file.parentFile?.mkdirs()
+            file.writeBytes(bytes)
+            FsResult.Ok(Unit)
+        }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be written") }
+    }
+
     override suspend fun writeText(path: String, content: String, append: Boolean): FsResult<Unit> {
         if (!writeAllowed) return fsError(FsErrorKind.READ_ONLY, "This location is read only")
         val file = resolve(path) ?: return fsError(FsErrorKind.FAILED, "Path escapes the root")
@@ -140,6 +177,31 @@ class LocalFileSystem(
             if (append) file.appendText(content) else file.writeText(content)
             FsResult.Ok(Unit)
         }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be written") }
+    }
+
+    override suspend fun copy(fromPath: String, toPath: String, recursive: Boolean): FsResult<Unit> {
+        if (!writeAllowed) return fsError(FsErrorKind.READ_ONLY, "This location is read only")
+        val from = resolve(fromPath) ?: return fsError(FsErrorKind.FAILED, "Path escapes the root")
+        val to = resolve(toPath) ?: return fsError(FsErrorKind.FAILED, "Path escapes the root")
+        if (!from.exists()) return fsError(FsErrorKind.NOT_FOUND, "No such file")
+        if (from.isDirectory && !recursive) return fsError(FsErrorKind.FAILED, "It is a directory")
+        // Copying a folder into itself would walk forever.
+        if (from.isDirectory && to.path.startsWith(from.path + "/")) {
+            return fsError(FsErrorKind.FAILED, "A folder cannot be copied into itself")
+        }
+        return runCatching {
+            if (from.isDirectory) {
+                to.mkdirs()
+                from.listFiles()?.forEach { child ->
+                    val name = child.name
+                    copy(FsPaths.join(fromPath, name), FsPaths.join(toPath, name), recursive)
+                }
+            } else {
+                to.parentFile?.mkdirs()
+                from.copyTo(to, overwrite = true)
+            }
+            FsResult.Ok(Unit)
+        }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "Could not copy") }
     }
 
     override suspend fun delete(path: String, recursive: Boolean): FsResult<Unit> {

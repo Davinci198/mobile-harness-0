@@ -60,6 +60,45 @@ class ShizukuFileSystem(
         return FsResult.Ok(entry)
     }
 
+    override suspend fun readBytes(path: String, maxBytes: Long): FsResult<ByteArray> {
+        if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")
+        val result = run(ShizukuFs.readBytesCommand(absolute(path), maxBytes), READ_TIMEOUT_MS)
+        if (result.exitCode == 0 && result.stdout.isBlank()) {
+            return fsError(FsErrorKind.NOT_FOUND, "No such file")
+        }
+        if (!result.ok) {
+            return fsError(FsErrorKind.NO_ACCESS, result.stderr.ifBlank { "Shizuku could not read this" }, FsRemedy.REQUEST_SHIZUKU)
+        }
+        return runCatching { FsResult.Ok(java.util.Base64.getDecoder().decode(result.stdout.trim())) }
+            .getOrElse { fsError(FsErrorKind.FAILED, "The file could not be decoded") }
+    }
+
+    override suspend fun writeBytes(path: String, bytes: ByteArray): FsResult<Unit> {
+        if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")
+        if (bytes.size > FsLimits.MAX_ARCHIVE_BYTES) {
+            return fsError(FsErrorKind.FAILED, "The file is too large to write")
+        }
+        val encoded = java.util.Base64.getEncoder().encodeToString(bytes)
+        val result = run(ShizukuFs.writeBytesCommand(absolute(path), encoded), WRITE_TIMEOUT_MS)
+        return if (result.ok) {
+            FsResult.Ok(Unit)
+        } else {
+            fsError(FsErrorKind.FAILED, result.stderr.ifBlank { "Shizuku could not write this" }, FsRemedy.REQUEST_SHIZUKU)
+        }
+    }
+
+    override suspend fun copy(fromPath: String, toPath: String, recursive: Boolean): FsResult<Unit> {
+        if (!FsPaths.isSafeRelative(fromPath) || !FsPaths.isSafeRelative(toPath)) {
+            return fsError(FsErrorKind.FAILED, "Path escapes the root")
+        }
+        val result = run(ShizukuFs.copyCommand(absolute(fromPath), absolute(toPath)), WRITE_TIMEOUT_MS)
+        return if (result.ok) {
+            FsResult.Ok(Unit)
+        } else {
+            fsError(FsErrorKind.FAILED, result.stderr.ifBlank { "Shizuku could not copy this" }, FsRemedy.REQUEST_SHIZUKU)
+        }
+    }
+
     override suspend fun readText(path: String): FsResult<String> {
         if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")
         val result = run(

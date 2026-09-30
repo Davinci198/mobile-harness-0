@@ -100,6 +100,15 @@ fun <T> fsError(kind: FsErrorKind, message: String, remedy: FsRemedy? = null): F
 /** Ce plafonezi ca să nu încarci tot device-ul în memorie. */
 object FsLimits {
     const val MAX_TEXT_READ_BYTES: Long = 512_000L
+
+    /**
+     * An archive is built in memory, so this is the ceiling on what may be zipped at once.
+     * A phone can hold far more; the limit is about the heap, not the disk.
+     */
+    const val MAX_ARCHIVE_BYTES: Long = 48L * 1024L * 1024L
+
+    /** How many files one archive may hold, so a whole device cannot be pulled into RAM. */
+    const val MAX_ARCHIVE_ENTRIES: Int = 2_000
     const val MAX_SHELL_OUTPUT_CHARS: Int = 64 * 1024
     const val MAX_LISTED_ENTRIES: Int = 5_000
 }

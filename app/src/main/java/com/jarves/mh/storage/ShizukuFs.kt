@@ -107,6 +107,21 @@ object ShizukuFs {
     fun readTextCommand(path: String, maxBytes: Long): String =
         "head -c ${maxBytes.coerceAtLeast(0L)} ${quote(path)} 2>/dev/null"
 
+    /**
+     * `base64` in and out, because a command pipe carries text safely and an archive is
+     * binary. The cap is enforced here as well as by the reader, so a huge file cannot
+     * pin the pipe open.
+     */
+    fun readBytesCommand(path: String, maxBytes: Long): String =
+        "head -c ${maxBytes.coerceAtLeast(0L)} ${quote(path)} 2>/dev/null | base64 | tr -d '\\n'"
+
+    /** One copy for files and folders alike, which is what a paste needs. */
+    fun copyCommand(from: String, to: String): String =
+        "cp -a ${quote(from)} ${quote(to)}"
+
+    fun writeBytesCommand(path: String, base64: String): String =
+        "printf '%s' ${quote(base64)} | base64 -d > ${quote(path)}"
+
     fun writeTextCommand(path: String, base64: String): String =
         "printf '%s' ${quote(base64)} | base64 -d > ${quote(path)}"
 
