@@ -8,6 +8,7 @@ import android.provider.OpenableColumns
 import android.os.SystemClock
 import android.os.Build
 import android.system.Os
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.core.content.ContextCompat
@@ -1149,7 +1150,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val usage = runCatching {
                 val stat = android.os.StatFs(path)
                 stat.availableBytes to stat.totalBytes
-            }.getOrNull() ?: return@launch
+            }.getOrElse { e ->
+                Log.e("Files", "storageUsage: StatFs failed path=$path", e)
+                return@launch
+            }
             _state.update { it.copy(fsStorageFree = usage.first, fsStorageTotal = usage.second) }
         }
     }
@@ -1169,16 +1173,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             navigateFiles(com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name))
             return
         }
-        val root = _state.value.fsRoot ?: return
-        val backend = fsFactory.open(root) ?: return
+        val root = _state.value.fsRoot
+        if (root == null) {
+            Log.e("Files", "open: no root selected name=${entry.name}")
+            return
+        }
+        val backend = fsFactory.open(root)
+        if (backend == null) {
+            Log.e("Files", "open: backend unavailable root=$root name=${entry.name}")
+            return
+        }
         val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
         _state.update { it.copy(fsOpenName = entry.name, fsOpenContent = null, fsOpenLoading = true) }
         viewModelScope.launch(Dispatchers.IO) {
             when (val result = backend.readText(path)) {
-                is com.jarves.mh.storage.FsResult.Ok ->
+                is com.jarves.mh.storage.FsResult.Ok -> {
+                    Log.d("Files", "open ok path=$path chars=${result.value.length}")
                     _state.update { it.copy(fsOpenContent = result.value, fsOpenLoading = false) }
-                is com.jarves.mh.storage.FsResult.Err ->
+                }
+
+                is com.jarves.mh.storage.FsResult.Err -> {
+                    Log.e("Files", "open FAILED path=$path ${result.error.kind} ${result.error.message}")
                     _state.update { it.copy(fsOpenName = null, fsOpenLoading = false, fsError = result.error) }
+                }
             }
         }
     }
@@ -1188,19 +1205,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun createFilesDirectory(name: String) {
-        val root = _state.value.fsRoot ?: return
         val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, name)
         mutateThenReload("Could not create the folder") { it.createDirectory(path) }
     }
 
     fun renameFileEntry(entry: com.jarves.mh.storage.FsEntry, newName: String) {
-        val root = _state.value.fsRoot ?: return
         val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
         mutateThenReload("Rename failed") { it.rename(path, newName) }
     }
 
     fun deleteFileEntry(entry: com.jarves.mh.storage.FsEntry) {
-        val root = _state.value.fsRoot ?: return
         val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
         mutateThenReload("Could not delete") { it.delete(path, recursive = entry.isDirectory) }
     }
@@ -1254,6 +1268,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val root = _state.value.fsRoot ?: return
         val backend = fsFactory.open(root)
         if (backend == null) {
+            Log.e("Files", "loadDirectory: backend unavailable for root=$root path=$path")
             _state.update {
                 it.copy(
                     fsEntries = emptyList(),
@@ -1287,6 +1302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             when (val result = backend.list(path)) {
                 is com.jarves.mh.storage.FsResult.Ok -> {
+                    Log.d("Files", "list ok path=$path entries=${result.value.size} backend=${backend::class.simpleName}")
                     _state.update {
                         it.copy(
                             fsEntries = com.jarves.mh.storage.FsQuery.sort(result.value, sort, ascending),
@@ -1296,8 +1312,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     fillChildCounts(backend, path)
                 }
-                is com.jarves.mh.storage.FsResult.Err ->
+                is com.jarves.mh.storage.FsResult.Err -> {
+                    Log.e("Files", "list FAILED path=$path ${result.error.kind} ${result.error.message} remedy=${result.error.remedy}")
                     _state.update { it.copy(fsEntries = emptyList(), fsLoading = false, fsError = result.error) }
+                }
             }
         }
     }
@@ -1332,6 +1350,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // work in a loop; the shell backend turns the whole set into one command,
                 // which is the difference between waiting once and waiting a dozen times.
                 val listings = backend.listMany(definitions.map { it.second })
+                var dropped = 0
                 definitions.mapIndexed { position, definition -> definition to listings[position] }
                     .forEach { (definition, listing) ->
                     val (kind, path) = definition
@@ -1340,7 +1359,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             .filterNot { it.isDirectory }
                             .sumOf { it.sizeBytes }
 
-                        is com.jarves.mh.storage.FsResult.Err -> -1 to -1L
+                        is com.jarves.mh.storage.FsResult.Err -> {
+                            dropped++
+                            Log.w("Files", "category dropped kind=$kind path=$path ${listing.error.kind} ${listing.error.message}")
+                            -1 to -1L
+                        }
                     }
                     val (count, bytes) = tally
                     if (count < 0) {
@@ -1362,6 +1385,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
+                Log.d("Files", "categories done root=$root total=${definitions.size} dropped=$dropped")
             }
         }
     }
@@ -1379,8 +1403,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val paths = folders.map { com.jarves.mh.storage.FsPaths.join(path, it.name) }
             val listings = backend.listMany(paths)
+            var failed = 0
+            var firstError: String? = null
             val counts = paths.indices.map { position ->
-                folders[position].name to listings[position].valueOrNull()?.size
+                when (val one = listings[position]) {
+                    is com.jarves.mh.storage.FsResult.Ok -> folders[position].name to one.value.size
+
+                    is com.jarves.mh.storage.FsResult.Err -> {
+                        failed++
+                        if (firstError == null) firstError = one.error.message
+                        folders[position].name to null
+                    }
+                }
+            }
+            if (failed > 0) {
+                Log.w("Files", "childCounts: $failed of ${paths.size} folders unreadable path=$path firstError=$firstError")
+            } else {
+                Log.d("Files", "childCounts ok path=$path folders=${paths.size}")
             }
             _state.update { current ->
                 current.copy(
@@ -1442,13 +1481,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun pasteInto(path: String) {
         val state = _state.value
         val board = state.fsClipboard
-        if (board.isEmpty) return
+        if (board.isEmpty) {
+            Log.d("Files", "paste skipped: clipboard empty path=$path")
+            return
+        }
         val targets = com.jarves.mh.storage.FsClipboardRules.pasteInto(board, path, "") ?: run {
+            Log.w("Files", "paste refused: ${board.items.size} items into path=$path")
             _state.update { it.copy(fsStatus = "Nu se poate lipi aici") }
             return
         }
-        val root = state.fsRoot ?: return
-        val backend = fsFactory.open(root) ?: return
+        val root = state.fsRoot
+        if (root == null) {
+            Log.e("Files", "paste: no root selected path=$path")
+            return
+        }
+        val backend = fsFactory.open(root)
+        if (backend == null) {
+            Log.e("Files", "paste: backend unavailable root=$root path=$path")
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             var moved = 0
             targets.forEach { target ->
@@ -1458,16 +1509,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     is com.jarves.mh.storage.FsResult.Ok -> {
                         moved++
                         if (board.operation == com.jarves.mh.storage.FsClipboardOperation.CUT) {
-                            backend.delete(source, recursive = true)
+                            val removed = backend.delete(source, recursive = true)
+                            if (removed is com.jarves.mh.storage.FsResult.Err) {
+                                Log.e("Files", "paste: source left behind after cut ${removed.error.message} src=$source")
+                            }
                         }
                     }
 
                     is com.jarves.mh.storage.FsResult.Err -> {
+                        Log.e("Files", "paste FAILED at item ${copied.error.kind} src=$source dst=$target ${copied.error.message}")
                         _state.update { it.copy(fsStatus = copied.error.message) }
                         return@forEach
                     }
                 }
             }
+            Log.d("Files", "paste done transferred=$moved of ${targets.size} operation=${board.operation} path=$path")
             _state.update {
                 it.copy(
                     fsClipboard = com.jarves.mh.storage.FsClipboard(),
@@ -1490,16 +1546,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun archiveSelection() {
         val state = _state.value
         val picked = selectedEntries()
-        if (picked.isEmpty()) return
-        val root = state.fsRoot ?: return
-        val backend = fsFactory.open(root) ?: return
+        if (picked.isEmpty()) {
+            Log.d("Files", "archive skipped: nothing selected")
+            return
+        }
+        val root = state.fsRoot
+        if (root == null) {
+            Log.e("Files", "archive: no root selected")
+            return
+        }
+        val backend = fsFactory.open(root)
+        if (backend == null) {
+            Log.e("Files", "archive: backend unavailable root=$root")
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val files = mutableListOf<com.jarves.mh.storage.FsEntry>()
             var refused = false
 
             suspend fun walk(relative: String, depth: Int) {
                 if (depth > MAX_ARCHIVE_DEPTH || files.size >= com.jarves.mh.storage.FsLimits.MAX_ARCHIVE_ENTRIES) return
-                val listing = backend.list(relative).valueOrNull() ?: return
+                val listing = backend.list(relative).valueOrNull() ?: run {
+                    Log.w("Files", "archive: skipping unreadable folder $relative")
+                    return
+                }
                 listing.forEach { entry ->
                     if (entry.isDirectory) {
                         walk(com.jarves.mh.storage.FsPaths.join(relative, entry.name), depth + 1)
@@ -1517,6 +1587,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             if (refused || files.isEmpty()) {
+                Log.w("Files", "archive refused=$refused collected=${files.size} picked=${picked.size}")
                 _state.update { it.copy(fsStatus = "Conținut prea mare pentru o arhivă") }
                 return@launch
             }
@@ -1525,14 +1596,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 java.util.zip.ZipOutputStream(sink).use { zipped ->
                     files.forEach { entry ->
                         val full = com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)
-                        val data = backend.readBytes(full, perFileCap).valueOrNull() ?: return@forEach
-                        zipped.putNextEntry(java.util.zip.ZipEntry(entry.name))
-                        zipped.write(data)
-                        zipped.closeEntry()
+                        when (val data = backend.readBytes(full, perFileCap)) {
+                            is com.jarves.mh.storage.FsResult.Err -> {
+                                Log.e("Files", "archive: dropping ${entry.name} ${data.error.kind} ${data.error.message}")
+                                return@forEach
+                            }
+
+                            is com.jarves.mh.storage.FsResult.Ok -> {
+                                zipped.putNextEntry(java.util.zip.ZipEntry(entry.name))
+                                zipped.write(data.value)
+                                zipped.closeEntry()
+                            }
+                        }
                     }
                 }
                 sink.toByteArray()
-            }.getOrElse {
+            }.getOrElse { e ->
+                Log.e("Files", "archive: zip build failed over ${files.size} files", e)
                 _state.update { it.copy(fsStatus = "Arhiva nu a putut fi construită") }
                 return@launch
             }
@@ -1540,25 +1620,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val target = com.jarves.mh.storage.FsPaths.join(state.fsPath, name)
             when (val written = backend.writeBytes(target, bytes)) {
                 is com.jarves.mh.storage.FsResult.Ok -> {
+                    Log.d("Files", "archive ok target=$target files=${files.size} bytes=${bytes.size}")
                     _state.update { it.copy(fsSelection = emptySet(), fsStatus = "$name · ${files.size} fișiere") }
                     loadDirectory(state.fsPath)
                 }
 
-                is com.jarves.mh.storage.FsResult.Err -> _state.update { it.copy(fsStatus = written.error.message) }
+                is com.jarves.mh.storage.FsResult.Err -> {
+                    Log.e("Files", "archive: write failed target=$target ${written.error.kind} ${written.error.message}")
+                    _state.update { it.copy(fsStatus = written.error.message) }
+                }
             }
         }
     }
 
     /** Unpacks a zip sitting in [path] into the folder it is in. */
     fun extractHere(entry: com.jarves.mh.storage.FsEntry) {
-        if (com.jarves.mh.storage.FsFileTypes.of(entry) != com.jarves.mh.storage.FsFileType.ARCHIVE) return
+        if (com.jarves.mh.storage.FsFileTypes.of(entry) != com.jarves.mh.storage.FsFileType.ARCHIVE) {
+            Log.d("Files", "extract skipped: ${entry.name} is not an archive")
+            return
+        }
         val state = _state.value
-        val root = state.fsRoot ?: return
-        val backend = fsFactory.open(root) ?: return
+        val root = state.fsRoot
+        if (root == null) {
+            Log.e("Files", "extract: no root selected")
+            return
+        }
+        val backend = fsFactory.open(root)
+        if (backend == null) {
+            Log.e("Files", "extract: backend unavailable root=$root")
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val full = com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)
             val bytes = when (val read = backend.readBytes(full, com.jarves.mh.storage.FsLimits.MAX_ARCHIVE_BYTES)) {
                 is com.jarves.mh.storage.FsResult.Err -> {
+                    Log.e("Files", "extract: read failed full=$full ${read.error.kind} ${read.error.message}")
                     _state.update { it.copy(fsStatus = read.error.message) }
                     return@launch
                 }
@@ -1566,29 +1662,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 is com.jarves.mh.storage.FsResult.Ok -> read.value
             }
             var written = 0
-            val refused = runCatching {
+            var skipped = 0
+            // A rejected path and a broken archive are different failures: the first stops
+            // extraction on purpose, the second is an error. Returning one flag for both
+            // reported a corrupt zip as a success.
+            var blocked = false
+            val outcome = runCatching {
                 java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes)).use { zipped ->
                     while (true) {
                         val member = zipped.nextEntry ?: break
                         val name = member.name
                         // A zip is untrusted input: an entry that climbs out of the folder
                         // is a way to write anywhere the app can.
-                        if (name.startsWith("/") || name.split('/').any { it == ".." }) return@runCatching false
+                        if (name.startsWith("/") || name.split('/').any { it == ".." }) {
+                            blocked = true
+                            return@runCatching false
+                        }
                         val bytes2 = zipped.readBytes()
                         if (member.isDirectory) {
                             backend.createDirectory(com.jarves.mh.storage.FsPaths.join(state.fsPath, name.trimEnd('/')))
                         } else {
-                            backend.writeBytes(com.jarves.mh.storage.FsPaths.join(state.fsPath, name), bytes2)
-                            written++
+                            when (val w = backend.writeBytes(com.jarves.mh.storage.FsPaths.join(state.fsPath, name), bytes2)) {
+                                is com.jarves.mh.storage.FsResult.Ok -> written++
+
+                                is com.jarves.mh.storage.FsResult.Err -> {
+                                    skipped++
+                                    Log.e("Files", "extract: ${w.error.kind} member=$name ${w.error.message}")
+                                }
+                            }
                         }
                         zipped.closeEntry()
                     }
                 }
                 true
-            }.getOrElse { false }
-            _state.update {
-                it.copy(fsStatus = if (refused) "Arhiva conține căi nepermise" else "$written fișiere extrase")
+            }.getOrElse { e ->
+                Log.e("Files", "extract: archive parse failed full=$full written=$written", e)
+                null
             }
+            when {
+                outcome == null -> _state.update { it.copy(fsStatus = "Arhiva este deteriorată") }
+                blocked -> _state.update { it.copy(fsStatus = "Arhiva conține căi nepermise") }
+                else -> _state.update { it.copy(fsStatus = "$written fișiere extrase") }
+            }
+            Log.d("Files", "extract done written=$written skipped=$skipped blocked=$blocked name=${entry.name}")
             loadDirectory(state.fsPath)
         }
     }
@@ -1668,20 +1784,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun searchFiles(query: String) {
-        val root = _state.value.fsRoot ?: return
-        val backend = fsFactory.open(root) ?: return
+        val root = _state.value.fsRoot
+        if (root == null) {
+            Log.e("Files", "search: no root selected")
+            return
+        }
+        val backend = fsFactory.open(root)
+        if (backend == null) {
+            Log.e("Files", "search: backend unavailable root=$root")
+            return
+        }
         val basePath = _state.value.fsPath
         _state.update { it.copy(fsQuery = query, fsSearchResults = emptyList(), fsSearching = query.isNotBlank()) }
         if (query.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
             val found = mutableListOf<com.jarves.mh.storage.FsEntry>()
             val visited = mutableSetOf<String>()
+            var unreadable = 0
             suspend fun walk(path: String, depth: Int) {
                 if (depth > com.jarves.mh.storage.FsQuery.SEARCH_MAX_DEPTH) return
                 if (visited.size >= com.jarves.mh.storage.FsQuery.SEARCH_MAX_DIRECTORIES) return
                 if (found.size >= com.jarves.mh.storage.FsQuery.SEARCH_MAX_RESULTS) return
                 visited += path
-                val listing = backend.list(path).valueOrNull() ?: return
+                val listing = backend.list(path).valueOrNull() ?: run {
+                    // A folder the backend cannot read is the usual reason a search comes
+                    // back shorter than it should, and nothing told the user before.
+                    unreadable++
+                    return
+                }
                 listing.forEach { entry ->
                     if (com.jarves.mh.storage.FsQuery.matches(entry.name, query)) {
                         // Carrying the full root-relative path means tapping a hit can open
@@ -1695,6 +1825,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             walk(basePath, 0)
+            Log.d("Files", "search done query=$query hits=${found.size} dirs=${visited.size} unreadable=$unreadable base=$basePath")
             val current = _state.value
             _state.update {
                 it.copy(
@@ -1729,19 +1860,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         failureMessage: String,
         action: suspend (com.jarves.mh.storage.DeviceFs) -> com.jarves.mh.storage.FsResult<Unit>,
     ) {
-        val root = _state.value.fsRoot ?: return
-        val backend = fsFactory.open(root) ?: return
+        val root = _state.value.fsRoot
+        if (root == null) {
+            Log.e("Files", "mutateThenReload: no root selected, refusing silently")
+            return
+        }
+        val backend = fsFactory.open(root)
+        if (backend == null) {
+            Log.e("Files", "mutateThenReload: backend unavailable for root=$root")
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             when (val result = action(backend)) {
-                is com.jarves.mh.storage.FsResult.Ok -> Unit
-                is com.jarves.mh.storage.FsResult.Err -> _state.update {
-                    it.copy(
-                        fsError = com.jarves.mh.storage.FsError(
-                            com.jarves.mh.storage.FsErrorKind.FAILED,
-                            result.error.message.ifBlank { failureMessage },
-                            result.error.remedy,
-                        ),
-                    )
+                is com.jarves.mh.storage.FsResult.Ok -> Log.d("Files", "mutateThenReload: ok path=${_state.value.fsPath}")
+                is com.jarves.mh.storage.FsResult.Err -> {
+                    Log.e("Files", "mutateThenReload: failed path=${_state.value.fsPath} ${result.error.kind} ${result.error.message} remedy=${result.error.remedy}")
+                    _state.update {
+                        it.copy(
+                            fsError = com.jarves.mh.storage.FsError(
+                                com.jarves.mh.storage.FsErrorKind.FAILED,
+                                result.error.message.ifBlank { failureMessage },
+                                result.error.remedy,
+                            ),
+                        )
+                    }
                 }
             }
             loadDirectory(_state.value.fsPath)
