@@ -1,6 +1,8 @@
 package com.jarves.mh.storage
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FsFileTypesTest {
@@ -53,5 +55,31 @@ class FsFileTypesTest {
     @Test
     fun aVersionedApkIsStillAnApk() {
         assertEquals(FsFileType.APK, FsFileTypes.of(file("app-release-v1.2.3.apk")))
+    }
+
+    @Test
+    fun textAndSourceStayInTheViewer() {
+        val cases = listOf(
+            "notes.md", "settings.json", "layout.xml", "gradle.properties", "MainViewModel.kt",
+            "index.tsx", "build.sh", "table.csv", "README", ".bashrc", "trailing.",
+        )
+        cases.forEach { name -> assertTrue(name, FsFileTypes.opensInViewer(name)) }
+    }
+
+    @Test
+    fun everythingTheViewerCannotRenderLeavesIt() {
+        // A video read as text is an error message, an archive is raw bytes, and a page
+        // belongs in a browser — none of them is a thing the viewer could ever draw.
+        val cases = listOf(
+            "clip.mp4", "IMG_0001.jpg", "song.flac", "CV_2024.pdf",
+            "app.apk", "backup.tar.gz", "index.html", "report.docx",
+        )
+        cases.forEach { name -> assertFalse(name, FsFileTypes.opensInViewer(name)) }
+    }
+
+    @Test
+    fun theViewerDecisionIgnoresCase() {
+        assertTrue(FsFileTypes.opensInViewer("NOTES.MD"))
+        assertFalse(FsFileTypes.opensInViewer("CLIP.MP4"))
     }
 }

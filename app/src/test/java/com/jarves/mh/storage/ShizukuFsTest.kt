@@ -30,6 +30,8 @@ class ShizukuFsTest {
             ShizukuFs.renameCommand("/data/plain dir", "other dir"),
             ShizukuFs.writeTextCommand("/data/plain dir", "QQ=="),
             ShizukuFs.listCommand("/data/plain dir"),
+            ShizukuFs.shareCopyCommand("/data/plain dir", "/data/local/tmp/mh-open/1", "/data/local/tmp/mh-open/1/clip.mp4"),
+            ShizukuFs.sweepShareCommand(),
         )
         for (command in commands) {
             // A bare $name is fine (the listing loop uses $f), but "$(...)" can only be a
@@ -41,6 +43,21 @@ class ShizukuFsTest {
     @Test
     fun statCommandQuotesThePath() {
         assertEquals("stat -c '%f|%s|%Y|%n' '/data/plain dir' 2>/dev/null || true", ShizukuFs.statCommand("/data/plain dir"))
+    }
+
+    @Test
+    fun theShareCopyQuotesAllThreePaths() {
+        // A file name reaches this command, and a name can carry anything at all.
+        assertEquals(
+            "mkdir -p '/data/local/tmp/mh-open/1' && " +
+                "cp '/sdcard/a; rm -rf /' '/data/local/tmp/mh-open/1/x.mp4' && " +
+                "chmod 644 '/data/local/tmp/mh-open/1/x.mp4'",
+            ShizukuFs.shareCopyCommand(
+                "/sdcard/a; rm -rf /",
+                "/data/local/tmp/mh-open/1",
+                "/data/local/tmp/mh-open/1/x.mp4",
+            ),
+        )
     }
 
     @Test
