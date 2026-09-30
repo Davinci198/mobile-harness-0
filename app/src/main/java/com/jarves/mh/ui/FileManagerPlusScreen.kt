@@ -30,11 +30,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ContentCopy
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -284,7 +284,7 @@ fun FileManagerPlusScreen(
                 onCut = onCut,
                 onPaste = onPaste,
                 onArchive = onArchive,
-                onShare = { onShare(selection.map { pathOf(path, it) }.mapNotNull { entryByName(it) }) },
+                onShare = { onShare(entries.filter { FsPaths.join(path, it.name) in selection }) },
                 onClear = onClearSelection,
             )
         },
@@ -921,7 +921,7 @@ private fun BottomBar(
                 modifier = Modifier.weight(1f).padding(start = 6.dp),
             )
             BarAction(Icons.Default.SelectAll, stringResource(R.string.files_select_all), onSelectAll)
-            BarAction(Icons.AutoMirrored.Filled.ContentCopy, stringResource(R.string.files_copy_action), onCopy)
+            BarAction(Icons.Default.ContentCopy, stringResource(R.string.files_copy_action), onCopy)
             BarAction(Icons.Default.ContentCut, stringResource(R.string.files_cut), onCut)
             BarAction(Icons.Default.ContentPaste, stringResource(R.string.files_paste), onPaste)
             BarAction(Icons.Default.Archive, stringResource(R.string.files_archive), onArchive)
