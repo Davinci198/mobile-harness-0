@@ -399,8 +399,7 @@
     <string name="files_col_date">Data</string>
     <string name="files_col_type">Tip</string>
     <string name="files_select_all">Selectează tot</string>
-    <string name="files_copy">Copiază</string>
-    <string name="files_copy_action">Copy</string>
+    <string name="files_copy_action">Copiază</string>
     <string name="files_cut">Taie</string>
     <string name="files_paste">Lipește</string>
     <string name="files_archive">Arhivează</string>
