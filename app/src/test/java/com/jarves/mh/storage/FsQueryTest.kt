@@ -58,8 +58,10 @@ class FsQueryTest {
 
         val types = FsQuery.sort(listing, FsSort.TYPE).map { FsFileTypes.ofName(it.name) }
 
+        // The order is the order the types are declared in, so the same kind lands
+        // together: images, then pdfs, then documents.
         assertEquals(
-            listOf(FsFileType.DOC, FsFileType.DOC, FsFileType.PDF, FsFileType.IMAGE),
+            listOf(FsFileType.IMAGE, FsFileType.PDF, FsFileType.DOC, FsFileType.DOC),
             types,
         )
     }
