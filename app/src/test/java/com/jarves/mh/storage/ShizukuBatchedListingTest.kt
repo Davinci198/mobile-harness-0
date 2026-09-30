@@ -11,9 +11,13 @@ import org.junit.Test
  */
 class ShizukuBatchedListingTest {
 
-    /** One `find -printf` line: type, octal permissions, size, mtime with fraction, name. */
-    private fun dirLine(name: String) = "d|755|4096|1700000000.250000000|$name"
-    private fun fileLine(name: String, size: Long = 10L) = "f|644|$size|1700000000.250000000|$name"
+    /**
+     * One `find -printf` line: the type as the command wrote it, octal permissions, size,
+     * mtime with a fraction, then the name. toybox find has no %y, so the type comes from
+     * which predicate matched.
+     */
+    private fun dirLine(name: String) = "D|755|4096|1700000000.250000000|$name"
+    private fun fileLine(name: String, size: Long = 10L) = "F|644|$size|1700000000.250000000|$name"
 
     @Test
     fun everyRequestedPathGetsABlock() {
@@ -104,22 +108,22 @@ class ShizukuBatchedListingTest {
 
     @Test
     fun aFractionalTimestampBecomesWholeSeconds() {
-        val entry = ShizukuFs.parseFindLine("f|644|12|1790713248.413296802|notes.md")
+        val entry = ShizukuFs.parseFindLine("F|644|12|1790713248.413296802|notes.md")
 
         assertEquals(1790713248L, entry?.lastModifiedMillis)
     }
 
     @Test
     fun permissionsDecideWhetherAnEntryReadsAsLocked() {
-        assertEquals(false, ShizukuFs.parseFindLine("f|000|12|1.0|secret.txt")?.readable)
-        assertEquals(true, ShizukuFs.parseFindLine("f|644|12|1.0|open.txt")?.readable)
-        assertEquals(true, ShizukuFs.parseFindLine("f|640|12|1.0|group.txt")?.readable)
+        assertEquals(false, ShizukuFs.parseFindLine("F|000|12|1.0|secret.txt")?.readable)
+        assertEquals(true, ShizukuFs.parseFindLine("F|644|12|1.0|open.txt")?.readable)
+        assertEquals(true, ShizukuFs.parseFindLine("F|640|12|1.0|group.txt")?.readable)
     }
 
     @Test
     fun aDirectoryCarriesNoSizeOfItsOwn() {
         // "4096" is the block size of the directory itself, not what it holds.
-        assertEquals(0L, ShizukuFs.parseFindLine("d|755|4096|1.0|Pictures")?.sizeBytes)
+        assertEquals(0L, ShizukuFs.parseFindLine("D|755|4096|1.0|Pictures")?.sizeBytes)
     }
 
     @Test
@@ -130,6 +134,17 @@ class ShizukuBatchedListingTest {
 
         assertTrue(command.contains("find . -maxdepth 1 -printf"))
         assertTrue("no per-entry stat", !command.contains("stat -c"))
+    }
+
+    @Test
+    fun theCommandNeverAsksToyboxForTheTypeSpecifier() {
+        // toybox find has no %y: asking for it makes the whole command fail and the
+        // directory comes back empty, which looks like an empty disk rather than an error.
+        val command = ShizukuFs.listManyCommand(listOf("/system"))
+
+        assertTrue("no %y in the command", !command.contains("%y"))
+        assertTrue(command.contains("-type d -printf 'D|"))
+        assertTrue(command.contains("-type f -printf 'F|"))
     }
 
     @Test

@@ -49,7 +49,7 @@ object ShizukuFs {
               echo "#MH${'$'}i"
               i=${'$'}((i+1))
               cd "${'$'}d" 2>/dev/null || { echo "#MHX"; continue; }
-              find . -maxdepth 1 -printf '%y|%m|%s|%T@|%f\n' 2>/dev/null
+              find . -maxdepth 1 \( -type d -printf 'D|%m|%s|%T@|%f\n' \) -o \( -type f -printf 'F|%m|%s|%T@|%f\n' \) 2>/dev/null
             done
         """.trimIndent().replace("__PATHS__", list)
     }
@@ -184,6 +184,8 @@ object ShizukuFs {
     fun parseFindLine(line: String): FsEntry? {
         val parts = line.trim().split('|', limit = 5)
         if (parts.size < 5) return null
+        // "D" or "F", written by the find command itself: toybox find has no %y, so the
+        // type is decided by which predicate matched rather than asked for.
         val type = parts[0].trim()
         val name = parts[4]
         if (name.isEmpty() || name == ".") return null

@@ -37,7 +37,12 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
@@ -216,7 +221,13 @@ fun FileManagerPlusScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.FolderOpen, null, Modifier.size(20.dp), tint = FmpColors.Accent)
                         Spacer(Modifier.width(8.dp))
-                        Text("File Manager+", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "File Manager+",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                         Spacer(Modifier.width(6.dp))
                         VersionBadge()
                     }
@@ -822,15 +833,16 @@ private fun StorageGrid(categories: List<FsCategory>, storageFree: Long, storage
     ) {
         items(categories, key = { "${it.kind}-${it.path}" }) { category ->
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val tint = categoryColor(category.kind)
                 Surface(
                     modifier = Modifier.size(width = 60.dp, height = 60.dp),
                     shape = RoundedCornerShape(18.dp),
-                    color = FmpColors.Raised,
-                    border = BorderStroke(1.dp, Color(0xFF27272A)),
+                    color = tint.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, tint.copy(alpha = 0.3f)),
                     onClick = { onNavigate(category.path) },
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(categoryIcon(category.kind), null, Modifier.size(30.dp), tint = FmpColors.Accent)
+                        Icon(categoryIcon(category.kind), null, Modifier.size(30.dp), tint = tint)
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -868,25 +880,40 @@ private fun storageSubtitle(category: FsCategory, free: Long, total: Long): Stri
     )
 }
 
+/** Each category keeps its own icon and colour, so they are told apart at a glance. */
 private fun categoryIcon(kind: FsCategoryKind): ImageVector = when (kind) {
     FsCategoryKind.STORAGE -> Icons.Default.FolderOpen
-    FsCategoryKind.DOWNLOADS -> Icons.Default.Archive
+    FsCategoryKind.DOWNLOADS, FsCategoryKind.SETUP -> Icons.Default.Archive
     FsCategoryKind.IMAGES -> Icons.Default.Image
     FsCategoryKind.AUDIO -> Icons.Default.MusicNote
     FsCategoryKind.VIDEO -> Icons.Default.Movie
     FsCategoryKind.DOCUMENTS -> Icons.Default.Description
     FsCategoryKind.APPS -> Icons.Default.Android
-    FsCategoryKind.SYSTEM,
-    FsCategoryKind.DATA,
-    FsCategoryKind.VENDOR,
-    FsCategoryKind.PRODUCT,
-    -> Icons.Default.Folder
-    FsCategoryKind.WORKSPACES -> Icons.Default.Folder
-    FsCategoryKind.CHATS -> Icons.Default.Folder
-    FsCategoryKind.RUNTIME -> Icons.Default.Folder
-    FsCategoryKind.SETUP -> Icons.Default.Folder
-    FsCategoryKind.TERMINAL -> Icons.Default.Folder
-    FsCategoryKind.OTHER -> Icons.Default.Folder
+    FsCategoryKind.SYSTEM -> Icons.Default.Lock
+    FsCategoryKind.DATA -> Icons.Default.Folder
+    FsCategoryKind.VENDOR, FsCategoryKind.PRODUCT -> Icons.Default.Memory
+    FsCategoryKind.WORKSPACES, FsCategoryKind.OTHER -> Icons.Default.Folder
+    FsCategoryKind.CHATS -> Icons.Default.Chat
+    FsCategoryKind.RUNTIME -> Icons.Default.Build
+    FsCategoryKind.TERMINAL -> Icons.Default.Terminal
+}
+
+private fun categoryColor(kind: FsCategoryKind): Color = when (kind) {
+    FsCategoryKind.STORAGE -> Color(0xFF90A4AE)
+    FsCategoryKind.DOWNLOADS, FsCategoryKind.SETUP -> Color(0xFFD9A05B)
+    FsCategoryKind.IMAGES -> Color(0xFFAB47BC)
+    FsCategoryKind.AUDIO -> Color(0xFF26A69A)
+    FsCategoryKind.VIDEO -> Color(0xFFEF5350)
+    FsCategoryKind.DOCUMENTS -> Color(0xFF42A5F5)
+    FsCategoryKind.APPS -> Color(0xFF7CB342)
+    FsCategoryKind.SYSTEM -> Color(0xFF78909C)
+    FsCategoryKind.DATA -> Color(0xFF5C6BC0)
+    FsCategoryKind.VENDOR, FsCategoryKind.PRODUCT -> Color(0xFF4DB6AC)
+    FsCategoryKind.WORKSPACES -> Color(0xFF5C6BC0)
+    FsCategoryKind.CHATS -> Color(0xFF66BB6A)
+    FsCategoryKind.RUNTIME -> Color(0xFFFFA726)
+    FsCategoryKind.TERMINAL -> Color(0xFF78909C)
+    FsCategoryKind.OTHER -> Color(0xFF8D6E63)
 }
 
 // ---- footer ------------------------------------------------------------------
