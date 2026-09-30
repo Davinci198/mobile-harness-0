@@ -16,9 +16,10 @@ class FsCategoriesTest {
 
     @Test
     fun aGrantedFolderIsOnePlaceNotAStorageLayout() {
+        // No tiles at all: a granted folder's root listing IS its content. The old single
+        // path="" tile sent every tap back to the root, so its contents were unreachable.
         val definitions = FsCategories.definitionsFor(DeviceRoot.SafTree("t", "content://x"))
-        assertEquals(1, definitions.size)
-        assertEquals("", definitions.single().second)
+        assertTrue(definitions.isEmpty())
     }
 
     @Test

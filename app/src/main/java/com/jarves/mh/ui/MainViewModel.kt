@@ -1265,7 +1265,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.getOrDefault(emptyList())
 
     private fun loadDirectory(path: String) {
-        val root = _state.value.fsRoot ?: return
+        val root = _state.value.fsRoot
+        if (root == null) {
+            Log.e("Files", "loadDirectory: no root selected path=$path")
+            return
+        }
         val backend = fsFactory.open(root)
         if (backend == null) {
             Log.e("Files", "loadDirectory: backend unavailable for root=$root path=$path")
@@ -1282,8 +1286,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         // At the root of a root the screen shows category tiles instead of a flat list, so
-        // the count per tile is what has to be worked out.
-        if (path.isEmpty()) {
+        // the count per tile is what has to be worked out. A granted folder has no tiles,
+        // so its root falls through to the listing — otherwise the tiles and the content
+        // would be the same place and nothing could be opened.
+        if (path.isEmpty() && com.jarves.mh.storage.FsCategories.definitionsFor(root).isNotEmpty()) {
             loadCategories(backend, root)
             return
         }

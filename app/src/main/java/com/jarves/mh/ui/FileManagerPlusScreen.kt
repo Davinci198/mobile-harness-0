@@ -1,5 +1,6 @@
 package com.jarves.mh.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -194,6 +195,28 @@ fun FileManagerPlusScreen(
     var sortMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(path) { onClearSelection() }
+
+    // On a gesture-navigation phone the system back arrives from either edge, and with no
+    // handler here it fell straight through to the activity: the home bar or the app
+    // closed instead of walking back out. It unwinds this screen's own stack first —
+    // overlays, then the folder chain — and is disabled at the root so the activity gets
+    // the gesture and can close as it normally would.
+    BackHandler(
+        enabled = lightboxPath != null || openName != null || searchOpen ||
+            previewPath != null || path.isNotEmpty(),
+    ) {
+        when {
+            lightboxPath != null -> onCloseLightbox()
+            openName != null -> onCloseFile()
+            searchOpen -> {
+                searchOpen = false
+                onQueryChange("")
+            }
+
+            previewPath != null -> onTogglePreview(null)
+            else -> onGoUp()
+        }
+    }
 
     if (openName != null) {
         TextViewer(

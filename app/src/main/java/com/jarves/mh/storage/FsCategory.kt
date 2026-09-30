@@ -102,8 +102,11 @@ object FsCategories {
         val base = when (root) {
             is DeviceRoot.Local -> SANDBOX
             is DeviceRoot.AllFiles -> SHARED_STORAGE
-            // A granted folder is one place, not a storage layout: list what is inside it.
-            is DeviceRoot.SafTree -> listOf(FsCategoryKind.OTHER to "")
+            // A granted folder is one place, not a storage layout: it has no tiles to
+            // offer, because the root listing IS the folder. Returning a tile for it (the
+            // old single path="" entry) sent every tap back to the root, so the contents
+            // could never be reached.
+            is DeviceRoot.SafTree -> emptyList()
             // The device root starts at /, where DCIM, Music and the rest do not exist:
             // they live under the shared storage mount. Without the prefix every one of
             // them is read as missing and its tile is dropped.
