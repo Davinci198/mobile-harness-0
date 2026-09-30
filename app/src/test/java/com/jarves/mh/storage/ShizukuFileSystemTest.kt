@@ -36,6 +36,37 @@ class ShizukuFileSystemTest {
     }
 
     @Test
+    fun theWriteOncePartitionsAreLeftOutOfListings() = runBlocking {
+        // /system, /vendor and /product are dropped from every listing: the grid, the
+        // folder view and search all read through here. /data and /storage are not in
+        // that set — they hold the app data and the mount.
+        val system = fs(start = "/") {
+            ok(
+                "#MH0\n.\n" +
+                    "D|755|4096|100.0|system\n" +
+                    "D|755|4096|100.0|vendor\n" +
+                    "D|755|4096|100.0|product\n" +
+                    "D|755|4096|100.0|data\n" +
+                    "D|755|4096|100.0|sdcard\n" +
+                    "D|755|4096|100.0|storage",
+            )
+        }
+        val entries = system.list("").valueOrNull()!!
+        assertEquals(listOf("data", "sdcard", "storage"), entries.map { it.name })
+    }
+
+    @Test
+    fun aFolderThatMerelyHasTheSameNameStays() = runBlocking {
+        // The match is on the whole path, not the name: sdcard/Android/data is where
+        // every app's files are, and hiding it would be a very different bug.
+        val system = fs(start = "/sdcard/Android") {
+            ok("#MH0\n.\nD|755|4096|100.0|data\nD|755|4096|100.0|obb")
+        }
+        val entries = system.list("").valueOrNull()!!
+        assertEquals(listOf("data", "obb"), entries.map { it.name })
+    }
+
+    @Test
     fun aMissingDirectoryIsReportedAsNotFound() = runBlocking {
         // The batched command marks a directory it could not enter, rather than exiting
         // with a code the way the old per-directory command did.

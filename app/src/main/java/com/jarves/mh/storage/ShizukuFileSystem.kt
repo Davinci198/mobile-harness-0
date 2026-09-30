@@ -24,6 +24,9 @@ class ShizukuFileSystem(
         return if (child.isEmpty()) base.ifEmpty { "/" } else ShizukuFs.joinPath(base, child)
     }
 
+    /** [FsCategories.HIDDEN_DEVICE_PATHS] as absolute paths, for matching entries. */
+    private val hiddenRootPaths = FsCategories.HIDDEN_DEVICE_PATHS.map { "/$it" }.toSet()
+
     override suspend fun list(path: String): FsResult<List<FsEntry>> {
         if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")
         // A single directory still goes through the batched command, so there is one way
@@ -44,13 +47,24 @@ class ShizukuFileSystem(
                 fsError(FsErrorKind.NO_ACCESS, result.stderr.ifBlank { "Shizuku could not list this" }, FsRemedy.REQUEST_SHIZUKU)
             }
         }
-        return ShizukuFs.parseBatched(result.stdout, commands.size).map { block ->
+        return ShizukuFs.parseBatched(result.stdout, commands.size).mapIndexed { index, block ->
             when {
                 block.missing -> fsError(FsErrorKind.NOT_FOUND, "No such directory")
-                else -> FsResult.Ok(block.entries)
+                else -> FsResult.Ok(visibleIn(commands[index], block.entries))
             }
         }
     }
+
+    /**
+     * Partitions the browser never shows. Writing to /system, /vendor or /product does
+     * not come back, so they are dropped from every listing — the grid, the folder view
+     * and search all read through this — rather than being one tap from a mistake.
+     *
+     * Matching the whole path and not the name keeps a folder that merely happens to be
+     * called "data" or "system" (sdcard/Android/data) where it belongs.
+     */
+    private fun visibleIn(parentAbsolute: String, entries: List<FsEntry>): List<FsEntry> =
+        entries.filterNot { ShizukuFs.joinPath(parentAbsolute, it.name) in hiddenRootPaths }
 
     override suspend fun stat(path: String): FsResult<FsEntry> {
         if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")

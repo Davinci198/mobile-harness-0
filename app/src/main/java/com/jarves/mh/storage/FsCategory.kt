@@ -89,6 +89,14 @@ object FsCategories {
         is DeviceRoot.Shizuku -> (DEVICE + SHARED_STORAGE.drop(1)).map { it.first }
     }
 
+    /**
+     * Device partitions the browser does not offer, as paths relative to the filesystem
+     * root. A write to /system, /vendor or /product does not come back, so they are not
+     * put in front of the user in the first place. /data stays: it is where every app's
+     * files live. Shared by the listing backend, which hides the same three.
+     */
+    val HIDDEN_DEVICE_PATHS = setOf("system", "vendor", "product")
+
     /** The definition list for a root, in the order the tiles should appear. */
     fun definitionsFor(root: DeviceRoot): List<Pair<FsCategoryKind, String>> {
         val base = when (root) {
@@ -105,6 +113,6 @@ object FsCategories {
         }
         // A kind may repeat with a different path (/sdcard and /storage are both real), so
         // the pairs are what identify a tile.
-        return base
+        return base.filterNot { (_, path) -> path in HIDDEN_DEVICE_PATHS }
     }
 }
