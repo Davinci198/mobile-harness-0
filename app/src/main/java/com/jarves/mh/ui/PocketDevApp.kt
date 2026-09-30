@@ -2167,7 +2167,7 @@ private fun RootScreenHost(
                     onAutoScanChange = viewModel::setAutoScanEnabled,
                     onDeleteModelCatalog = viewModel::deleteModelCatalog,
                 )
-                RootScreen.FILES -> FilesScreen(
+                RootScreen.FILES -> FileManagerPlusScreen(
                     roots = state.fsRoots,
                     unavailable = state.fsUnavailable,
                     activeRoot = state.fsRoot,
@@ -2177,34 +2177,48 @@ private fun RootScreenHost(
                     searchResults = state.fsSearchResults,
                     searching = state.fsSearching,
                     query = state.fsQuery,
-                    selectedPath = state.fsSelectedPath,
+                    selection = state.fsSelection,
+                    clipboardCount = state.fsClipboard.items.size,
+                    status = state.fsStatus,
+                    storageFree = state.fsStorageFree,
+                    storageTotal = state.fsStorageTotal,
                     view = state.fsView,
                     sort = state.fsSort,
                     sortAscending = state.fsSortAscending,
-                    storageFree = state.fsStorageFree,
-                    storageTotal = state.fsStorageTotal,
                     loading = state.fsLoading,
                     error = state.fsError,
+                    previewPath = state.fsPreviewPath,
+                    lightboxPath = state.fsLightboxPath,
                     openName = state.fsOpenName,
                     openContent = state.fsOpenContent,
                     openLoading = state.fsOpenLoading,
                     onOpenRoot = viewModel::openFileRoot,
                     onNavigate = viewModel::navigateFiles,
                     onGoUp = viewModel::goUpFiles,
-                    onRefreshRoots = viewModel::refreshFileRoots,
                     onGoHome = { state.fsRoots.firstOrNull()?.let(viewModel::openFileRoot) },
+                    onRefreshRoots = viewModel::refreshFileRoots,
                     onPickFolder = { uri -> viewModel.addSafTree(uri) },
                     onOpenEntry = viewModel::openFileEntry,
-                    onOpenSearchResult = viewModel::openSearchResult,
                     onCloseFile = viewModel::closeOpenFile,
                     onCreateDirectory = viewModel::createFilesDirectory,
                     onRename = viewModel::renameFileEntry,
                     onDelete = viewModel::deleteFileEntry,
+                    onExtract = viewModel::extractHere,
                     onQueryChange = viewModel::searchFiles,
                     onSetView = viewModel::setFilesView,
                     onSetSort = viewModel::setFilesSort,
-                    onSelect = viewModel::selectFileEntry,
-                    onClearSelection = viewModel::clearFileSelection,
+                    onToggleSelect = viewModel::toggleSelection,
+                    onSelectAll = viewModel::selectAllEntries,
+                    onClearSelection = viewModel::clearSelection,
+                    onCopy = { viewModel.stageClipboard(com.jarves.mh.storage.FsClipboardOperation.COPY) },
+                    onCut = { viewModel.stageClipboard(com.jarves.mh.storage.FsClipboardOperation.CUT) },
+                    onPaste = { viewModel.pasteInto(state.fsPath) },
+                    onArchive = viewModel::archiveSelection,
+                    onShare = { entries -> shareEntries(fileContext, entries) },
+                    onTogglePreview = viewModel::togglePreview,
+                    onOpenLightbox = viewModel::openLightbox,
+                    onStepLightbox = viewModel::stepLightbox,
+                    onCloseLightbox = viewModel::closeLightbox,
                     onRemedy = { remedy ->
                         when (remedy) {
                             FsRemedy.PICK_FOLDER -> Unit
@@ -5925,3 +5939,31 @@ private fun BrandMark(modifier: Modifier = Modifier, compact: Boolean = false) {
         )
     }
 }
+
+
+/**
+ * Shares what the user picked, as the real path it sits at.
+ *
+ * An attachment would need a FileProvider entry for every file the browser can see, and
+ * only the app's own directory can be exposed that way, so this hands over the path and
+ * lets the receiving app deal with it. A made-up share link would be worse: it would look
+ * like a working feature and resolve to nothing.
+ */
+private fun shareEntries(context: android.content.Context, entries: List<com.jarves.mh.storage.FsEntry>) {
+    val picked = entries.take(MAX_SHARED_ENTRIES)
+    if (picked.isEmpty()) return
+    val text = picked.joinToString("\n") { entry ->
+        if (entry.isDirectory) entry.name + "/" else entry.name
+    }
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_TEXT, text)
+        putExtra(android.content.Intent.EXTRA_SUBJECT, picked.first().name)
+    }
+    runCatching {
+        context.startActivity(android.content.Intent.createChooser(intent, null))
+    }
+}
+
+/** Sharing ten thousand files is a way to hang the chooser, so it stops here. */
+private const val MAX_SHARED_ENTRIES = 50
