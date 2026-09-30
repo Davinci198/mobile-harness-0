@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileInputStream
@@ -118,6 +119,9 @@ object ShizukuBridge {
     suspend fun execute(command: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS): ShizukuCommandResult =
         withContext(Dispatchers.IO) {
             if (!hasPermission()) {
+                // Every filesystem call goes through here, so a missing grant repeats
+                // hundreds of times a second: log the reason only when it changes.
+                logFailureOnce("permission", "Shizuku permission missing or service not running")
                 return@withContext ShizukuCommandResult(
                     exitCode = -1,
                     stdout = "",
@@ -128,6 +132,7 @@ object ShizukuBridge {
                 service()?.newProcess(arrayOf("sh", "-c", command), null, null)
             }.getOrNull()
             if (process == null) {
+                logFailureOnce("service", "Shizuku service returned no process")
                 return@withContext ShizukuCommandResult(-1, "", "Cannot reach the Shizuku service")
             }
 
@@ -146,6 +151,12 @@ object ShizukuBridge {
             runCatching { outThread.join(READ_JOIN_MS) }
             runCatching { errThread.join(READ_JOIN_MS) }
 
+            if (!finished) {
+                Log.w("Files", "shizuku timeout after ${timeoutMs}ms cmd=${command.take(120)}")
+            } else {
+                lastFailureLogged = null
+            }
+
             ShizukuCommandResult(
                 exitCode = if (finished) exitCode else -1,
                 stdout = stdout.toString(),
@@ -153,6 +164,19 @@ object ShizukuBridge {
                 timedOut = !finished,
             )
         }
+
+    /**
+     * The reason of the last Shizuku failure that was written to the log, so a permanent
+     * failure is reported once instead of once per command.
+     */
+    @Volatile
+    private var lastFailureLogged: String? = null
+
+    private fun logFailureOnce(reason: String, message: String) {
+        if (lastFailureLogged == reason) return
+        lastFailureLogged = reason
+        Log.w("Files", "shizuku unavailable ($reason): $message")
+    }
 
     /** Shizuku hands the pipes back as file descriptors, so read them through a stream. */
     private fun drain(descriptor: ParcelFileDescriptor, sink: StringBuilder) {
