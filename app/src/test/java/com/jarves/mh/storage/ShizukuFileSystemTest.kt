@@ -29,7 +29,7 @@ class ShizukuFileSystemTest {
     @Test
     fun listStartsFromTheRootAndParsesTheOutput() = runBlocking {
         // The find format, and find's first line is the directory it was pointed at.
-        val system = fs { ok("#MH0\n.\nd|755|4096|100.0|docs\nf|644|12|100.0|a.txt") }
+        val system = fs { ok("#MH0\n.\nD|755|4096|100.0|docs\nF|644|12|100.0|a.txt") }
         val entries = system.list("").valueOrNull()!!
         assertEquals(listOf("docs", "a.txt"), entries.map { it.name })
         assertTrue(calls.single(), calls.single().contains("for d in '/data'"))
