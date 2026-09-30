@@ -160,6 +160,7 @@ fun FileManagerPlusScreen(
     onNavigate: (String) -> Unit,
     onGoUp: () -> Unit,
     onGoHome: () -> Unit,
+    onBackToProjects: () -> Unit,
     onRefreshRoots: () -> Unit,
     onPickFolder: (android.net.Uri) -> Unit,
     onOpenEntry: (FsEntry) -> Unit,
@@ -199,13 +200,13 @@ fun FileManagerPlusScreen(
     // On a gesture-navigation phone the system back arrives from either edge, and with no
     // handler here it fell straight through to the activity: the home bar or the app
     // closed instead of walking back out. It unwinds this screen's own stack first —
-    // overlays, then the folder chain — and is disabled at the root so the activity gets
-    // the gesture and can close as it normally would.
-    BackHandler(
-        enabled = lightboxPath != null || openName != null || searchOpen ||
-            previewPath != null || path.isNotEmpty(),
-    ) {
+    // overlays, then the folder chain — and hands the last one to the main tab rather
+    // than to the activity, so leaving Files is two deliberate gestures and never one.
+    BackHandler {
         when {
+            // A dialog owns its own window, but if the gesture reaches this callback the
+            // dialog still has to be what goes, not the folder underneath it.
+            dialog != null -> dialog = null
             lightboxPath != null -> onCloseLightbox()
             openName != null -> onCloseFile()
             searchOpen -> {
@@ -214,7 +215,8 @@ fun FileManagerPlusScreen(
             }
 
             previewPath != null -> onTogglePreview(null)
-            else -> onGoUp()
+            path.isNotEmpty() -> onGoUp()
+            else -> onBackToProjects()
         }
     }
 
