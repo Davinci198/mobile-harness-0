@@ -447,6 +447,10 @@ private fun VersionBadge() {
             "3.8.3",
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
+            // Without these the badge is squeezed by the toolbar's action row and breaks
+            // into a tall pill reading "3." over "8.".
+            maxLines = 1,
+            softWrap = false,
             color = FmpColors.Accent,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
         )
