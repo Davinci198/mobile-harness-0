@@ -31,6 +31,19 @@ object FsFileTypes {
         "doc", "docx", "odt", "txt", "md", "rtf", "csv", "xls", "xlsx", "ods", "ppt", "pptx", "odp", "json", "xml", "html", "yml", "yaml",
     )
 
+    /**
+     * What the built-in viewer can actually render: plain text and source. Everything
+     * else — a video, a photo, a page a browser should draw, an office document — goes
+     * to whichever app on the phone already knows how to open it, which is the whole
+     * point of having those apps installed.
+     */
+    private val VIEWER = setOf(
+        "txt", "md", "markdown", "log", "csv", "tsv", "json", "jsonl", "yaml", "yml",
+        "xml", "toml", "ini", "conf", "properties", "gradle", "sql",
+        "kt", "kts", "java", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx",
+        "c", "cc", "cpp", "h", "hpp", "sh", "bash", "zsh", "css", "scss", "sass", "less",
+    )
+
     /** A folder is a folder whatever it is called; a file is judged by its extension. */
     fun of(entry: FsEntry): FsFileType {
         if (entry.isDirectory) return FsFileType.FOLDER
@@ -55,4 +68,16 @@ object FsFileTypes {
 
     /** The label the type card shows, already localised by the caller. */
     fun needsLabel(type: FsFileType): Boolean = type != FsFileType.OTHER
+
+    /**
+     * Whether [name] opens in the built-in viewer or is handed to another app.
+     *
+     * A file with no extension gives nothing to build a MIME type from, so it is read as
+     * text — the only thing that can still work for it.
+     */
+    fun opensInViewer(name: String): Boolean {
+        val dot = name.lastIndexOf('.')
+        if (dot <= 0 || dot == name.length - 1) return true
+        return name.substring(dot + 1).lowercase() in VIEWER
+    }
 }

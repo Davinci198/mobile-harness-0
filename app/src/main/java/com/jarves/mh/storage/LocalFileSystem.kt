@@ -106,6 +106,13 @@ class LocalFileSystem(
     private val readAllowed: () -> Boolean = { true },
     private val noAccessError: FsError = FsError(FsErrorKind.NO_ACCESS, "Storage access is not granted"),
 ) : DeviceFs {
+    /**
+     * The real file a path points at, for handing to another app through the file
+     * provider. Null when the path escapes the root, which is the same guard `resolve`
+     * applies everywhere else.
+     */
+    fun fileFor(path: String): File? = resolve(path)
+
     private fun resolve(relative: String): File? {
         if (!FsPaths.isSafeRelative(relative)) return null
         val candidate = if (relative.isBlank()) base else File(base, relative)

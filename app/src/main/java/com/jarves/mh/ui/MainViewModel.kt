@@ -1173,6 +1173,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             navigateFiles(com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name))
             return
         }
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        // Anything the viewer cannot render goes to an app that can: a video has no
+        // business being read as text, which is how a binary file used to reach the
+        // screen as an error instead of as a film.
+        if (!com.jarves.mh.storage.FsFileTypes.opensInViewer(entry.name)) {
+            openWithAnotherApp(path, entry.name)
+            return
+        }
         val root = _state.value.fsRoot
         if (root == null) {
             Log.e("Files", "open: no root selected name=${entry.name}")
@@ -1183,7 +1191,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Log.e("Files", "open: backend unavailable root=$root name=${entry.name}")
             return
         }
-        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
         _state.update { it.copy(fsOpenName = entry.name, fsOpenContent = null, fsOpenLoading = true) }
         viewModelScope.launch(Dispatchers.IO) {
             when (val result = backend.readText(path)) {
@@ -1202,6 +1209,98 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun closeOpenFile() {
         _state.update { it.copy(fsOpenName = null, fsOpenContent = null, fsOpenLoading = false) }
+    }
+
+    /** Hands the file sitting in the viewer to an app that might render it better. */
+    fun openFileElsewhere() {
+        val state = _state.value
+        val name = state.fsOpenName ?: return
+        closeOpenFile()
+        openWithAnotherApp(com.jarves.mh.storage.FsPaths.join(state.fsPath, name), name)
+    }
+
+    /**
+     * Hands a file to whichever app on the phone can open it, instead of trying to read
+     * it as text.
+     *
+     * The URI is what decides the work: a granted folder already is one and needs
+     * nothing, the sandbox and all-files access are real paths the file provider can
+     * serve, and only a file seen through the shell has to be copied first.
+     */
+    private fun openWithAnotherApp(path: String, name: String) {
+        val root = _state.value.fsRoot
+        if (root == null) {
+            Log.e("Files", "external open: no root selected path=$path")
+            _state.update { it.copy(fsStatus = "Fișierul nu a putut fi deschis") }
+            return
+        }
+        val backend = fsFactory.open(root)
+        if (backend == null) {
+            Log.e("Files", "external open: backend unavailable root=$root path=$path")
+            _state.update { it.copy(fsStatus = "Fișierul nu a putut fi deschis") }
+            return
+        }
+        val app = getApplication<Application>()
+        val mime = mimeFor(name)
+        viewModelScope.launch(Dispatchers.IO) {
+            val uri = uriForSharing(backend, path, name, app)
+            if (uri == null) {
+                Log.e("Files", "external open: no uri root=$root path=$path")
+                _state.update { it.copy(fsStatus = "Fișierul nu a putut fi pregătit") }
+                return@launch
+            }
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching { app.startActivity(intent) }.onSuccess {
+                Log.d("Files", "external open ok path=$path mime=$mime")
+            }.onFailure { e ->
+                Log.e("Files", "external open: no app path=$path mime=$mime", e)
+                _state.update { it.copy(fsStatus = "Nicio aplicație nu poate deschide acest fișier") }
+            }
+        }
+    }
+
+    private suspend fun uriForSharing(
+        backend: com.jarves.mh.storage.DeviceFs,
+        path: String,
+        name: String,
+        app: Application,
+    ): Uri? {
+        val provider = "${app.packageName}.files"
+        fun share(file: java.io.File): Uri? =
+            runCatching { FileProvider.getUriForFile(app, provider, file) }.getOrNull()
+
+        return when (backend) {
+            is com.jarves.mh.storage.SafFileSystem -> backend.documentUri(path)
+            is com.jarves.mh.storage.LocalFileSystem -> backend.fileFor(path)?.let(::share)
+            is com.jarves.mh.storage.ShizukuFileSystem ->
+                // All-files access makes the real path readable as it is. Without it the
+                // shell copies the file somewhere the app can reach, which costs a copy
+                // but asks the user for nothing.
+                if (fsFactory.isAllFilesGranted()) {
+                    share(java.io.File(backend.absolutePathOf(path)))
+                } else {
+                    backend.copyForSharing(path, name).valueOrNull()?.let { share(java.io.File(it)) }
+                }
+
+            else -> null
+        }
+    }
+
+    private fun mimeFor(name: String): String {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)?.let { return it }
+        return when (com.jarves.mh.storage.FsFileTypes.ofName(name)) {
+            com.jarves.mh.storage.FsFileType.IMAGE -> "image/*"
+            com.jarves.mh.storage.FsFileType.VIDEO -> "video/*"
+            com.jarves.mh.storage.FsFileType.AUDIO -> "audio/*"
+            com.jarves.mh.storage.FsFileType.PDF -> "application/pdf"
+            com.jarves.mh.storage.FsFileType.APK -> "application/vnd.android.package-archive"
+            com.jarves.mh.storage.FsFileType.ARCHIVE -> "application/zip"
+            else -> "application/octet-stream"
+        }
     }
 
     fun createFilesDirectory(name: String) {

@@ -15,6 +15,25 @@ object ShizukuFs {
     fun quote(path: String): String = "'" + path.replace("'", "'\\''") + "'"
 
     /**
+     * Where a file is copied so the app itself can read it.
+     *
+     * The shell can reach anything on the device and an ordinary app cannot, so handing a
+     * Shizuku file to another app needs a real copy first. This directory is the one that
+     * works without any storage permission: it is world-traversable, the copy lands on
+     * disk rather than travelling through the command pipe, and each copy gets its own
+     * subdirectory so two files with the same name cannot collide.
+     */
+    const val SHARE_DIR = "/data/local/tmp/mh-open"
+
+    /** Copies [src] into [dir] under [dest]'s name, world-readable. */
+    fun shareCopyCommand(src: String, dir: String, dest: String): String =
+        "mkdir -p ${quote(dir)} && cp ${quote(src)} ${quote(dest)} && chmod 644 ${quote(dest)}"
+
+    /** Drops copies older than a day so the directory cannot grow without bound. */
+    fun sweepShareCommand(): String =
+        "find $SHARE_DIR -mindepth 1 -maxdepth 1 -type d -mtime +1 -exec rm -rf {} + 2>/dev/null"
+
+    /**
      * One line per entry, emitting `mode|size|mtime|name`. The name comes last so a file
      * whose name contains the delimiter still parses: only the first three fields split.
      */

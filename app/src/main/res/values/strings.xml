@@ -404,6 +404,7 @@
     <string name="files_paste">Paste</string>
     <string name="files_archive">Archive</string>
     <string name="files_share">Share</string>
+    <string name="files_open_with">Open with another app</string>
     <string name="files_preview">PREVIEW</string>
     <string name="files_open_fullscreen">Open fullscreen</string>
     <string name="files_next">Next</string>

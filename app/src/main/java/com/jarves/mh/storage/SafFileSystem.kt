@@ -25,7 +25,12 @@ class SafFileSystem(
         return if (child.isEmpty()) base else "$base/$child"
     }
 
-    private fun documentUri(relative: String): Uri? {
+    /**
+     * The tree-backed document URI for a path, which is what another app opens directly —
+     * no copy, no file provider, and the provider's own permissions carry the read.
+     * Null when the path escapes the granted folder.
+     */
+    fun documentUri(relative: String): Uri? {
         val id = documentId(relative) ?: return null
         return runCatching { DocumentsContract.buildDocumentUriUsingTree(treeUri, id) }.getOrNull()
     }

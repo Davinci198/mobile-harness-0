@@ -27,6 +27,36 @@ class ShizukuFileSystem(
     /** [FsCategories.HIDDEN_DEVICE_PATHS] as absolute paths, for matching entries. */
     private val hiddenRootPaths = FsCategories.HIDDEN_DEVICE_PATHS.map { "/$it" }.toSet()
 
+    /** The real path behind a relative one, for handing to a content provider. */
+    fun absolutePathOf(relative: String): String = absolute(relative)
+
+    /**
+     * Copies the file behind [path] to a place the app can read on its own, and returns
+     * that path.
+     *
+     * Only needed when the backend is the shell: the shell sees everything, an ordinary
+     * app sees nothing, so there is no way to hand a Shizuku file to a video player
+     * without a copy. The copy is made by the shell, on disk, so a video is never loaded
+     * into memory — the command pipe only ever carries the outcome.
+     */
+    suspend fun copyForSharing(path: String, name: String): FsResult<String> {
+        if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")
+        // A name ends up on a command line and in a URI, so keep it to characters that
+        // survive both. The original is what the other app sees in its title bar.
+        val safeName = name.filter { it.isLetterOrDigit() || it in " ._-()" }.trim().ifEmpty { "file" }
+        val dir = "${ShizukuFs.SHARE_DIR}/${System.currentTimeMillis()}"
+        val dest = "$dir/$safeName"
+        val result = run(
+            ShizukuFs.sweepShareCommand() +
+                "; " + ShizukuFs.shareCopyCommand(absolute(path), dir, dest),
+            WRITE_TIMEOUT_MS,
+        )
+        if (!result.ok) {
+            return fsError(FsErrorKind.NO_ACCESS, result.stderr.ifBlank { "The file could not be prepared" })
+        }
+        return FsResult.Ok(dest)
+    }
+
     override suspend fun list(path: String): FsResult<List<FsEntry>> {
         if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")
         // A single directory still goes through the batched command, so there is one way

@@ -3,4 +3,7 @@
     <files-path name="workspaces" path="workspaces/" />
     <files-path name="updates" path="updates/" />
     <files-path name="shizuku" path="shizuku/" />
+    <files-path name="sandbox" path="." />
+    <external-path name="shared" path="." />
+    <root-path name="shell_tmp" path="data/local/tmp/mh-open/" />
 </paths>
