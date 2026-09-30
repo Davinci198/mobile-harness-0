@@ -3,6 +3,7 @@ package com.jarves.mh.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -32,7 +33,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -71,6 +76,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -79,6 +85,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -91,6 +98,8 @@ import androidx.compose.ui.unit.sp
 import com.jarves.mh.R
 import com.jarves.mh.storage.DeviceRoot
 import com.jarves.mh.storage.FsCategory
+import com.jarves.mh.storage.FsFileType
+import com.jarves.mh.storage.FsFileTypes
 import com.jarves.mh.storage.FsCategoryKind
 import com.jarves.mh.storage.FsEntry
 import com.jarves.mh.storage.FsError
@@ -283,16 +292,13 @@ fun FilesScreen(
 
                 view == FsViewMode.GRID -> EntryGrid(entries, path, selectedPath, onOpen = onOpenEntry, onSelect = onSelect)
 
-                else -> LazyColumn(Modifier.fillMaxSize()) {
-                    items(entries, key = { it.relativePath }) { entry ->
-                        FileRow(
-                            entry = entry,
-                            selected = selectedPath != null && FsPaths.join(path, entry.name) == selectedPath,
-                            onOpen = { onOpenEntry(entry) },
-                            onSelect = { onSelect(entry) },
-                        )
-                    }
-                }
+                else -> FileTable(
+                    entries = entries,
+                    path = path,
+                    selectedPath = selectedPath,
+                    onOpen = onOpenEntry,
+                    onSelect = onSelect,
+                )
             }
         }
     }
@@ -588,93 +594,141 @@ private fun categoryIcon(kind: FsCategoryKind): ImageVector = when (kind) {
     FsCategoryKind.OTHER -> Icons.Default.Folder
 }
 
+/**
+ * The listing as a card: a header row naming the columns, then one line per entry with a
+ * coloured badge. It reads as a table of files rather than as a settings list, which is
+ * what a file manager is.
+ */
+@Composable
+private fun FileTable(
+    entries: List<FsEntry>,
+    path: String,
+    selectedPath: String?,
+    onOpen: (FsEntry) -> Unit,
+    onSelect: (FsEntry) -> Unit,
+) {
+    val selected = selectedPath ?: ""
+    LazyColumn(
+        Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+        item(key = "header") {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.files_col_name),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    stringResource(R.string.files_col_date),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        items(entries, key = { it.relativePath }) { entry ->
+            FileRow(
+                entry = entry,
+                selected = selected.isNotEmpty() && FsPaths.join(path, entry.name) == selected,
+                onOpen = { onOpen(entry) },
+                onSelect = { onSelect(entry) },
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FileRow(entry: FsEntry, selected: Boolean, onOpen: () -> Unit, onSelect: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(if (selected) PocketAccent.copy(alpha = 0.16f) else Color.Transparent)
-            // Long press selects, the way a file manager does, so the row itself stays clean.
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Color(0xFF8B5CF6).copy(alpha = 0.16f) else Color.Transparent)
             .combinedClickable(onClick = onOpen, onLongClick = onSelect)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .height(56.dp)
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FolderIcon(entry)
-        Spacer(Modifier.width(14.dp))
+        TypeBadge(FsFileTypes.of(entry))
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 entry.name,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 2,
+                fontSize = 13.sp,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onBackground,
             )
-            Text(
-                // A folder says how much is inside it, a file says how big it is.
-                when {
-                    entry.isDirectory && entry.childCount >= 0 -> stringResource(R.string.files_cat_count, entry.childCount)
-                    entry.isDirectory -> stringResource(R.string.files_folder)
-                    else -> formatFileSize(entry.sizeBytes)
-                },
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // The size belongs under the name on a narrow screen; the date sits on the
+            // right, so the eye runs down a column instead of across a row.
+            if (!entry.isDirectory) {
+                Text(formatFileSize(entry.sizeBytes), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-        // The date sits at the far right of the row, on the name's line, the way a
-        // file manager keeps the eye moving down the column rather than the row.
         if (entry.lastModifiedMillis > 0L) {
             Text(
                 formatEntryDate(entry.lastModifiedMillis),
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
-                modifier = Modifier.padding(start = 10.dp),
             )
         }
     }
 }
 
 /**
- * A folder in the app's own amber, with a badge when the folder is a known kind, so
- * DCIM, Music or Movies are recognisable before the name is read.
+ * The coloured square that says what an entry is. A folder is amber, an image violet, an
+ * archive a different amber, and the icon is white on top of the colour.
  */
 @Composable
-private fun FolderIcon(entry: FsEntry) {
-    Box(Modifier.size(width = 44.dp, height = 40.dp), contentAlignment = Alignment.Center) {
+private fun TypeBadge(type: FsFileType) {
+    Box(
+        Modifier
+            .size(36.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(typeBrush(type)),
+        contentAlignment = Alignment.Center,
+    ) {
         Icon(
-            imageVector = if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Description,
+            imageVector = typeIcon(type),
             contentDescription = null,
-            modifier = Modifier.size(40.dp),
-            tint = if (entry.isDirectory) Color(0xFFE8A33D) else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+            tint = Color.White,
         )
-        val badge = entry.badgeKind()
-        if (badge != null) {
-            Surface(
-                modifier = Modifier.align(Alignment.BottomCenter).size(19.dp),
-                shape = RoundedCornerShape(4.dp),
-                color = Color.White,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(badge, null, Modifier.size(13.dp), tint = Color(0xFF2F6FDB))
-                }
-            }
-        }
     }
 }
 
-private fun FsEntry.badgeKind(): ImageVector? {
-    if (!isDirectory) return null
-    return when {
-        listOf("dcim", "camera").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.PhotoCamera
-        listOf("music", "melodies").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.MusicNote
-        listOf("movie", "video", "camera").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.Movie
-        listOf("download").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.Download
-        listOf("document", "doc").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.Description
-        listOf("picture", "photo", "image").any { name.startsWith(it, ignoreCase = true) } -> Icons.Default.Image
-        else -> null
-    }
+private fun typeBrush(type: FsFileType): Brush = when (type) {
+    FsFileType.FOLDER -> Brush.linearGradient(listOf(Color(0xFFFBBF24), Color(0xFFF97316)))
+    FsFileType.IMAGE -> Brush.linearGradient(listOf(Color(0xFF8B5CF6), Color(0xFFD946EF)))
+    FsFileType.VIDEO -> Brush.linearGradient(listOf(Color(0xFF3B82F6), Color(0xFF22D3EE)))
+    FsFileType.AUDIO -> Brush.linearGradient(listOf(Color(0xFF34D399), Color(0xFF14B8A6)))
+    FsFileType.PDF -> Brush.linearGradient(listOf(Color(0xFFEF4444), Color(0xFFE11D48)))
+    FsFileType.APK -> Brush.linearGradient(listOf(Color(0xFF84CC16), Color(0xFF16A34A)))
+    FsFileType.ARCHIVE -> Brush.linearGradient(listOf(Color(0xFFFCD34D), Color(0xFFD97706)))
+    FsFileType.DOC -> Brush.linearGradient(listOf(Color(0xFF0EA5E9), Color(0xFF6366F1)))
+    FsFileType.OTHER -> Brush.linearGradient(listOf(Color(0xFF94A3B8), Color(0xFF475569)))
+}
+
+private fun typeIcon(type: FsFileType): ImageVector = when (type) {
+    FsFileType.FOLDER -> Icons.Default.Folder
+    FsFileType.IMAGE -> Icons.Default.Image
+    FsFileType.VIDEO -> Icons.Default.Movie
+    FsFileType.AUDIO -> Icons.Default.MusicNote
+    FsFileType.PDF -> Icons.Default.PictureAsPdf
+    FsFileType.APK -> Icons.Default.Android
+    FsFileType.ARCHIVE -> Icons.Default.FolderZip
+    FsFileType.DOC -> Icons.Default.Description
+    FsFileType.OTHER -> Icons.Default.InsertDriveFile
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -713,14 +767,10 @@ private fun EntryGrid(entries: List<FsEntry>, path: String, selectedPath: String
     }
 }
 
-private fun entrySubtitle(entry: FsEntry): String {
-    val size = formatFileSize(entry.sizeBytes)
-    if (entry.lastModifiedMillis <= 0L) return size
-    return "$size · ${formatEntryDate(entry.lastModifiedMillis)}"
-}
 
+/** "11 dec. 2024", the shape a Romanian file manager shows. */
 private fun formatEntryDate(millis: Long): String =
-    SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(millis))
+    SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(millis))
 
 @Composable
 private fun SelectionBar(name: String, onRename: () -> Unit, onDelete: () -> Unit, onClose: () -> Unit) {
