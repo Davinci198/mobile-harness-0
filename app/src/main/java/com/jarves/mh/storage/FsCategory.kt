@@ -96,7 +96,12 @@ object FsCategories {
             is DeviceRoot.AllFiles -> SHARED_STORAGE
             // A granted folder is one place, not a storage layout: list what is inside it.
             is DeviceRoot.SafTree -> listOf(FsCategoryKind.OTHER to "")
-            is DeviceRoot.Shizuku -> DEVICE + SHARED_STORAGE.drop(1)
+            // The device root starts at /, where DCIM, Music and the rest do not exist:
+            // they live under the shared storage mount. Without the prefix every one of
+            // them is read as missing and its tile is dropped.
+            is DeviceRoot.Shizuku -> DEVICE + SHARED_STORAGE.drop(1).map { (kind, path) ->
+                kind to "sdcard/$path"
+            }
         }
         // A kind may repeat with a different path (/sdcard and /storage are both real), so
         // the pairs are what identify a tile.

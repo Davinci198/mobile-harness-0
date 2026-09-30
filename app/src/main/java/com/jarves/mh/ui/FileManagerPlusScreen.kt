@@ -228,6 +228,10 @@ fun FileManagerPlusScreen(
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            // The title yields the space first: without a weight the badge
+                            // is measured last against whatever is left and gets clipped
+                            // to "3." when the actions row is wide.
+                            modifier = Modifier.weight(1f),
                         )
                         Spacer(Modifier.width(6.dp))
                         VersionBadge()
