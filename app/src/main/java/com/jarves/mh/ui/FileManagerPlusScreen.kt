@@ -1,5 +1,6 @@
 package com.jarves.mh.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -159,6 +160,7 @@ fun FileManagerPlusScreen(
     onNavigate: (String) -> Unit,
     onGoUp: () -> Unit,
     onGoHome: () -> Unit,
+    onBackToProjects: () -> Unit,
     onRefreshRoots: () -> Unit,
     onPickFolder: (android.net.Uri) -> Unit,
     onOpenEntry: (FsEntry) -> Unit,
@@ -194,6 +196,29 @@ fun FileManagerPlusScreen(
     var sortMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(path) { onClearSelection() }
+
+    // On a gesture-navigation phone the system back arrives from either edge, and with no
+    // handler here it fell straight through to the activity: the home bar or the app
+    // closed instead of walking back out. It unwinds this screen's own stack first —
+    // overlays, then the folder chain — and hands the last one to the main tab rather
+    // than to the activity, so leaving Files is two deliberate gestures and never one.
+    BackHandler {
+        when {
+            // A dialog owns its own window, but if the gesture reaches this callback the
+            // dialog still has to be what goes, not the folder underneath it.
+            dialog != null -> dialog = null
+            lightboxPath != null -> onCloseLightbox()
+            openName != null -> onCloseFile()
+            searchOpen -> {
+                searchOpen = false
+                onQueryChange("")
+            }
+
+            previewPath != null -> onTogglePreview(null)
+            path.isNotEmpty() -> onGoUp()
+            else -> onBackToProjects()
+        }
+    }
 
     if (openName != null) {
         TextViewer(

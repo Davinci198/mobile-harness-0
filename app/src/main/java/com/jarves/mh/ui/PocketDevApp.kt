@@ -2196,6 +2196,7 @@ private fun RootScreenHost(
                     onNavigate = viewModel::navigateFiles,
                     onGoUp = viewModel::goUpFiles,
                     onGoHome = { state.fsRoots.firstOrNull()?.let(viewModel::openFileRoot) },
+                    onBackToProjects = { screen = RootScreen.PROJECTS },
                     onRefreshRoots = viewModel::refreshFileRoots,
                     onPickFolder = { uri -> viewModel.addSafTree(uri) },
                     onOpenEntry = viewModel::openFileEntry,
