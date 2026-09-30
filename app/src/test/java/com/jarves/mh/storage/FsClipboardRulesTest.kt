@@ -8,7 +8,9 @@ import java.util.Locale
 
 class FsClipboardRulesTest {
 
-    private val root = "storage/emulated/0"
+    // Everything is root-relative, which is how the view model keeps it: the clipboard
+    // outlives the folder it was filled from, so it never holds an absolute path.
+    private val root = ""
 
     @Test
     fun puttingStripsDuplicatesAndAnythingEscapingTheRoot() {
