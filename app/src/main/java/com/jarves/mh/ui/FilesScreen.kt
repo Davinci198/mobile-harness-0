@@ -717,7 +717,8 @@ private fun FileTable(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    stringResource(R.string.files_status, entries.size, selected.count { it }),
+                    // The browser holds one selected path at a time, so the count is 0 or 1.
+                    stringResource(R.string.files_status, entries.size, if (selected.isEmpty()) 0 else 1),
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
