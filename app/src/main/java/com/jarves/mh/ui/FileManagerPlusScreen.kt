@@ -398,6 +398,8 @@ fun FileManagerPlusScreen(
                     onOpen = onOpenEntry,
                     onToggleSelect = onToggleSelect,
                     onTogglePreview = onTogglePreview,
+                    onRename = { dialog = FmpDialog.Rename(it) },
+                    onDelete = { dialog = FmpDialog.Delete(it) },
                 )
                 return@Column
             }

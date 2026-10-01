@@ -1168,12 +1168,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Opens a directory or loads a text preview, depending on the entry. */
+    /**
+     * Where an entry actually lives. A listing entry is only ever named after the folder
+     * being browsed, but a search hit can come from anywhere under the search base and
+     * carries its whole path — the walker builds it while descending. Joining a hit's
+     * name onto the current folder would open, rename or delete a different file.
+     */
+    private fun pathOf(entry: com.jarves.mh.storage.FsEntry): String {
+        val state = _state.value
+        if (state.fsSearchResults.any { it === entry }) return entry.relativePath
+        return com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)
+    }
+
     fun openFileEntry(entry: com.jarves.mh.storage.FsEntry) {
+        val path = pathOf(entry)
         if (entry.isDirectory) {
-            navigateFiles(com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name))
+            navigateFiles(path)
             return
         }
-        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
         // Anything the viewer cannot render goes to an app that can: a video has no
         // business being read as text, which is how a binary file used to reach the
         // screen as an error instead of as a film.
@@ -1315,12 +1327,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun renameFileEntry(entry: com.jarves.mh.storage.FsEntry, newName: String) {
-        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        val path = pathOf(entry)
         mutateThenReload("Rename failed") { it.rename(path, newName) }
     }
 
     fun deleteFileEntry(entry: com.jarves.mh.storage.FsEntry) {
-        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
+        val path = pathOf(entry)
         mutateThenReload("Could not delete") { it.delete(path, recursive = entry.isDirectory) }
     }
 
