@@ -120,19 +120,25 @@ object ShizukuFs {
         "stat -c '%f|%s|%Y|%n' ${quote(path)} 2>/dev/null || true"
 
     /**
-     * `cat` with a byte cap, so a huge or endless file cannot pin the pipe open. The cap
+     * `head` with a byte cap, so a huge or endless file cannot pin the pipe open. The cap
      * is enforced by the reader too, but stopping early here also frees the process.
+     *
+     * stderr is deliberately left alone: `2>/dev/null` used to swallow "Permission denied"
+     * and leave the reader with nothing but a placeholder to show, so a plain missing file
+     * came out as a Shizuku problem the user was asked to go and fix.
      */
     fun readTextCommand(path: String, maxBytes: Long): String =
-        "head -c ${maxBytes.coerceAtLeast(0L)} ${quote(path)} 2>/dev/null"
+        "head -c ${maxBytes.coerceAtLeast(0L)} ${quote(path)}"
 
     /**
      * `base64` in and out, because a command pipe carries text safely and an archive is
      * binary. The cap is enforced here as well as by the reader, so a huge file cannot
-     * pin the pipe open.
+     * pin the pipe open. stderr rides alongside: the pipe's exit status is `tr`'s, which
+     * succeeds even when `head` never opened the file, so the shell's own words are the
+     * only thing left to tell the two apart.
      */
     fun readBytesCommand(path: String, maxBytes: Long): String =
-        "head -c ${maxBytes.coerceAtLeast(0L)} ${quote(path)} 2>/dev/null | base64 | tr -d '\\n'"
+        "head -c ${maxBytes.coerceAtLeast(0L)} ${quote(path)} | base64 | tr -d '\\n'"
 
     /** One copy for files and folders alike, which is what a paste needs. */
     fun copyCommand(from: String, to: String): String =

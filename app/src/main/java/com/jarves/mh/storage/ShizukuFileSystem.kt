@@ -104,15 +104,40 @@ class ShizukuFileSystem(
         return FsResult.Ok(entry)
     }
 
+    /**
+     * The shell's own account of a read that produced nothing, or null when nothing went
+     * wrong.
+     *
+     * An empty file is a successful read of zero bytes and has to come back as one — it
+     * used to be reported as "No such file", so every freshly created file looked missing.
+     * What tells the two apart is stderr: a failed `head` always says why, and its words
+     * are no longer thrown away on the way out of the pipe.
+     */
+    private fun readFailure(result: com.jarves.mh.runtime.ShizukuCommandResult): FsResult<Nothing>? {
+        // The byte reader is a pipeline whose exit status is the last command's, which
+        // succeeds even when `head` never opened anything: stdout blank and stderr not
+        // blank is the only signal left.
+        if (result.stdout.isEmpty() && result.stderr.isNotBlank()) return classifyRead(result.stderr)
+        if (!result.ok) return classifyRead(result.stderr)
+        return null
+    }
+
+    /** Turns a shell message into the kind of error the screen can explain. */
+    private fun classifyRead(stderr: String): FsResult<Nothing> {
+        val message = stderr.trim().ifBlank { "Shizuku could not read this" }
+        return when {
+            message.contains("No such file") || message.contains("not found") ->
+                fsError(FsErrorKind.NOT_FOUND, message)
+            // Not Shizuku's fault: asking for it again would send the user in a circle.
+            message.contains("Permission denied") -> fsError(FsErrorKind.NO_ACCESS, message)
+            else -> fsError(FsErrorKind.NO_ACCESS, message, FsRemedy.REQUEST_SHIZUKU)
+        }
+    }
+
     override suspend fun readBytes(path: String, maxBytes: Long): FsResult<ByteArray> {
         if (!FsPaths.isSafeRelative(path)) return fsError(FsErrorKind.FAILED, "Path escapes the root")
         val result = run(ShizukuFs.readBytesCommand(absolute(path), maxBytes), READ_TIMEOUT_MS)
-        if (result.exitCode == 0 && result.stdout.isBlank()) {
-            return fsError(FsErrorKind.NOT_FOUND, "No such file")
-        }
-        if (!result.ok) {
-            return fsError(FsErrorKind.NO_ACCESS, result.stderr.ifBlank { "Shizuku could not read this" }, FsRemedy.REQUEST_SHIZUKU)
-        }
+        readFailure(result)?.let { return it }
         return runCatching { FsResult.Ok(java.util.Base64.getDecoder().decode(result.stdout.trim())) }
             .getOrElse { fsError(FsErrorKind.FAILED, "The file could not be decoded") }
     }
@@ -149,12 +174,7 @@ class ShizukuFileSystem(
             ShizukuFs.readTextCommand(absolute(path), FsLimits.MAX_TEXT_READ_BYTES),
             READ_TIMEOUT_MS,
         )
-        if (result.exitCode == 0 && result.stdout.isEmpty()) {
-            return fsError(FsErrorKind.NOT_FOUND, "No such file")
-        }
-        if (!result.ok) {
-            return fsError(FsErrorKind.NO_ACCESS, result.stderr.ifBlank { "Shizuku could not read this" }, FsRemedy.REQUEST_SHIZUKU)
-        }
+        readFailure(result)?.let { return it }
         return FsResult.Ok(result.stdout.take(FsLimits.MAX_SHELL_OUTPUT_CHARS.toInt()))
     }
 
