@@ -1419,9 +1419,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Stores a folder the user picked. The permission grant is persisted so the tree keeps
      * working after a reboot; without it the URI is useless, so both are dropped together.
      */
-    fun addSafTree(uri: android.net.Uri) {        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+    fun addSafTree(uri: android.net.Uri) {
+        val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
             android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         runCatching { getApplication<Application>().contentResolver.takePersistableUriPermission(uri, flags) }
+            .exceptionOrNull()?.let { failure ->
+                // The folder is kept either way: the grant the picker just handed lasts
+                // the session, and the pill is what leads back to the picker when it does
+                // not. The failure used to be swallowed, which left the cause unknown.
+                Log.e("Files", "grant persist failed uri=$uri ${failure.javaClass.simpleName}: ${failure.message}")
+            }
         val trees = readSafTrees().toMutableList()
         val entry = uri.toString() to prettifyTreeLabel(uri)
         if (entry !in trees) trees += entry

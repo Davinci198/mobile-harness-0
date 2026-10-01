@@ -66,7 +66,7 @@ class SafFileSystem(
         val children = runCatching {
             DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
         }.getOrNull() ?: return fsError(FsErrorKind.FAILED, "This folder cannot be listed")
-        return runCatching {
+        val listed = runCatching {
             resolver.query(children, CHILD_COLUMNS, null, null, null)?.use { cursor ->
                 val entries = mutableListOf<FsEntry>()
                 while (cursor.moveToNext()) {
@@ -76,9 +76,23 @@ class SafFileSystem(
                     .sortedWith(compareByDescending<FsEntry> { it.isDirectory }.thenBy { it.name.lowercase() })
                     .take(FsLimits.MAX_LISTED_ENTRIES)
             }
-        }.getOrNull()?.let { FsResult.Ok(it) }
-            ?: fsError(FsErrorKind.FAILED, "This folder cannot be listed")
+        }.getOrElse { cause -> return grantOrFailed(cause, "This folder cannot be listed") }
+            ?: return fsError(FsErrorKind.FAILED, "This folder cannot be listed")
+        return FsResult.Ok(listed)
     }
+
+    /**
+     * A tree the picker granted once can come back later with its grant missing, and every
+     * provider call then dies with SecurityException. That is the one failure here the user
+     * can fix by picking the folder again, so it comes back as the picker remedy instead of
+     * a dead end.
+     */
+    private fun <T> grantOrFailed(cause: Throwable, fallback: String): FsResult<T> =
+        if (cause is SecurityException) {
+            fsError(FsErrorKind.NO_ACCESS, "The access to this folder expired. Pick it again.", FsRemedy.PICK_FOLDER)
+        } else {
+            fsError(FsErrorKind.FAILED, cause.message ?: fallback)
+        }
 
     override suspend fun stat(path: String): FsResult<FsEntry> {
         val uri = documentUri(path) ?: return fsError(FsErrorKind.FAILED, "Path escapes the folder")
@@ -110,7 +124,7 @@ class SafFileSystem(
                 if (text == null) fsError(FsErrorKind.FAILED, "File is too large to open")
                 else FsResult.Ok(text)
             },
-            onFailure = { fsError(FsErrorKind.FAILED, it.message ?: "File could not be read") },
+            onFailure = { grantOrFailed(it, "File could not be read") },
         )
     }
 
@@ -121,7 +135,7 @@ class SafFileSystem(
                 ?: error("The provider refused to open this file")
             if (bytes.size > maxBytes) error("File is too large")
             FsResult.Ok(bytes)
-        }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be read") }
+        }.getOrElse { grantOrFailed(it, "File could not be read") }
     }
 
     override suspend fun writeBytes(path: String, bytes: ByteArray): FsResult<Unit> {
@@ -133,7 +147,7 @@ class SafFileSystem(
             resolver.openOutputStream(target, "wt")?.use { it.write(bytes) }
                 ?: error("The provider refused to open this file")
             FsResult.Ok(Unit)
-        }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be written") }
+        }.getOrElse { grantOrFailed(it, "File could not be written") }
     }
 
     /**
@@ -217,7 +231,7 @@ class SafFileSystem(
             resolver.openOutputStream(target, "wt")?.use { it.write(content.toByteArray()) }
                 ?: error("The provider refused to open this file")
             FsResult.Ok(Unit)
-        }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be written") }
+        }.getOrElse { grantOrFailed(it, "File could not be written") }
     }
 
     override suspend fun delete(path: String, recursive: Boolean): FsResult<Unit> {
@@ -227,7 +241,7 @@ class SafFileSystem(
             DocumentsContract.deleteDocument(resolver, uri)
                 ?: return fsError(FsErrorKind.FAILED, "The provider refused to delete this")
             FsResult.Ok(Unit)
-        }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "Could not delete") }
+        }.getOrElse { grantOrFailed(it, "Could not delete") }
     }
 
     override suspend fun rename(path: String, newName: String): FsResult<Unit> {
@@ -237,7 +251,7 @@ class SafFileSystem(
             DocumentsContract.renameDocument(resolver, uri, newName)
                 ?: return fsError(FsErrorKind.FAILED, "The provider refused to rename this")
             FsResult.Ok(Unit)
-        }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "Rename failed") }
+        }.getOrElse { grantOrFailed(it, "Rename failed") }
     }
 
     override suspend fun createDirectory(path: String): FsResult<Unit> {
@@ -256,7 +270,7 @@ class SafFileSystem(
                 name,
             ) ?: return fsError(FsErrorKind.FAILED, "The provider refused to create a folder")
             FsResult.Ok(Unit)
-        }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "Could not create the folder") }
+        }.getOrElse { grantOrFailed(it, "Could not create the folder") }
     }
 
     private companion object {
