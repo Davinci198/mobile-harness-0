@@ -186,6 +186,13 @@ data class AppUiState(
     val fsRoot: com.jarves.mh.storage.DeviceRoot? = null,
     val fsPath: String = "",
     val fsCategories: List<com.jarves.mh.storage.FsCategory> = emptyList(),
+    /**
+     * Whether the root's tiles belong at the empty path, rather than a listing of it.
+     * The tiles home and the contents of the main storage are both "path = ''", so the
+     * tap on "Main storage" — which opens the root itself — has to be able to tell the
+     * two apart: without this it sent the screen back to the tiles it was already on.
+     */
+    val fsShowTiles: Boolean = false,
     val fsEntries: List<com.jarves.mh.storage.FsEntry> = emptyList(),
     val fsLoading: Boolean = false,
     val fsError: com.jarves.mh.storage.FsError? = null,
@@ -1134,6 +1141,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 fsPath = "",
                 fsEntries = emptyList(),
                 fsError = null,
+                fsShowTiles = com.jarves.mh.storage.FsCategories.definitionsFor(root).isNotEmpty(),
                 fsStorageFree = -1L,
                 fsStorageTotal = -1L,
             )
@@ -1163,8 +1171,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun navigateFiles(path: String) {
-        _state.update { it.copy(fsPath = path, fsError = null) }
+        // Anywhere the user points at is a listing, tiles included only by opening the
+        // root: the "Main storage" tile is the empty path too, and used to come straight
+        // back here to the same tiles.
+        _state.update { it.copy(fsPath = path, fsShowTiles = false, fsError = null) }
         loadDirectory(path)
+    }
+
+    /** Back to this root's tiles from a listing of the root itself. */
+    fun showFileRootTiles() {
+        _state.value.fsRoot?.let { openFileRoot(it) }
     }
 
     fun goUpFiles() {
@@ -1461,8 +1477,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // At the root of a root the screen shows category tiles instead of a flat list, so
         // the count per tile is what has to be worked out. A granted folder has no tiles,
         // so its root falls through to the listing — otherwise the tiles and the content
-        // would be the same place and nothing could be opened.
-        if (path.isEmpty() && com.jarves.mh.storage.FsCategories.definitionsFor(root).isNotEmpty()) {
+        // would be the same place and nothing could be opened. [fsShowTiles] is what
+        // separates the tiles home from a listing of the root itself: both are the empty
+        // path, and "Main storage" opens the second one.
+        if (com.jarves.mh.storage.FsCategories.tilesBelongAt(root, path, _state.value.fsShowTiles)) {
             loadCategories(backend, root)
             return
         }

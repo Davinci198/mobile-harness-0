@@ -118,4 +118,15 @@ object FsCategories {
         // the pairs are what identify a tile.
         return base.filterNot { (_, path) -> path in HIDDEN_DEVICE_PATHS }
     }
+
+    /**
+     * Whether [path] under [root] is the tiles home rather than a folder to list.
+     *
+     * The tiles home and the contents of the main storage are both the empty path: the
+     * root opens with tiles, and the "Main storage" tile opens the root itself. Without
+     * the [tilesRequested] bit that tile handed the screen back to the tiles it was
+     * already on, and nothing could ever be browsed.
+     */
+    fun tilesBelongAt(root: DeviceRoot, path: String, tilesRequested: Boolean): Boolean =
+        path.isEmpty() && tilesRequested && definitionsFor(root).isNotEmpty()
 }
