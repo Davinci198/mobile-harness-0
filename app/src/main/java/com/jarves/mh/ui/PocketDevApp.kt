@@ -2203,6 +2203,7 @@ private fun RootScreenHost(
                     onCloseFile = viewModel::closeOpenFile,
                     onOpenElsewhere = viewModel::openFileElsewhere,
                     onCreateDirectory = viewModel::createFilesDirectory,
+                    onCreateFile = viewModel::createFilesFile,
                     onRename = viewModel::renameFileEntry,
                     onDelete = viewModel::deleteFileEntry,
                     onExtract = viewModel::extractHere,

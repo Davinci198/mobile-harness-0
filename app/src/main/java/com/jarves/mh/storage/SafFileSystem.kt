@@ -125,12 +125,49 @@ class SafFileSystem(
     }
 
     override suspend fun writeBytes(path: String, bytes: ByteArray): FsResult<Unit> {
-        val uri = documentUri(path) ?: return fsError(FsErrorKind.FAILED, "Path escapes the folder")
+        val target = when (val document = writableUri(path)) {
+            is FsResult.Err -> return document
+            is FsResult.Ok -> document.value
+        }
         return runCatching {
-            resolver.openOutputStream(uri, "wt")?.use { it.write(bytes) }
+            resolver.openOutputStream(target, "wt")?.use { it.write(bytes) }
                 ?: error("The provider refused to open this file")
             FsResult.Ok(Unit)
         }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be written") }
+    }
+
+    /**
+     * The document to write through: the one already there, or one made for it.
+     *
+     * A provider refuses to open a file that does not exist yet, so every write has to
+     * come through here. Without it, saving an archive failed on the very file being
+     * saved — "missing file" for the thing the save was supposed to create.
+     */
+    private fun writableUri(path: String): FsResult<Uri> {
+        val uri = documentUri(path) ?: return fsError(FsErrorKind.FAILED, "Path escapes the folder")
+        if (column(uri, DocumentsContract.Document.COLUMN_MIME_TYPE) != null) return FsResult.Ok(uri)
+        val made = createDocument(path)
+            ?: return fsError(FsErrorKind.FAILED, "The provider refused to create this file")
+        return FsResult.Ok(made)
+    }
+
+    /** Makes the file at [path] beside its siblings and returns the URI it was given. */
+    private fun createDocument(path: String): Uri? {
+        val name = FsPaths.nameOf(path)
+        if (name.isEmpty()) return null
+        val parent = FsPaths.parentOf(path) ?: return null
+        val parentId = documentId(parent) ?: return null
+        val parentUri = runCatching { DocumentsContract.buildDocumentUriUsingTree(treeUri, parentId) }.getOrNull()
+            ?: return null
+        return runCatching {
+            DocumentsContract.createDocument(resolver, parentUri, mimeOf(name), name)
+        }.getOrNull()
+    }
+
+    private fun mimeOf(name: String): String {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+            ?: "application/octet-stream"
     }
 
     override suspend fun copy(fromPath: String, toPath: String, recursive: Boolean): FsResult<Unit> {
@@ -169,12 +206,15 @@ class SafFileSystem(
         // Appending through SAF is provider-specific and rarely supported, so say so
         // instead of silently truncating the file.
         if (append) return fsError(FsErrorKind.FAILED, "Appending is not supported for granted folders")
-        val uri = documentUri(path) ?: return fsError(FsErrorKind.FAILED, "Path escapes the folder")
         if (content.toByteArray().size > FsLimits.MAX_TEXT_READ_BYTES) {
             return fsError(FsErrorKind.FAILED, "File is too large to write")
         }
+        val target = when (val document = writableUri(path)) {
+            is FsResult.Err -> return document
+            is FsResult.Ok -> document.value
+        }
         return runCatching {
-            resolver.openOutputStream(uri, "wt")?.use { it.write(content.toByteArray()) }
+            resolver.openOutputStream(target, "wt")?.use { it.write(content.toByteArray()) }
                 ?: error("The provider refused to open this file")
             FsResult.Ok(Unit)
         }.getOrElse { fsError(FsErrorKind.FAILED, it.message ?: "File could not be written") }

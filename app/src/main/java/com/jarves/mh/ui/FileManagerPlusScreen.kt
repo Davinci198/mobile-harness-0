@@ -31,6 +31,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Archive
@@ -168,6 +169,7 @@ fun FileManagerPlusScreen(
     onCloseFile: () -> Unit,
     onOpenElsewhere: () -> Unit,
     onCreateDirectory: (String) -> Unit,
+    onCreateFile: (String) -> Unit,
     onRename: (FsEntry, String) -> Unit,
     onDelete: (FsEntry) -> Unit,
     onExtract: (FsEntry) -> Unit,
@@ -196,6 +198,7 @@ fun FileManagerPlusScreen(
     var dialog by remember { mutableStateOf<FmpDialog?>(null) }
     var searchOpen by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
+    var createMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(path) { onClearSelection() }
 
@@ -271,6 +274,32 @@ fun FileManagerPlusScreen(
                     }
                 },
                 actions = {
+                    Box {
+                        IconButton(onClick = { createMenu = true }) {
+                            Icon(Icons.Default.Add, stringResource(R.string.files_create))
+                        }
+                        // Both creation actions live behind one button: they are rare
+                        // enough not to deserve a slot each, and a row of icons is the
+                        // one thing this bar does not have room for.
+                        DropdownMenu(expanded = createMenu, onDismissRequest = { createMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.files_new_file), fontSize = 13.sp) },
+                                leadingIcon = { Icon(Icons.Default.Description, null, Modifier.size(18.dp)) },
+                                onClick = {
+                                    createMenu = false
+                                    dialog = FmpDialog.NewFile
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.files_new_folder), fontSize = 13.sp) },
+                                leadingIcon = { Icon(Icons.Default.CreateNewFolder, null, Modifier.size(18.dp)) },
+                                onClick = {
+                                    createMenu = false
+                                    dialog = FmpDialog.NewFolder
+                                },
+                            )
+                        }
+                    }
                     IconButton(onClick = { searchOpen = !searchOpen }) {
                         Icon(Icons.Default.Search, stringResource(R.string.files_search))
                     }
@@ -369,6 +398,8 @@ fun FileManagerPlusScreen(
                     onOpen = onOpenEntry,
                     onToggleSelect = onToggleSelect,
                     onTogglePreview = onTogglePreview,
+                    onRename = { dialog = FmpDialog.Rename(it) },
+                    onDelete = { dialog = FmpDialog.Delete(it) },
                 )
                 return@Column
             }
@@ -395,7 +426,8 @@ fun FileManagerPlusScreen(
                             onOpen = onOpenEntry,
                             onToggleSelect = onToggleSelect,
                             onTogglePreview = onTogglePreview,
-                            onLongPress = { entry -> if (entry.isDirectory) onNavigate(FsPaths.join(path, entry.name)) else onShare(listOf(entry)) },
+                            onRename = { dialog = FmpDialog.Rename(it) },
+                            onDelete = { dialog = FmpDialog.Delete(it) },
                         )
                     }
                     // The side panel is the one piece of the desktop layout that is worth
@@ -416,6 +448,13 @@ fun FileManagerPlusScreen(
         is FmpDialog.NewFolder -> FmpPromptDialog(
             title = stringResource(R.string.files_new_folder),
             onConfirm = { onCreateDirectory(it); dialog = null },
+            onDismiss = { dialog = null },
+        )
+
+        is FmpDialog.NewFile -> FmpPromptDialog(
+            title = stringResource(R.string.files_new_file),
+            initial = "note.txt",
+            onConfirm = { onCreateFile(it); dialog = null },
             onDismiss = { dialog = null },
         )
 
@@ -444,6 +483,7 @@ fun FileManagerPlusScreen(
 
 private sealed interface FmpDialog {
     data object NewFolder : FmpDialog
+    data object NewFile : FmpDialog
     data class Rename(val entry: FsEntry) : FmpDialog
     data class Delete(val entry: FsEntry) : FmpDialog
 }
@@ -634,10 +674,11 @@ private fun FmpTable(
     onOpen: (FsEntry) -> Unit,
     onToggleSelect: (FsEntry) -> Unit,
     onTogglePreview: (FsEntry?) -> Unit,
-    onLongPress: (FsEntry) -> Unit = {},
+    onRename: (FsEntry) -> Unit,
+    onDelete: (FsEntry) -> Unit,
 ) {
     if (view == FsViewMode.GRID) {
-        EntryGrid(entries, path, selection, onOpen, onToggleSelect, onTogglePreview)
+        EntryGrid(entries, path, selection, onOpen, onToggleSelect, onTogglePreview, onRename, onDelete)
         return
     }
     LazyColumn(Modifier.fillMaxSize()) {
@@ -679,7 +720,8 @@ private fun FmpTable(
                 onOpen = { onOpen(entry) },
                 onToggleSelect = { onToggleSelect(entry) },
                 onTogglePreview = { onTogglePreview(entry) },
-                onLongPress = { onLongPress(entry) },
+                onRename = { onRename(entry) },
+                onDelete = { onDelete(entry) },
             )
         }
     }
@@ -694,49 +736,95 @@ private fun FmpRow(
     onOpen: () -> Unit,
     onToggleSelect: () -> Unit,
     onTogglePreview: () -> Unit,
-    onLongPress: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val type = FsFileTypes.of(entry)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) FmpColors.Select.copy(alpha = 0.16f) else Color.Transparent)
-            .combinedClickable(onClick = onOpen, onLongClick = onToggleSelect)
-            .height(56.dp)
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TypeBadge(type)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                entry.name,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = FmpColors.Text,
-            )
-            if (entry.isDirectory) {
+    // A long press used to be the only way to pick something, which meant selection had no
+    // other home and rename and delete had none at all. It opens the menu now, and the
+    // menu still offers picking as its first item.
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (selected) FmpColors.Select.copy(alpha = 0.16f) else Color.Transparent)
+                .combinedClickable(onClick = onOpen, onLongClick = { menuOpen = true })
+                .height(56.dp)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TypeBadge(type)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    stringResource(R.string.files_folder),
-                    fontSize = 11.sp,
-                    color = FmpColors.Muted,
+                    entry.name,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = FmpColors.Text,
                 )
+                if (entry.isDirectory) {
+                    Text(
+                        stringResource(R.string.files_folder),
+                        fontSize = 11.sp,
+                        color = FmpColors.Muted,
+                    )
+                }
+            }
+            Text(
+                if (entry.lastModifiedMillis > 0L) fmpDate(entry.lastModifiedMillis) else "",
+                fontSize = 11.sp,
+                color = FmpColors.Muted,
+                maxLines = 1,
+            )
+            Spacer(Modifier.width(8.dp))
+            TypePill(type)
+            IconButton(onClick = onTogglePreview, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.SelectAll, null, Modifier.size(16.dp), tint = FmpColors.Muted)
             }
         }
-        Text(
-            if (entry.lastModifiedMillis > 0L) fmpDate(entry.lastModifiedMillis) else "",
-            fontSize = 11.sp,
-            color = FmpColors.Muted,
-            maxLines = 1,
+        FmpEntryMenu(
+            expanded = menuOpen,
+            onDismiss = { menuOpen = false },
+            onSelect = { menuOpen = false; onToggleSelect() },
+            onRename = { menuOpen = false; onRename() },
+            onDelete = { menuOpen = false; onDelete() },
         )
-        Spacer(Modifier.width(8.dp))
-        TypePill(type)
-        IconButton(onClick = onTogglePreview, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.SelectAll, null, Modifier.size(16.dp), tint = FmpColors.Muted)
-        }
+    }
+}
+
+/**
+ * What a long press offers on a file or a folder. Picking is first because a long press
+ * used to do only that, and rename and delete are the two things a file manager without
+ * them cannot do at all.
+ */
+@Composable
+private fun FmpEntryMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onSelect: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.files_select), fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.SelectAll, null, Modifier.size(18.dp)) },
+            onClick = onSelect,
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.files_rename), fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null, Modifier.size(18.dp)) },
+            onClick = onRename,
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.files_delete), fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.Delete, null, Modifier.size(18.dp)) },
+            onClick = onDelete,
+        )
     }
 }
 
@@ -749,6 +837,8 @@ private fun EntryGrid(
     onOpen: (FsEntry) -> Unit,
     onToggleSelect: (FsEntry) -> Unit,
     onTogglePreview: (FsEntry) -> Unit,
+    onRename: (FsEntry) -> Unit,
+    onDelete: (FsEntry) -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
@@ -757,30 +847,40 @@ private fun EntryGrid(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         items(entries, key = { it.relativePath }) { entry ->
-            Column(
-                Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(
-                        if (FsPaths.join(path, entry.name) in selection) {
-                            FmpColors.Select.copy(alpha = 0.16f)
-                        } else {
-                            Color.Transparent
-                        },
+            var menuOpen by remember { mutableStateOf(false) }
+            Box {
+                Column(
+                    Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            if (FsPaths.join(path, entry.name) in selection) {
+                                FmpColors.Select.copy(alpha = 0.16f)
+                            } else {
+                                Color.Transparent
+                            },
+                        )
+                        .combinedClickable(onClick = { onOpen(entry) }, onLongClick = { menuOpen = true })
+                        .clickable { onTogglePreview(entry) }
+                        .padding(6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    TypeBadge(FsFileTypes.of(entry), size = 48)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        entry.name,
+                        fontSize = 11.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        color = FmpColors.Text,
                     )
-                    .combinedClickable(onClick = { onOpen(entry) }, onLongClick = { onToggleSelect(entry) })
-                    .clickable { onTogglePreview(entry) }
-                    .padding(6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                TypeBadge(FsFileTypes.of(entry), size = 48)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    entry.name,
-                    fontSize = 11.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    color = FmpColors.Text,
+                }
+                FmpEntryMenu(
+                    expanded = menuOpen,
+                    onDismiss = { menuOpen = false },
+                    onSelect = { menuOpen = false; onToggleSelect(entry) },
+                    onRename = { menuOpen = false; onRename(entry) },
+                    onDelete = { menuOpen = false; onDelete(entry) },
                 )
             }
         }
