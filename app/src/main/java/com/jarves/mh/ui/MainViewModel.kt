@@ -216,6 +216,13 @@ data class AppUiState(
     /** Every entry the user has picked, as root-relative paths. */
     val fsSelection: Set<String> = emptySet(),
     val fsClipboard: com.jarves.mh.storage.FsClipboard = com.jarves.mh.storage.FsClipboard(),
+    /**
+     * Text taken from the system clipboard and waiting to be written into the folder at
+     * [fsPasteTextPath]. It sits in the state rather than in a dialog because the name is
+     * the only thing the screen still has to ask for.
+     */
+    val fsPasteText: String? = null,
+    val fsPasteTextPath: String? = null,
     /** The entry shown in the side panel, or null when the panel is closed. */
     val fsPreviewPath: String? = null,
     /** The fullscreen image being looked at, and where it sits in the listing. */
@@ -1704,7 +1711,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val state = _state.value
         val board = state.fsClipboard
         if (board.isEmpty) {
-            Log.d("Files", "paste skipped: clipboard empty path=$path")
+            // Nothing was picked up, but the clipboard may still carry text from another
+            // app: pasting it as a file is the other half of what the button promises.
+            pasteClipboardText(path)
             return
         }
         val targets = com.jarves.mh.storage.FsClipboardRules.pasteInto(board, path, "") ?: run {
@@ -1755,6 +1764,79 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             loadDirectory(path)
         }
+    }
+
+    /**
+     * Takes the system clipboard as text and holds it until the screen has a name for it.
+     * The clipboard can only be read while the app has focus, which is exactly when the
+     * paste button can be tapped, so the read belongs here rather than at startup.
+     */
+    private fun pasteClipboardText(path: String) {
+        val text = runCatching { clipboardText() }.getOrNull().orEmpty()
+        if (text.isBlank()) {
+            Log.d("Files", "paste text refused: clipboard empty path=$path")
+            _state.update { it.copy(fsStatus = "Clipboard gol") }
+            return
+        }
+        Log.d("Files", "paste text staged chars=${text.length} path=$path")
+        _state.update { it.copy(fsPasteText = text, fsPasteTextPath = path) }
+    }
+
+    /** Drops the staged text, the way dismissing the dialog that asked for its name. */
+    fun cancelPasteText() {
+        _state.update { it.copy(fsPasteText = null, fsPasteTextPath = null) }
+    }
+
+    /**
+     * Writes the staged text under [name] in the folder it was pasted into. A name that is
+     * already taken gets a number instead of being overwritten: pasting text is how a note
+     * arrives, and silently replacing an existing note is how a note is lost.
+     */
+    fun savePasteText(name: String) {
+        val state = _state.value
+        val text = state.fsPasteText ?: run {
+            Log.e("Files", "save paste text: nothing staged")
+            return
+        }
+        val path = state.fsPasteTextPath ?: state.fsPath
+        mutateThenReload("Could not create the file") { backend ->
+            val wanted = freeName(backend, path, name)
+            val result = backend.writeText(com.jarves.mh.storage.FsPaths.join(path, wanted), text)
+            if (result is com.jarves.mh.storage.FsResult.Ok) {
+                _state.update {
+                    it.copy(fsPasteText = null, fsPasteTextPath = null, fsStatus = "$wanted salvat")
+                }
+            }
+            result
+        }
+    }
+
+    /** The first of [name], name-2, name-3… that nothing at [path] is using yet. */
+    private suspend fun freeName(
+        backend: com.jarves.mh.storage.DeviceFs,
+        path: String,
+        name: String,
+    ): String {
+        val dot = name.lastIndexOf('.')
+        val stem = if (dot > 0) name.substring(0, dot) else name
+        val suffix = if (dot > 0) name.substring(dot) else ""
+        var candidate = name
+        var attempt = 2
+        while (backend.stat(com.jarves.mh.storage.FsPaths.join(path, candidate)) is com.jarves.mh.storage.FsResult.Ok) {
+            candidate = "$stem-$attempt$suffix"
+            attempt++
+        }
+        return candidate
+    }
+
+    /** The clipboard as plain text, or null when there is nothing in it to paste. */
+    private fun clipboardText(): String? {
+        val clipboard = getApplication<Application>()
+            .getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = clipboard.primaryClip ?: return null
+        return (0 until clip.itemCount).joinToString("\n") { index ->
+            clip.getItemAt(index).coerceToText(getApplication<Application>()).toString()
+        }.ifBlank { null }
     }
 
     /**

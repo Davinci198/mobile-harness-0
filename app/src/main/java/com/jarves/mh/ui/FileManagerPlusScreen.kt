@@ -164,6 +164,8 @@ fun FileManagerPlusScreen(
     openContent: String?,
     openLoading: Boolean,
     saving: Boolean,
+    /** Clipboard text waiting for a file name, or null while nothing is staged. */
+    pasteText: String?,
     onOpenRoot: (DeviceRoot) -> Unit,
     onNavigate: (String) -> Unit,
     /** True while the root's tiles, rather than a listing of the root, are what is shown. */
@@ -178,6 +180,8 @@ fun FileManagerPlusScreen(
     onCloseFile: () -> Unit,
     onOpenElsewhere: () -> Unit,
     onSave: (String) -> Unit,
+    onSavePasteText: (String) -> Unit,
+    onCancelPasteText: () -> Unit,
     onCreateDirectory: (String) -> Unit,
     onCreateFile: (String) -> Unit,
     onRename: (FsEntry, String) -> Unit,
@@ -211,6 +215,9 @@ fun FileManagerPlusScreen(
     var searchOpen by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
     var createMenu by remember { mutableStateOf(false) }
+    // The long-press menu can send a file straight to the editor, so the viewer has to
+    // come up already editing rather than one tap later.
+    var startEditing by remember { mutableStateOf(false) }
 
     // A granted folder has no tiles home at all, so leaving the root has to stay
     // possible: the back gesture and the up button fall through to their last option
@@ -231,7 +238,10 @@ fun FileManagerPlusScreen(
             // dialog still has to be what goes, not the folder underneath it.
             dialog != null -> dialog = null
             lightboxPath != null -> onCloseLightbox()
-            openName != null -> onCloseFile()
+            openName != null -> {
+                startEditing = false
+                onCloseFile()
+            }
             searchOpen -> {
                 searchOpen = false
                 onQueryChange("")
@@ -251,7 +261,8 @@ fun FileManagerPlusScreen(
             loading = openLoading,
             saving = saving,
             error = error,
-            onClose = onCloseFile,
+            startEditing = startEditing,
+            onClose = { startEditing = false; onCloseFile() },
             onOpenElsewhere = onOpenElsewhere,
             onSave = onSave,
         )
@@ -434,6 +445,7 @@ fun FileManagerPlusScreen(
                     onDelete = { dialog = FmpDialog.Delete(it) },
                     onCopyEntry = onCopyEntry,
                     onCutEntry = onCutEntry,
+                    onEditEntry = { startEditing = true; onOpenEntry(it) },
                 )
                 return@Column
             }
@@ -464,6 +476,7 @@ fun FileManagerPlusScreen(
                             onDelete = { dialog = FmpDialog.Delete(it) },
                             onCopyEntry = onCopyEntry,
                             onCutEntry = onCutEntry,
+                            onEditEntry = { startEditing = true; onOpenEntry(it) },
                         )
                     }
                     // The side panel is the one piece of the desktop layout that is worth
@@ -514,6 +527,17 @@ fun FileManagerPlusScreen(
         )
 
         null -> Unit
+    }
+
+    // Text pasted from another app arrives without a name, so the name is the one thing
+    // to ask for. Confirming writes it into the folder it was pasted into.
+    if (pasteText != null) {
+        FmpPromptDialog(
+            title = stringResource(R.string.files_new_file),
+            initial = "note.txt",
+            onConfirm = { onSavePasteText(it) },
+            onDismiss = { onCancelPasteText() },
+        )
     }
 }
 
@@ -714,6 +738,7 @@ private fun FmpTable(
     onDelete: (FsEntry) -> Unit,
     onCopyEntry: (FsEntry) -> Unit,
     onCutEntry: (FsEntry) -> Unit,
+    onEditEntry: (FsEntry) -> Unit,
 ) {
     if (view == FsViewMode.GRID) {
         EntryGrid(
@@ -727,6 +752,7 @@ private fun FmpTable(
             onDelete,
             onCopyEntry,
             onCutEntry,
+            onEditEntry,
         )
         return
     }
@@ -773,6 +799,7 @@ private fun FmpTable(
                 onDelete = { onDelete(entry) },
                 onCopy = { onCopyEntry(entry) },
                 onCut = { onCutEntry(entry) },
+                onEdit = { onEditEntry(entry) },
             )
         }
     }
@@ -791,6 +818,7 @@ private fun FmpRow(
     onDelete: () -> Unit,
     onCopy: () -> Unit,
     onCut: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     val type = FsFileTypes.of(entry)
     // A long press picks the item up and offers what can be done with it, in one gesture:
@@ -846,6 +874,8 @@ private fun FmpRow(
             onSelect = { menuOpen = false; onToggleSelect() },
             onCopy = { menuOpen = false; onCopy() },
             onCut = { menuOpen = false; onCut() },
+            editable = FsFileTypes.opensInViewer(entry.name),
+            onEdit = { menuOpen = false; onEdit() },
             onRename = { menuOpen = false; onRename() },
             onDelete = { menuOpen = false; onDelete() },
         )
@@ -866,6 +896,9 @@ private fun FmpEntryMenu(
     onSelect: () -> Unit,
     onCopy: () -> Unit,
     onCut: () -> Unit,
+    /** Only a file the viewer can hold is worth offering to edit. */
+    editable: Boolean,
+    onEdit: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -880,6 +913,13 @@ private fun FmpEntryMenu(
             leadingIcon = { Icon(Icons.Default.ContentCut, null, Modifier.size(18.dp)) },
             onClick = onCut,
         )
+        if (editable) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.files_edit), fontSize = 13.sp) },
+                leadingIcon = { Icon(Icons.Default.Edit, null, Modifier.size(18.dp)) },
+                onClick = onEdit,
+            )
+        }
         DropdownMenuItem(
             text = {
                 Text(
@@ -916,6 +956,7 @@ private fun EntryGrid(
     onDelete: (FsEntry) -> Unit,
     onCopyEntry: (FsEntry) -> Unit,
     onCutEntry: (FsEntry) -> Unit,
+    onEditEntry: (FsEntry) -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
@@ -957,6 +998,8 @@ private fun EntryGrid(
                     onSelect = { menuOpen = false; onToggleSelect(entry) },
                     onCopy = { menuOpen = false; onCopyEntry(entry) },
                     onCut = { menuOpen = false; onCutEntry(entry) },
+                    editable = FsFileTypes.opensInViewer(entry.name),
+                    onEdit = { menuOpen = false; onEditEntry(entry) },
                     onRename = { menuOpen = false; onRename(entry) },
                     onDelete = { menuOpen = false; onDelete(entry) },
                 )
@@ -1320,6 +1363,8 @@ private fun TextViewer(
     loading: Boolean,
     saving: Boolean,
     error: FsError?,
+    /** True when the menu opened this file to be written to, not just looked at. */
+    startEditing: Boolean,
     onClose: () -> Unit,
     onOpenElsewhere: () -> Unit,
     onSave: (String) -> Unit,
@@ -1327,6 +1372,17 @@ private fun TextViewer(
     var editing by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf(content.orEmpty()) }
     var underway by remember { mutableStateOf(false) }
+    // The menu can ask for the editor before the file has been read, and switching
+    // straight away would open an empty draft over a file that has content — saving it
+    // would wipe the file. The switch waits for the bytes instead.
+    var pendingEdit by remember { mutableStateOf(startEditing) }
+    LaunchedEffect(pendingEdit, content, loading) {
+        if (pendingEdit && content != null && !loading) {
+            draft = content
+            editing = true
+            pendingEdit = false
+        }
+    }
 
     fun leaveEditor() {
         draft = content.orEmpty()
