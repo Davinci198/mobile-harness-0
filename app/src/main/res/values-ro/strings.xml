@@ -476,6 +476,8 @@
     <string name="files_new_file">Fișier text nou</string>
     <string name="files_create">Crează</string>
     <string name="files_select">Selectează</string>
+    <string name="files_deselect">Deselectează</string>
+    <string name="files_edit">Editează</string>
     <string name="files_rename">Redenumește</string>
     <string name="files_delete">Șterge</string>
     <string name="files_delete_title">Ștergi asta?</string>

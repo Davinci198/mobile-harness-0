@@ -29,12 +29,15 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
@@ -48,6 +51,7 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FolderZip
@@ -93,6 +97,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -158,6 +163,7 @@ fun FileManagerPlusScreen(
     openName: String?,
     openContent: String?,
     openLoading: Boolean,
+    saving: Boolean,
     onOpenRoot: (DeviceRoot) -> Unit,
     onNavigate: (String) -> Unit,
     onGoUp: () -> Unit,
@@ -168,6 +174,7 @@ fun FileManagerPlusScreen(
     onOpenEntry: (FsEntry) -> Unit,
     onCloseFile: () -> Unit,
     onOpenElsewhere: () -> Unit,
+    onSave: (String) -> Unit,
     onCreateDirectory: (String) -> Unit,
     onCreateFile: (String) -> Unit,
     onRename: (FsEntry, String) -> Unit,
@@ -230,8 +237,11 @@ fun FileManagerPlusScreen(
             name = openName,
             content = openContent,
             loading = openLoading,
+            saving = saving,
+            error = error,
             onClose = onCloseFile,
             onOpenElsewhere = onOpenElsewhere,
+            onSave = onSave,
         )
         return
     }
@@ -382,8 +392,12 @@ fun FileManagerPlusScreen(
             Breadcrumb(path = path, onNavigate = onNavigate)
 
             error?.let { FmpErrorBanner(it, onRemedy) }
-            if (error == null && unavailable.isNotEmpty() && roots.size <= 1) {
-                unavailable.firstOrNull()?.let { FmpErrorBanner(it, onRemedy) }
+            // Every grant the app still needs, not just the first while nothing else
+            // works. The all-files banner used to hide itself as soon as a folder had
+            // been granted, so the system permission behind the writes was never asked
+            // for again and the phone kept reporting it as off.
+            if (error == null) {
+                unavailable.forEach { FmpErrorBanner(it, onRemedy) }
             }
             if (searching) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -740,9 +754,9 @@ private fun FmpRow(
     onDelete: () -> Unit,
 ) {
     val type = FsFileTypes.of(entry)
-    // A long press used to be the only way to pick something, which meant selection had no
-    // other home and rename and delete had none at all. It opens the menu now, and the
-    // menu still offers picking as its first item.
+    // A long press picks the item up and offers what can be done with it, in one gesture:
+    // selection alone left rename and delete with nowhere to live, and a menu alone left
+    // copy with nothing to act on.
     var menuOpen by remember { mutableStateOf(false) }
     Box {
         Row(
@@ -750,7 +764,7 @@ private fun FmpRow(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
                 .background(if (selected) FmpColors.Select.copy(alpha = 0.16f) else Color.Transparent)
-                .combinedClickable(onClick = onOpen, onLongClick = { menuOpen = true })
+                .combinedClickable(onClick = onOpen, onLongClick = { onToggleSelect(); menuOpen = true })
                 .height(56.dp)
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -789,6 +803,7 @@ private fun FmpRow(
         FmpEntryMenu(
             expanded = menuOpen,
             onDismiss = { menuOpen = false },
+            selected = selected,
             onSelect = { menuOpen = false; onToggleSelect() },
             onRename = { menuOpen = false; onRename() },
             onDelete = { menuOpen = false; onDelete() },
@@ -797,21 +812,27 @@ private fun FmpRow(
 }
 
 /**
- * What a long press offers on a file or a folder. Picking is first because a long press
- * used to do only that, and rename and delete are the two things a file manager without
- * them cannot do at all.
+ * What a long press offers on a file or a folder. The item is already picked up by the
+ * time this opens, so the first row says what putting it down would do rather than
+ * offering to do what has just happened.
  */
 @Composable
 private fun FmpEntryMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
+    selected: Boolean,
     onSelect: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         DropdownMenuItem(
-            text = { Text(stringResource(R.string.files_select), fontSize = 13.sp) },
+            text = {
+                Text(
+                    stringResource(if (selected) R.string.files_deselect else R.string.files_select),
+                    fontSize = 13.sp,
+                )
+            },
             leadingIcon = { Icon(Icons.Default.SelectAll, null, Modifier.size(18.dp)) },
             onClick = onSelect,
         )
@@ -848,18 +869,16 @@ private fun EntryGrid(
     ) {
         items(entries, key = { it.relativePath }) { entry ->
             var menuOpen by remember { mutableStateOf(false) }
+            val selected = FsPaths.join(path, entry.name) in selection
             Box {
                 Column(
                     Modifier
                         .clip(RoundedCornerShape(14.dp))
-                        .background(
-                            if (FsPaths.join(path, entry.name) in selection) {
-                                FmpColors.Select.copy(alpha = 0.16f)
-                            } else {
-                                Color.Transparent
-                            },
+                        .background(if (selected) FmpColors.Select.copy(alpha = 0.16f) else Color.Transparent)
+                        .combinedClickable(
+                            onClick = { onOpen(entry) },
+                            onLongClick = { onToggleSelect(entry); menuOpen = true },
                         )
-                        .combinedClickable(onClick = { onOpen(entry) }, onLongClick = { menuOpen = true })
                         .clickable { onTogglePreview(entry) }
                         .padding(6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -878,6 +897,7 @@ private fun EntryGrid(
                 FmpEntryMenu(
                     expanded = menuOpen,
                     onDismiss = { menuOpen = false },
+                    selected = selected,
                     onSelect = { menuOpen = false; onToggleSelect(entry) },
                     onRename = { menuOpen = false; onRename(entry) },
                     onDelete = { menuOpen = false; onDelete(entry) },
@@ -1233,32 +1253,76 @@ private fun FmpPromptDialog(title: String, initial: String = "", onConfirm: (Str
 
 // ---- text preview -------------------------------------------------------------
 
-/** A plain look at a text file, the way a file manager previews one. */
+/** A text file, read and then written back — viewing and editing are the same screen. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TextViewer(
     name: String,
     content: String?,
     loading: Boolean,
+    saving: Boolean,
+    error: FsError?,
     onClose: () -> Unit,
     onOpenElsewhere: () -> Unit,
+    onSave: (String) -> Unit,
 ) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(content.orEmpty()) }
+    var underway by remember { mutableStateOf(false) }
+
+    fun leaveEditor() {
+        draft = content.orEmpty()
+        editing = false
+        underway = false
+    }
+
+    // Leaving the editor costs the draft, so back cancels the edit first and the file
+    // only afterwards: a half-typed line is not a reason to lose the screen it is on.
+    BackHandler(enabled = editing) { leaveEditor() }
+
+    // The write is a provider or a shell round trip and can be refused. The editor stays
+    // open until the bytes are on disk, because a failed save that looks like a successful
+    // one is how a draft quietly disappears.
+    LaunchedEffect(saving, content) {
+        if (saving) {
+            underway = true
+        } else if (underway) {
+            underway = false
+            if (content == draft) editing = false
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(name, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
-                    IconButton(onClick = onClose) {
+                    IconButton(onClick = { if (editing) leaveEditor() else onClose() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.files_close))
                     }
                 },
                 actions = {
-                    IconButton(onClick = onOpenElsewhere) {
-                        Icon(
-                            Icons.Default.OpenInNew,
-                            stringResource(R.string.files_open_with),
-                            tint = FmpColors.Muted,
-                        )
+                    if (editing) {
+                        IconButton(
+                            onClick = { underway = true; onSave(draft) },
+                            enabled = !saving,
+                        ) {
+                            Icon(Icons.Default.Check, stringResource(R.string.files_save), tint = FmpColors.Text)
+                        }
+                    } else {
+                        IconButton(
+                            onClick = { draft = content.orEmpty(); editing = true },
+                            enabled = !loading && content != null,
+                        ) {
+                            Icon(Icons.Default.Edit, stringResource(R.string.files_edit), tint = FmpColors.Muted)
+                        }
+                        IconButton(onClick = onOpenElsewhere) {
+                            Icon(
+                                Icons.Default.OpenInNew,
+                                stringResource(R.string.files_open_with),
+                                tint = FmpColors.Muted,
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = FmpColors.Page),
@@ -1274,6 +1338,25 @@ private fun TextViewer(
                     fontSize = 13.sp,
                     modifier = Modifier.align(Alignment.Center),
                 )
+
+                editing -> Column(Modifier.fillMaxSize()) {
+                    if (saving) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    error?.let {
+                        Text(
+                            it.message,
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+                        )
+                    }
+                    BasicTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+                        textStyle = TextStyle(color = FmpColors.Text, fontSize = 12.sp, lineHeight = 18.sp),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    )
+                }
 
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     item { Text(content, fontSize = 12.sp, color = FmpColors.Text, modifier = Modifier.padding(12.dp)) }

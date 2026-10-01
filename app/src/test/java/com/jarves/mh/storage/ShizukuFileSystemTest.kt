@@ -153,4 +153,51 @@ class ShizukuFileSystemTest {
         assertTrue(system.delete("").errorOrNull()!!.message.contains("root"))
         assertTrue(system.rename("", "x").errorOrNull()!!.message.contains("root"))
     }
+
+    @Test
+    fun anEmptyFileIsAReadOfNothingNotAMissingOne() = runBlocking {
+        // A file the app has just created is zero bytes long, and used to come back as
+        // "No such file" — the one answer that makes a working feature look broken.
+        val system = fs { ok("") }
+        assertEquals("", system.readText("note.txt").valueOrNull())
+        assertEquals(0, system.readBytes("note.txt", 10).valueOrNull()!!.size)
+    }
+
+    @Test
+    fun theShellsOwnWordsAreWhatTheScreenShows() = runBlocking {
+        // 2>/dev/null used to swallow this line, leaving the placeholder to be shown as
+        // if Shizuku itself were the problem.
+        val system = fs { ShizukuCommandResult(1, "", "head: cannot open 'a.txt': No such file or directory") }
+        val error = system.readText("a.txt").errorOrNull()!!
+        assertEquals(FsErrorKind.NOT_FOUND, error.kind)
+        assertTrue(error.message, error.message.contains("No such file"))
+        assertTrue(error.remedy == null)
+    }
+
+    @Test
+    fun aPermissionProblemDoesNotSendTheUserToAskForShizukuAgain() = runBlocking {
+        val system = fs { ShizukuCommandResult(1, "", "head: cannot open 'a.txt': Permission denied") }
+        val error = system.readText("a.txt").errorOrNull()!!
+        assertEquals(FsErrorKind.NO_ACCESS, error.kind)
+        assertTrue(error.message, error.message.contains("Permission denied"))
+        assertTrue(error.remedy == null)
+    }
+
+    @Test
+    fun aByteReadReportsAFailureEvenWhenThePipeItselfSucceeded() = runBlocking {
+        // The pipeline exits with tr's status, which is 0 even when head opened nothing,
+        // so stdout blank and stderr not blank is the only signal left.
+        val system = fs { ShizukuCommandResult(0, "", "head: cannot open 'a.txt': Permission denied") }
+        val error = system.readBytes("a.txt", 10).errorOrNull()!!
+        assertEquals(FsErrorKind.NO_ACCESS, error.kind)
+        assertTrue(error.message, error.message.contains("Permission denied"))
+    }
+
+    @Test
+    fun aReadThatSaysNothingAtAllStillPointsAtShizuku() = runBlocking {
+        val system = fs { ShizukuCommandResult(-1, "", "") }
+        val error = system.readText("a.txt").errorOrNull()!!
+        assertEquals(FsErrorKind.NO_ACCESS, error.kind)
+        assertEquals(FsRemedy.REQUEST_SHIZUKU, error.remedy)
+    }
 }

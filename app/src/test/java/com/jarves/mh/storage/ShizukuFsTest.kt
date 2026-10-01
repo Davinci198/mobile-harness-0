@@ -71,6 +71,14 @@ class ShizukuFsTest {
     }
 
     @Test
+    fun aReadLetsTheShellComplain() {
+        // 2>/dev/null swallowed the reason for a failure, so the reader had nothing to
+        // show and reached for a placeholder that blamed Shizuku for a missing file.
+        assertFalse(ShizukuFs.readTextCommand("/data/plain dir", 10).contains("2>/dev/null"))
+        assertFalse(ShizukuFs.readBytesCommand("/data/plain dir", 10).contains("2>/dev/null"))
+    }
+
+    @Test
     fun deleteCommandQuotesThePath() {
         assertTrue(ShizukuFs.deleteCommand("/data/plain dir", recursive = true).contains("'/data/plain dir'"))
     }

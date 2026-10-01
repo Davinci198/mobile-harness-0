@@ -190,8 +190,12 @@ data class AppUiState(
     val fsLoading: Boolean = false,
     val fsError: com.jarves.mh.storage.FsError? = null,
     val fsOpenName: String? = null,
+    /** Where the open file really is: a search hit can sit in a folder other than [fsPath]. */
+    val fsOpenPath: String? = null,
     val fsOpenContent: String? = null,
     val fsOpenLoading: Boolean = false,
+    /** True from the moment Save is pressed until the backend answers. */
+    val fsSaving: Boolean = false,
     val fsView: com.jarves.mh.storage.FsViewMode = com.jarves.mh.storage.FsViewMode.LIST,
     val fsSort: com.jarves.mh.storage.FsSort = com.jarves.mh.storage.FsSort.NAME,
     val fsSortAscending: Boolean = true,
@@ -1203,7 +1207,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Log.e("Files", "open: backend unavailable root=$root name=${entry.name}")
             return
         }
-        _state.update { it.copy(fsOpenName = entry.name, fsOpenContent = null, fsOpenLoading = true) }
+        _state.update {
+            it.copy(
+                fsOpenName = entry.name,
+                fsOpenPath = path,
+                fsOpenContent = null,
+                fsOpenLoading = true,
+                fsError = null,
+            )
+        }
         viewModelScope.launch(Dispatchers.IO) {
             when (val result = backend.readText(path)) {
                 is com.jarves.mh.storage.FsResult.Ok -> {
@@ -1213,22 +1225,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 is com.jarves.mh.storage.FsResult.Err -> {
                     Log.e("Files", "open FAILED path=$path ${result.error.kind} ${result.error.message}")
-                    _state.update { it.copy(fsOpenName = null, fsOpenLoading = false, fsError = result.error) }
+                    _state.update {
+                        it.copy(fsOpenName = null, fsOpenPath = null, fsOpenLoading = false, fsError = result.error)
+                    }
                 }
             }
         }
     }
 
     fun closeOpenFile() {
-        _state.update { it.copy(fsOpenName = null, fsOpenContent = null, fsOpenLoading = false) }
+        _state.update {
+            it.copy(fsOpenName = null, fsOpenPath = null, fsOpenContent = null, fsOpenLoading = false, fsSaving = false)
+        }
+    }
+
+    /**
+     * Writes the draft back through whatever backend the file was read from. The viewer
+     * is told by way of [AppUiState.fsSaving]: it stays in edit mode until the bytes are
+     * actually on disk, because a refused write is otherwise indistinguishable from a
+     * saved one and the draft would vanish with the screen.
+     */
+    fun saveOpenFile(draft: String) {
+        val state = _state.value
+        val path = state.fsOpenPath ?: run {
+            Log.e("Files", "save: no open file to write")
+            return
+        }
+        val root = state.fsRoot
+        if (root == null) {
+            Log.e("Files", "save: no root selected path=$path")
+            return
+        }
+        val backend = fsFactory.open(root)
+        if (backend == null) {
+            Log.e("Files", "save: backend unavailable root=$root path=$path")
+            return
+        }
+        _state.update { it.copy(fsSaving = true, fsError = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            when (val result = backend.writeText(path, draft)) {
+                is com.jarves.mh.storage.FsResult.Ok -> {
+                    Log.d("Files", "save ok path=$path chars=${draft.length}")
+                    _state.update { it.copy(fsOpenContent = draft, fsSaving = false, fsStatus = "Salvat") }
+                    loadDirectory(_state.value.fsPath)
+                }
+
+                is com.jarves.mh.storage.FsResult.Err -> {
+                    Log.e("Files", "save FAILED path=$path ${result.error.kind} ${result.error.message}")
+                    _state.update { it.copy(fsSaving = false, fsError = result.error) }
+                }
+            }
+        }
     }
 
     /** Hands the file sitting in the viewer to an app that might render it better. */
     fun openFileElsewhere() {
         val state = _state.value
         val name = state.fsOpenName ?: return
+        val path = state.fsOpenPath ?: com.jarves.mh.storage.FsPaths.join(state.fsPath, name)
         closeOpenFile()
-        openWithAnotherApp(com.jarves.mh.storage.FsPaths.join(state.fsPath, name), name)
+        openWithAnotherApp(path, name)
     }
 
     /**
@@ -1586,8 +1642,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stageClipboard(operation: com.jarves.mh.storage.FsClipboardOperation) {
         val items = _state.value.fsSelection.toList()
-        if (items.isEmpty()) return
+        if (items.isEmpty()) {
+            // Copy used to return without a word, so an unselected press looked like a
+            // broken clipboard rather than a missing selection.
+            Log.d("Files", "copy refused: nothing selected operation=$operation")
+            _state.update { it.copy(fsStatus = "Selectează întâi un fișier") }
+            return
+        }
         val board = com.jarves.mh.storage.FsClipboardRules.put(items, operation)
+        if (board.isEmpty) {
+            Log.w("Files", "copy refused: ${items.size} paths were not usable as relative ones")
+            _state.update { it.copy(fsStatus = "Selectează întâi un fișier") }
+            return
+        }
+        Log.d("Files", "clipboard staged items=${board.items.size} operation=$operation")
         _state.update { it.copy(fsClipboard = board, fsStatus = clipboardStatus(board)) }
     }
 

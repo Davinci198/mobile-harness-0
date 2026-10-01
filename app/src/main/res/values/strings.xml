@@ -476,6 +476,8 @@
     <string name="files_new_file">New text file</string>
     <string name="files_create">Create</string>
     <string name="files_select">Select</string>
+    <string name="files_deselect">Deselect</string>
+    <string name="files_edit">Edit</string>
     <string name="files_rename">Rename</string>
     <string name="files_delete">Delete</string>
     <string name="files_delete_title">Delete this?</string>
