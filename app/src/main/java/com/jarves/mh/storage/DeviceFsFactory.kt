@@ -44,7 +44,14 @@ class DeviceFsFactory(private val context: Context) {
                 LocalFileSystem(
                     root = root,
                     base = base,
-                    writeAllowed = isExternalStorageWritable(),
+                    // Shared storage only turns read-only for an app the system refused
+                    // all-files access, and such an app never gets this root: the branch
+                    // is entered by the grant itself. Refusing the write here anyway is
+                    // what put "This location is read only" in front of a folder the app
+                    // had just been allowed to write, with no remedy to offer. What the
+                    // system still refuses — Android/data, someone else's app directory —
+                    // comes back by its own name instead.
+                    writeAllowed = true,
                     noAccessError = FsError(
                         FsErrorKind.NO_ACCESS,
                         context.getString(com.jarves.mh.R.string.files_error_all_files),
@@ -109,7 +116,4 @@ class DeviceFsFactory(private val context: Context) {
         } else {
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
         }
-
-    /** Shared storage is read-only on Android 11 and above. */
-    private fun isExternalStorageWritable(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.R
 }
