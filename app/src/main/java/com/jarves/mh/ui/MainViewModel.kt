@@ -1658,8 +1658,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun listingStatus(selected: Int): String =
         "${_state.value.fsEntries.size} elemente • $selected selectate"
 
-    fun stageClipboard(operation: com.jarves.mh.storage.FsClipboardOperation) {
-        val items = _state.value.fsSelection.toList()
+    fun stageClipboard(operation: com.jarves.mh.storage.FsClipboardOperation) =
+        stagePaths(_state.value.fsSelection.toList(), operation)
+
+    /**
+     * The long-press menu acts on the file under the finger, which is not necessarily
+     * part of any selection: staging from the selection alone left the menu's own copy
+     * with nothing to hand over unless the item happened to be picked up first.
+     */
+    fun copyFileEntry(entry: com.jarves.mh.storage.FsEntry) =
+        stagePaths(listOf(pathOf(entry)), com.jarves.mh.storage.FsClipboardOperation.COPY)
+
+    fun cutFileEntry(entry: com.jarves.mh.storage.FsEntry) =
+        stagePaths(listOf(pathOf(entry)), com.jarves.mh.storage.FsClipboardOperation.CUT)
+
+    private fun stagePaths(items: List<String>, operation: com.jarves.mh.storage.FsClipboardOperation) {
         if (items.isEmpty()) {
             // Copy used to return without a word, so an unselected press looked like a
             // broken clipboard rather than a missing selection.
