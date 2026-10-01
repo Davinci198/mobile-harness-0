@@ -2066,6 +2066,15 @@ private fun RootScreenHost(
 ) {
     var screen by rememberSaveable { mutableStateOf(RootScreen.PROJECTS) }
     var showQuickTerminal by rememberSaveable { mutableStateOf(false) }
+
+    // The bottom bar is a stack of tabs rather than a set of activities: back leaves the
+    // tab you are in and only leaves the app from the first one, the way the Files tab
+    // already behaves. Every other tab had no handler at all, so the gesture fell
+    // through to the activity and put the whole app in the background. Files keeps its
+    // own handler, which is registered after this one and so still gets the gesture
+    // first — this is what runs when there is nothing above the tabs.
+    BackHandler(enabled = screen != RootScreen.PROJECTS) { screen = RootScreen.PROJECTS }
+
     val fileContext = LocalContext.current
     fun allFilesSettingsIntent(): android.content.Intent =
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
