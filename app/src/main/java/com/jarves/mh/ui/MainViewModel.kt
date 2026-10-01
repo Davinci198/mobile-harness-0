@@ -1308,6 +1308,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         mutateThenReload("Could not create the folder") { it.createDirectory(path) }
     }
 
+    /** Creates an empty text file, ready to be opened and read or typed into. */
+    fun createFilesFile(name: String) {
+        val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, name)
+        mutateThenReload("Could not create the file") { it.writeText(path, "") }
+    }
+
     fun renameFileEntry(entry: com.jarves.mh.storage.FsEntry, newName: String) {
         val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, entry.name)
         mutateThenReload("Rename failed") { it.rename(path, newName) }
