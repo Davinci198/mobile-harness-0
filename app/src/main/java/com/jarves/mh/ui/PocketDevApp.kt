@@ -2219,6 +2219,8 @@ private fun RootScreenHost(
                     onCreateFile = viewModel::createFilesFile,
                     onRename = viewModel::renameFileEntry,
                     onDelete = viewModel::deleteFileEntry,
+                    onCopyEntry = viewModel::copyFileEntry,
+                    onCutEntry = viewModel::cutFileEntry,
                     onExtract = viewModel::extractHere,
                     onQueryChange = viewModel::searchFiles,
                     onSetView = viewModel::setFilesView,

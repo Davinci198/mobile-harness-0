@@ -182,6 +182,8 @@ fun FileManagerPlusScreen(
     onCreateFile: (String) -> Unit,
     onRename: (FsEntry, String) -> Unit,
     onDelete: (FsEntry) -> Unit,
+    onCopyEntry: (FsEntry) -> Unit,
+    onCutEntry: (FsEntry) -> Unit,
     onExtract: (FsEntry) -> Unit,
     onRemedy: (FsRemedy) -> Unit,
     onQueryChange: (String) -> Unit,
@@ -430,6 +432,8 @@ fun FileManagerPlusScreen(
                     onTogglePreview = onTogglePreview,
                     onRename = { dialog = FmpDialog.Rename(it) },
                     onDelete = { dialog = FmpDialog.Delete(it) },
+                    onCopyEntry = onCopyEntry,
+                    onCutEntry = onCutEntry,
                 )
                 return@Column
             }
@@ -458,6 +462,8 @@ fun FileManagerPlusScreen(
                             onTogglePreview = onTogglePreview,
                             onRename = { dialog = FmpDialog.Rename(it) },
                             onDelete = { dialog = FmpDialog.Delete(it) },
+                            onCopyEntry = onCopyEntry,
+                            onCutEntry = onCutEntry,
                         )
                     }
                     // The side panel is the one piece of the desktop layout that is worth
@@ -706,9 +712,22 @@ private fun FmpTable(
     onTogglePreview: (FsEntry?) -> Unit,
     onRename: (FsEntry) -> Unit,
     onDelete: (FsEntry) -> Unit,
+    onCopyEntry: (FsEntry) -> Unit,
+    onCutEntry: (FsEntry) -> Unit,
 ) {
     if (view == FsViewMode.GRID) {
-        EntryGrid(entries, path, selection, onOpen, onToggleSelect, onTogglePreview, onRename, onDelete)
+        EntryGrid(
+            entries,
+            path,
+            selection,
+            onOpen,
+            onToggleSelect,
+            onTogglePreview,
+            onRename,
+            onDelete,
+            onCopyEntry,
+            onCutEntry,
+        )
         return
     }
     LazyColumn(Modifier.fillMaxSize()) {
@@ -752,6 +771,8 @@ private fun FmpTable(
                 onTogglePreview = { onTogglePreview(entry) },
                 onRename = { onRename(entry) },
                 onDelete = { onDelete(entry) },
+                onCopy = { onCopyEntry(entry) },
+                onCut = { onCutEntry(entry) },
             )
         }
     }
@@ -768,6 +789,8 @@ private fun FmpRow(
     onTogglePreview: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onCopy: () -> Unit,
+    onCut: () -> Unit,
 ) {
     val type = FsFileTypes.of(entry)
     // A long press picks the item up and offers what can be done with it, in one gesture:
@@ -821,6 +844,8 @@ private fun FmpRow(
             onDismiss = { menuOpen = false },
             selected = selected,
             onSelect = { menuOpen = false; onToggleSelect() },
+            onCopy = { menuOpen = false; onCopy() },
+            onCut = { menuOpen = false; onCut() },
             onRename = { menuOpen = false; onRename() },
             onDelete = { menuOpen = false; onDelete() },
         )
@@ -828,9 +853,10 @@ private fun FmpRow(
 }
 
 /**
- * What a long press offers on a file or a folder. The item is already picked up by the
- * time this opens, so the first row says what putting it down would do rather than
- * offering to do what has just happened.
+ * What a long press offers on a file or a folder. Copy and cut act on the file under the
+ * finger rather than on whatever is selected, so they work on a press that picked the
+ * item up and on one that put it down again; the select row still says what putting it
+ * down would do rather than offering to do what has just happened.
  */
 @Composable
 private fun FmpEntryMenu(
@@ -838,10 +864,22 @@ private fun FmpEntryMenu(
     onDismiss: () -> Unit,
     selected: Boolean,
     onSelect: () -> Unit,
+    onCopy: () -> Unit,
+    onCut: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.files_copy_action), fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.ContentCopy, null, Modifier.size(18.dp)) },
+            onClick = onCopy,
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.files_cut), fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.ContentCut, null, Modifier.size(18.dp)) },
+            onClick = onCut,
+        )
         DropdownMenuItem(
             text = {
                 Text(
@@ -876,6 +914,8 @@ private fun EntryGrid(
     onTogglePreview: (FsEntry) -> Unit,
     onRename: (FsEntry) -> Unit,
     onDelete: (FsEntry) -> Unit,
+    onCopyEntry: (FsEntry) -> Unit,
+    onCutEntry: (FsEntry) -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
@@ -915,6 +955,8 @@ private fun EntryGrid(
                     onDismiss = { menuOpen = false },
                     selected = selected,
                     onSelect = { menuOpen = false; onToggleSelect(entry) },
+                    onCopy = { menuOpen = false; onCopyEntry(entry) },
+                    onCut = { menuOpen = false; onCutEntry(entry) },
                     onRename = { menuOpen = false; onRename(entry) },
                     onDelete = { menuOpen = false; onDelete(entry) },
                 )
