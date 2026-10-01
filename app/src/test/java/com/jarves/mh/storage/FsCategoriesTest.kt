@@ -64,4 +64,26 @@ class FsCategoriesTest {
         val kinds = FsCategories.definitionsFor(DeviceRoot.Shizuku("t", "/")).map { it.first }
         assertEquals(2, kinds.count { it == FsCategoryKind.DATA })
     }
+
+    @Test
+    fun theMainStorageTileIsAListingNotTheTilesHomeAgain() {
+        // Both views are the empty path: opening the root shows the tiles, and the
+        // "Main storage" tile opens the root itself. Reading the empty path as the tiles
+        // home unconditionally sent that tap straight back to the tiles, so the main
+        // storage could never be browsed.
+        val allFiles = DeviceRoot.AllFiles("t")
+        assertTrue(FsCategories.tilesBelongAt(allFiles, "", tilesRequested = true))
+        assertTrue(!FsCategories.tilesBelongAt(allFiles, "", tilesRequested = false))
+        // A folder is a listing either way.
+        assertTrue(!FsCategories.tilesBelongAt(allFiles, "Download", tilesRequested = true))
+    }
+
+    @Test
+    fun aRootWithoutTilesNeverGetsThem() {
+        // A granted folder's root is a listing, and asking for its tiles home must not
+        // invent one: the back gesture falls through to leaving instead of reloading.
+        val granted = DeviceRoot.SafTree("t", "content://x")
+        assertTrue(!FsCategories.tilesBelongAt(granted, "", tilesRequested = true))
+        assertTrue(FsCategories.tilesBelongAt(DeviceRoot.Local("t"), "", tilesRequested = true))
+    }
 }

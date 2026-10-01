@@ -2195,6 +2195,8 @@ private fun RootScreenHost(
                     saving = state.fsSaving,
                     onOpenRoot = viewModel::openFileRoot,
                     onNavigate = viewModel::navigateFiles,
+                    showTiles = state.fsShowTiles,
+                    onShowTiles = viewModel::showFileRootTiles,
                     onGoUp = viewModel::goUpFiles,
                     onGoHome = { state.fsRoots.firstOrNull()?.let(viewModel::openFileRoot) },
                     onBackToProjects = { screen = RootScreen.PROJECTS },

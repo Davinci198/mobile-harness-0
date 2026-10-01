@@ -166,6 +166,9 @@ fun FileManagerPlusScreen(
     saving: Boolean,
     onOpenRoot: (DeviceRoot) -> Unit,
     onNavigate: (String) -> Unit,
+    /** True while the root's tiles, rather than a listing of the root, are what is shown. */
+    showTiles: Boolean,
+    onShowTiles: () -> Unit,
     onGoUp: () -> Unit,
     onGoHome: () -> Unit,
     onBackToProjects: () -> Unit,
@@ -207,6 +210,12 @@ fun FileManagerPlusScreen(
     var sortMenu by remember { mutableStateOf(false) }
     var createMenu by remember { mutableStateOf(false) }
 
+    // A granted folder has no tiles home at all, so leaving the root has to stay
+    // possible: the back gesture and the up button fall through to their last option
+    // instead of reloading a home that does not exist.
+    val tilesAvailable = activeRoot?.let { com.jarves.mh.storage.FsCategories.definitionsFor(it).isNotEmpty() } == true
+    val backToTiles = path.isEmpty() && tilesAvailable && !showTiles
+
     LaunchedEffect(path) { onClearSelection() }
 
     // On a gesture-navigation phone the system back arrives from either edge, and with no
@@ -228,6 +237,7 @@ fun FileManagerPlusScreen(
 
             previewPath != null -> onTogglePreview(null)
             path.isNotEmpty() -> onGoUp()
+            backToTiles -> onShowTiles()
             else -> onBackToProjects()
         }
     }
@@ -279,7 +289,13 @@ fun FileManagerPlusScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = if (path.isEmpty()) onGoHome else onGoUp) {
+                    IconButton(
+                        onClick = when {
+                            path.isNotEmpty() -> onGoUp
+                            backToTiles -> onShowTiles
+                            else -> onGoHome
+                        },
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.files_up))
                     }
                 },
@@ -389,7 +405,7 @@ fun FileManagerPlusScreen(
                 onSelect = onOpenRoot,
                 onAddFolder = { folderLauncher.launch(null) },
             )
-            Breadcrumb(path = path, onNavigate = onNavigate)
+            Breadcrumb(path = path, onNavigate = onNavigate, onShowTiles = onShowTiles)
 
             error?.let { FmpErrorBanner(it, onRemedy) }
             // Every grant the app still needs, not just the first while nothing else
@@ -650,7 +666,7 @@ private fun PlacePill(label: String, active: Boolean, icon: ImageVector, onClick
 
 /** Home, then every folder above the one on screen, each of them tappable. */
 @Composable
-private fun Breadcrumb(path: String, onNavigate: (String) -> Unit) {
+private fun Breadcrumb(path: String, onNavigate: (String) -> Unit, onShowTiles: () -> Unit) {
     if (path.isEmpty()) return
     val parts = path.trim('/').split('/').filter { it.isNotEmpty() }
     Row(
@@ -661,7 +677,7 @@ private fun Breadcrumb(path: String, onNavigate: (String) -> Unit) {
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = { onNavigate("") }, modifier = Modifier.size(24.dp)) {
+        IconButton(onClick = onShowTiles, modifier = Modifier.size(24.dp)) {
             Icon(Icons.Default.Home, null, Modifier.size(16.dp), tint = FmpColors.Accent)
         }
         parts.forEachIndexed { index, name ->
