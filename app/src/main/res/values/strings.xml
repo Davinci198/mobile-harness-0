@@ -401,6 +401,7 @@
     <string name="files_select_all">Select all</string>
     <string name="files_copy_action">Copy</string>
     <string name="files_cut">Cut</string>
+    <string name="files_move">Move</string>
     <string name="files_paste">Paste</string>
     <string name="files_archive">Archive</string>
     <string name="files_share">Share</string>

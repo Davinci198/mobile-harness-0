@@ -232,6 +232,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -375,6 +377,9 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onDeleteFile = viewModel::deleteWorkspaceEntry,
             onCreateFile = viewModel::createWorkspaceTextFile,
             onCreateFolder = viewModel::createWorkspaceFolder,
+            onCopyEntry = viewModel::stageWorkspaceCopy,
+            onCutEntry = viewModel::stageWorkspaceCut,
+            onPasteEntry = viewModel::pasteWorkspaceEntry,
             onSaveOpenedFile = viewModel::saveOpenedFile,
             onUndoChanges = viewModel::undoLastChanges,
             onKeepChanges = viewModel::keepLastChanges,
@@ -4014,8 +4019,11 @@ private fun WorkspaceScreen(
     onEditFile: (WorkspaceEntry) -> Unit,
     onRenameFile: (WorkspaceEntry, String) -> Unit,
     onDeleteFile: (WorkspaceEntry) -> Unit,
-    onCreateFile: (String) -> Unit,
-    onCreateFolder: (String) -> Unit,
+    onCreateFile: (String, String) -> Unit,
+    onCreateFolder: (String, String) -> Unit,
+    onCopyEntry: (WorkspaceEntry) -> Unit,
+    onCutEntry: (WorkspaceEntry) -> Unit,
+    onPasteEntry: (String) -> Unit,
     onSaveOpenedFile: (String) -> Unit,
     onUndoChanges: () -> Unit,
     onKeepChanges: () -> Unit,
@@ -4045,6 +4053,8 @@ private fun WorkspaceScreen(
     BackHandler(onBack = onBack)
     val context = LocalContext.current
     val isAndroidProject = state.androidProjectDetected
+    /** The folder the Files tab is showing. Kept here so opening a file does not reset it. */
+    var filesCurrentDir by rememberSaveable { mutableStateOf("") }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val exportProjectLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/zip"),
@@ -4293,6 +4303,12 @@ private fun WorkspaceScreen(
                     onDeleteFile = onDeleteFile,
                     onCreateFile = onCreateFile,
                     onCreateFolder = onCreateFolder,
+                    onCopyEntry = onCopyEntry,
+                    onCutEntry = onCutEntry,
+                    onPasteEntry = onPasteEntry,
+                    clipboardPath = state.workspaceClipboardPath,
+                    currentDir = filesCurrentDir,
+                    onCurrentDirChange = { filesCurrentDir = it },
                     onUseSuggestedProjectRoot = onUseSuggestedProjectRoot,
                     onExport = {
                         exportProjectLauncher.launch("${state.activeProject?.slug ?: "project"}.zip")
@@ -4601,27 +4617,29 @@ private fun FilesTab(
     onEditFile: (WorkspaceEntry) -> Unit,
     onRenameFile: (WorkspaceEntry, String) -> Unit,
     onDeleteFile: (WorkspaceEntry) -> Unit,
-    onCreateFile: (String) -> Unit,
-    onCreateFolder: (String) -> Unit,
+    onCreateFile: (String, String) -> Unit,
+    onCreateFolder: (String, String) -> Unit,
+    onCopyEntry: (WorkspaceEntry) -> Unit,
+    onCutEntry: (WorkspaceEntry) -> Unit,
+    onPasteEntry: (String) -> Unit,
+    clipboardPath: String?,
+    currentDir: String,
+    onCurrentDirChange: (String) -> Unit,
     onUseSuggestedProjectRoot: () -> Unit,
     onExport: () -> Unit,
 ) {
-    var expandedDirectories by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var menuEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
     var renameEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
     var deleteEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
     var createFile by remember { mutableStateOf(false) }
     var createFolder by remember { mutableStateOf(false) }
     LaunchedEffect(files.map { it.path }) {
-        val directories = files.asSequence().filter { it.isDirectory }.map { it.path }.toSet()
-        expandedDirectories = expandedDirectories.filter { it in directories }
-    }
-    val expandedSet = expandedDirectories.toSet()
-    val visibleFiles = files.filter { entry ->
-        val segments = entry.path.split('/')
-        segments.size == 1 || (1 until segments.size).all { depth ->
-            segments.take(depth).joinToString("/") in expandedSet
+        if (currentDir.isNotEmpty() && files.none { it.path == currentDir && it.isDirectory }) {
+            onCurrentDirChange("")
         }
+    }
+    val children = files.filter { entry ->
+        (if ('/' in entry.path) entry.path.substringBeforeLast('/') else "") == currentDir
     }
     val directChildCounts = files.filter { candidate ->
         candidate.path.contains('/')
@@ -4643,17 +4661,21 @@ private fun FilesTab(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        stringResource(R.string.tab_files),
+                        if (currentDir.isEmpty()) stringResource(R.string.tab_files) else currentDir,
                         Modifier.weight(1f),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
                     )
-                    if (expandedDirectories.isNotEmpty()) {
-                        TextButton(onClick = { expandedDirectories = emptyList() }) {
-                            Icon(Icons.Default.KeyboardArrowUp, null, Modifier.size(17.dp))
+                    if (currentDir.isNotEmpty()) {
+                        TextButton(onClick = { onCurrentDirChange(currentDir.substringBeforeLast('/', "")) }) {
+                            Icon(Icons.Default.ArrowUpward, stringResource(R.string.files_up), Modifier.size(16.dp))
                             Spacer(Modifier.width(3.dp))
-                            Text(stringResource(R.string.files_collapse_all), fontSize = 11.sp)
+                            Text(stringResource(R.string.files_up), fontSize = 11.sp)
                         }
+                    }
+                    if (!loading && clipboardPath != null) {
+                        IconButton(onClick = { onPasteEntry(currentDir) }) { Icon(Icons.Default.ContentPaste, stringResource(R.string.files_paste)) }
                     }
                     if (!loading) {
                         IconButton(onClick = { createFolder = true }) { Icon(Icons.Default.CreateNewFolder, stringResource(R.string.files_add_folder)) }
@@ -4689,10 +4711,10 @@ private fun FilesTab(
                 }
             }
         }
-        if (!loading && files.isEmpty()) {
+        if (!loading && children.isEmpty()) {
             item { EmptyState(Icons.Default.Folder, stringResource(R.string.files_none), stringResource(R.string.files_ask_agent)) }
         }
-        items(visibleFiles, key = { it.path }) { entry ->
+        items(children, key = { it.path }) { entry ->
             Box {
                 Column {
                     Row(
@@ -4701,11 +4723,7 @@ private fun FilesTab(
                             .combinedClickable(
                                 onClick = {
                                     if (entry.isDirectory) {
-                                        expandedDirectories = if (entry.path in expandedSet) {
-                                            expandedDirectories.filterNot { it == entry.path || it.startsWith("${entry.path}/") }
-                                        } else {
-                                            expandedDirectories + entry.path
-                                        }
+                                        onCurrentDirChange(entry.path)
                                     } else {
                                         onOpenFile(entry)
                                     }
@@ -4716,15 +4734,6 @@ private fun FilesTab(
                             .padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (entry.isDirectory) {
-                            Icon(
-                                if (entry.path in expandedSet) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                if (entry.path in expandedSet) stringResource(R.string.files_collapse_folder) else stringResource(R.string.files_expand_folder),
-                                Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.width(5.dp))
-                        }
                         Icon(
                             if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Description,
                             null,
@@ -4757,6 +4766,8 @@ private fun FilesTab(
                     expanded = menuEntry?.path == entry.path,
                     onDismiss = { menuEntry = null },
                     onEdit = { menuEntry = null; onEditFile(entry) },
+                    onCopy = { menuEntry = null; onCopyEntry(entry) },
+                    onMove = { menuEntry = null; onCutEntry(entry) },
                     onRename = { menuEntry = null; renameEntry = entry },
                     onDelete = { menuEntry = null; deleteEntry = entry },
                 )
@@ -4768,7 +4779,7 @@ private fun FilesTab(
         FmpPromptDialog(
             title = stringResource(R.string.files_new_file),
             initial = "note.txt",
-            onConfirm = { value -> createFile = false; onCreateFile(value) },
+            onConfirm = { value -> createFile = false; onCreateFile(currentDir, value) },
             onDismiss = { createFile = false },
         )
     }
@@ -4777,7 +4788,7 @@ private fun FilesTab(
         FmpPromptDialog(
             title = stringResource(R.string.files_new_folder),
             initial = "folder",
-            onConfirm = { value -> createFolder = false; onCreateFolder(value) },
+            onConfirm = { value -> createFolder = false; onCreateFolder(currentDir, value) },
             onDismiss = { createFolder = false },
         )
     }
@@ -4807,9 +4818,10 @@ private fun FilesTab(
 }
 
 /**
- * What a long press offers in the project's own file list. Copy and cut wait until there is
- * somewhere to paste them, and a file the viewer cannot hold — or one too large to read
- * whole — is never offered for editing, because its draft would not be the file.
+ * What a long press offers in the project's own file list. Copy and Move stage the entry
+ * for the header's Paste button — the target is the folder being looked at — and a file
+ * the viewer cannot hold, or one too large to read whole, is never offered for editing,
+ * because its draft would not be the file.
  */
 @Composable
 private fun WorkspaceEntryMenu(
@@ -4817,6 +4829,8 @@ private fun WorkspaceEntryMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
     onEdit: () -> Unit,
+    onCopy: () -> Unit,
+    onMove: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -4831,6 +4845,16 @@ private fun WorkspaceEntryMenu(
                 onClick = onEdit,
             )
         }
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.files_copy_action), fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.ContentCopy, null, Modifier.size(18.dp)) },
+            onClick = onCopy,
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.files_move), fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.ContentCut, null, Modifier.size(18.dp)) },
+            onClick = onMove,
+        )
         DropdownMenuItem(
             text = { Text(stringResource(R.string.files_rename), fontSize = 13.sp) },
             leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null, Modifier.size(18.dp)) },

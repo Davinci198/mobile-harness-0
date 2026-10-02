@@ -401,6 +401,7 @@
     <string name="files_select_all">Selectează tot</string>
     <string name="files_copy_action">Copiază</string>
     <string name="files_cut">Taie</string>
+    <string name="files_move">Mută</string>
     <string name="files_paste">Lipește</string>
     <string name="files_archive">Arhivează</string>
     <string name="files_share">Partajează</string>
