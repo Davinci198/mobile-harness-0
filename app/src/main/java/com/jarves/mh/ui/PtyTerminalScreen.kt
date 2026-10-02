@@ -103,7 +103,7 @@ fun PtyTerminalScreen(
     installer: RuntimeInstaller,
     projectSlug: String,
     modifier: Modifier = Modifier,
-    quickCommands: List<String> = listOf("uname -a", "ls -la", "pwd"),
+    quickCommands: List<String> = listOf("uname -a", "ls -la", "pwd", "mtop --adb"),
 ) {
     val context = LocalContext.current
     var error by remember { mutableStateOf<String?>(null) }
@@ -613,6 +613,8 @@ private class PtyTerminalBackend(
 
     init {
         val installed = installer.installedRuntime()
+        // Self-heal la fiecare sesiune de terminal: pune comanda mtop in PATH.
+        installer.ensureMtop()
         val guestWorkspacePath = "/workspace/$projectSlug"
         val workspace = File(appContext.filesDir, "workspace/$projectSlug").apply { mkdirs() }
         File(installed.rootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
