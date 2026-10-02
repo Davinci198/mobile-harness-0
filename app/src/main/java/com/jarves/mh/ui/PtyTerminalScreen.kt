@@ -65,6 +65,32 @@ import com.termux.view.TerminalViewClient
 import java.io.File
 
 /**
+ * Deschide tastatura pentru [view] doar cand view-ul e cel deservit de IME.
+ *
+ * La click in DropdownMenu-ul ≡, popup-ul e inca atasat (fereastra lui are
+ * focusul si e served view) -> Androidul refuza showSoftInput pentru orice
+ * alt view ("Ignoring showSoftInput() as view ... is not served",
+ * ImeTracker onFailed PHASE_CLIENT_VIEW_SERVED) si tastatura nu se deschide.
+ * Asteptam pana cand fereastra terminalului primeste focusul si showSoftInput
+ * reuseste (intoarce true); re-incercarea la 50ms acopera si dez atasarea
+ * asincrona a popup-ului dupa recompozitie. Max ~1s, apoi ne oprim.
+ */
+private fun showKeyboardWhenServed(
+    ime: InputMethodManager,
+    view: TerminalView?,
+    tries: Int = 20,
+) {
+    val v = view ?: return
+    if (v.hasWindowFocus()) {
+        v.requestFocus()
+        if (ime.showSoftInput(v, 0)) return
+    }
+    if (tries > 0) {
+        v.postDelayed({ showKeyboardWhenServed(ime, v, tries - 1) }, 50)
+    }
+}
+
+/**
  * Pas 3 (PLAN-TERMINAL): terminal VT real (grid + ANSI + fullscreen) peste
  * [TerminalView]/[TerminalSession] din termux, cu procesul lansat in PRoot
  * cu exact argv/env din [RuntimeInstaller.process].
@@ -124,7 +150,7 @@ fun PtyTerminalScreen(
                 val ime = focusContext.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 val imeWasActive = ime.isActive
                 view.requestFocus()
-                if (imeWasActive) ime.showSoftInput(view, 0)
+                if (imeWasActive) showKeyboardWhenServed(ime, view)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -196,7 +222,7 @@ fun PtyTerminalScreen(
                             setTextSize(viewState.textSizePx)
                             isFocusable = true
                             isFocusableInTouchMode = true
-                            setTerminalViewClient(PtyViewClient(viewState))
+                            setTerminalViewClient(PtyViewClient(viewState, ctx))
                             viewState.terminalView = this
                             terminalView = this
                             attachSession(backend.session)
@@ -389,7 +415,7 @@ private fun PtyExtraKeys(
                         menuOpen = false
                         val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                         if (keyboardVisible) ime.hideSoftInputFromWindow(view?.windowToken, 0)
-                        else if (view != null) ime.showSoftInput(view, 0)
+                        else showKeyboardWhenServed(ime, view)
                     })
                     for ((i, b) in sessions.withIndex()) {
                         val active = b === activeSession
@@ -502,7 +528,7 @@ private fun PtyVerticalExtraKeys(
                     menuOpen = false
                     val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                     if (keyboardVisible) ime.hideSoftInputFromWindow(view?.windowToken, 0)
-                    else if (view != null) ime.showSoftInput(view, 0)
+                    else showKeyboardWhenServed(ime, view)
                 })
                 for ((i, b) in sessions.withIndex()) {
                     val active = b === activeSession
@@ -690,6 +716,7 @@ private class PtySessionClient(
 
 private class PtyViewClient(
     private val state: PtyViewState,
+    private val context: Context,
 ) : TerminalViewClient {
     // TerminalView acumuleaza mScaleFactor si ne cheama aici. Peste pragurile
     // 0.9/1.1 schimbam marimea fontului cu 2sp si resetam acumulatorul (1f);
@@ -707,7 +734,14 @@ private class PtyViewClient(
         }
         return scale
     }
-    override fun onSingleTapUp(e: MotionEvent) {}
+    // Tap simplu pe terminal (TerminalView deja a facut requestFocus si a
+    // iesit din selectie): deschide tastatura. Fara calea asta tastatura nu
+    // se deschide deloc la apasare — doar automat, la revenirea in app.
+    override fun onSingleTapUp(e: MotionEvent) {
+        val ime = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            ?: return
+        showKeyboardWhenServed(ime, state.terminalView)
+    }
     override fun shouldBackButtonBeMappedToEscape(): Boolean = true
     override fun shouldEnforceCharBasedInput(): Boolean = true
     override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
