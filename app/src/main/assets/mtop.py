@@ -2022,7 +2022,6 @@ def main() -> int:
             print(f"Eroare adb: {message}", file=sys.stderr)
             return 2
         set_adb_backend(backend)
-        print(f"Monitorizez prin adb: {message}", file=sys.stderr)
     if args.pid is not None:
         existing, _ = scan_processes()
         if args.pid not in existing:

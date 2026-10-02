@@ -2365,7 +2365,7 @@ fi
         private const val CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
-        private const val MTOP_VERSION = "2procwatch-2"
+        private const val MTOP_VERSION = "2procwatch-3"
         private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
         private const val ANDROID_ASSET_BASE = "https://appdevforall.org/dev-assets/debug"
         private const val ANDROID_SDK_URL = "$ANDROID_ASSET_BASE/android-sdk-arm64-v8a.zip"
