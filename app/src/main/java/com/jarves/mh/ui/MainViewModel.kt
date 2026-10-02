@@ -4531,6 +4531,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Creates a folder at the workspace root. The name goes through the same rules as a
+     * file's: one segment, no separators, never `.` or `..`.
+     */
+    fun createWorkspaceFolder(rawName: String) {
+        val project = _state.value.activeProject ?: return
+        val name = rawName.trim()
+        if (name.isEmpty() || '/' in name || '\\' in name || name == "." || name == "..") return
+        viewModelScope.launch(Dispatchers.IO) {
+            withWorkspacePath(project, name, name) { _, target ->
+                when {
+                    target.exists() -> s(R.string.files_exists, name)
+                    !target.mkdirs() && !target.isDirectory -> s(R.string.files_op_fail, name)
+                    else -> null
+                }
+            }
+        }
+    }
+
+    /**
      * Resolves [relativePath] inside the project workspace, refuses anything that escapes it,
      * and turns a failure into a toast. The file list is re-read only when the change landed.
      */

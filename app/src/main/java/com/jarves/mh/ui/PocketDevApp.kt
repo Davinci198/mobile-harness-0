@@ -86,6 +86,7 @@ import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Description
@@ -373,6 +374,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onRenameFile = viewModel::renameWorkspaceEntry,
             onDeleteFile = viewModel::deleteWorkspaceEntry,
             onCreateFile = viewModel::createWorkspaceTextFile,
+            onCreateFolder = viewModel::createWorkspaceFolder,
             onSaveOpenedFile = viewModel::saveOpenedFile,
             onUndoChanges = viewModel::undoLastChanges,
             onKeepChanges = viewModel::keepLastChanges,
@@ -4013,6 +4015,7 @@ private fun WorkspaceScreen(
     onRenameFile: (WorkspaceEntry, String) -> Unit,
     onDeleteFile: (WorkspaceEntry) -> Unit,
     onCreateFile: (String) -> Unit,
+    onCreateFolder: (String) -> Unit,
     onSaveOpenedFile: (String) -> Unit,
     onUndoChanges: () -> Unit,
     onKeepChanges: () -> Unit,
@@ -4289,6 +4292,7 @@ private fun WorkspaceScreen(
                     onRenameFile = onRenameFile,
                     onDeleteFile = onDeleteFile,
                     onCreateFile = onCreateFile,
+                    onCreateFolder = onCreateFolder,
                     onUseSuggestedProjectRoot = onUseSuggestedProjectRoot,
                     onExport = {
                         exportProjectLauncher.launch("${state.activeProject?.slug ?: "project"}.zip")
@@ -4598,6 +4602,7 @@ private fun FilesTab(
     onRenameFile: (WorkspaceEntry, String) -> Unit,
     onDeleteFile: (WorkspaceEntry) -> Unit,
     onCreateFile: (String) -> Unit,
+    onCreateFolder: (String) -> Unit,
     onUseSuggestedProjectRoot: () -> Unit,
     onExport: () -> Unit,
 ) {
@@ -4606,6 +4611,7 @@ private fun FilesTab(
     var renameEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
     var deleteEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
     var createFile by remember { mutableStateOf(false) }
+    var createFolder by remember { mutableStateOf(false) }
     LaunchedEffect(files.map { it.path }) {
         val directories = files.asSequence().filter { it.isDirectory }.map { it.path }.toSet()
         expandedDirectories = expandedDirectories.filter { it in directories }
@@ -4648,6 +4654,9 @@ private fun FilesTab(
                             Spacer(Modifier.width(3.dp))
                             Text(stringResource(R.string.files_collapse_all), fontSize = 11.sp)
                         }
+                    }
+                    if (!loading) {
+                        IconButton(onClick = { createFolder = true }) { Icon(Icons.Default.CreateNewFolder, stringResource(R.string.files_add_folder)) }
                     }
                     if (!loading) {
                         IconButton(onClick = { createFile = true }) { Icon(Icons.Default.Add, stringResource(R.string.files_new_file)) }
@@ -4761,6 +4770,15 @@ private fun FilesTab(
             initial = "note.txt",
             onConfirm = { value -> createFile = false; onCreateFile(value) },
             onDismiss = { createFile = false },
+        )
+    }
+
+    if (createFolder) {
+        FmpPromptDialog(
+            title = stringResource(R.string.files_new_folder),
+            initial = "folder",
+            onConfirm = { value -> createFolder = false; onCreateFolder(value) },
+            onDismiss = { createFolder = false },
         )
     }
 
