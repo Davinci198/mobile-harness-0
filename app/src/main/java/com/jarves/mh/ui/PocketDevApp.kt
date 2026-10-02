@@ -372,6 +372,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onEditFile = viewModel::editFile,
             onRenameFile = viewModel::renameWorkspaceEntry,
             onDeleteFile = viewModel::deleteWorkspaceEntry,
+            onCreateFile = viewModel::createWorkspaceTextFile,
             onSaveOpenedFile = viewModel::saveOpenedFile,
             onUndoChanges = viewModel::undoLastChanges,
             onKeepChanges = viewModel::keepLastChanges,
@@ -4011,6 +4012,7 @@ private fun WorkspaceScreen(
     onEditFile: (WorkspaceEntry) -> Unit,
     onRenameFile: (WorkspaceEntry, String) -> Unit,
     onDeleteFile: (WorkspaceEntry) -> Unit,
+    onCreateFile: (String) -> Unit,
     onSaveOpenedFile: (String) -> Unit,
     onUndoChanges: () -> Unit,
     onKeepChanges: () -> Unit,
@@ -4286,6 +4288,7 @@ private fun WorkspaceScreen(
                     onEditFile = onEditFile,
                     onRenameFile = onRenameFile,
                     onDeleteFile = onDeleteFile,
+                    onCreateFile = onCreateFile,
                     onUseSuggestedProjectRoot = onUseSuggestedProjectRoot,
                     onExport = {
                         exportProjectLauncher.launch("${state.activeProject?.slug ?: "project"}.zip")
@@ -4594,6 +4597,7 @@ private fun FilesTab(
     onEditFile: (WorkspaceEntry) -> Unit,
     onRenameFile: (WorkspaceEntry, String) -> Unit,
     onDeleteFile: (WorkspaceEntry) -> Unit,
+    onCreateFile: (String) -> Unit,
     onUseSuggestedProjectRoot: () -> Unit,
     onExport: () -> Unit,
 ) {
@@ -4601,6 +4605,7 @@ private fun FilesTab(
     var menuEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
     var renameEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
     var deleteEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
+    var createFile by remember { mutableStateOf(false) }
     LaunchedEffect(files.map { it.path }) {
         val directories = files.asSequence().filter { it.isDirectory }.map { it.path }.toSet()
         expandedDirectories = expandedDirectories.filter { it in directories }
@@ -4643,6 +4648,9 @@ private fun FilesTab(
                             Spacer(Modifier.width(3.dp))
                             Text(stringResource(R.string.files_collapse_all), fontSize = 11.sp)
                         }
+                    }
+                    if (!loading) {
+                        IconButton(onClick = { createFile = true }) { Icon(Icons.Default.Add, stringResource(R.string.files_new_file)) }
                     }
                     if (!loading && files.any { !it.isDirectory }) {
                         IconButton(onClick = onExport) { Icon(Icons.Default.Download, stringResource(R.string.files_export)) }
@@ -4745,6 +4753,15 @@ private fun FilesTab(
                 )
             }
         }
+    }
+
+    if (createFile) {
+        FmpPromptDialog(
+            title = stringResource(R.string.files_new_file),
+            initial = "note.txt",
+            onConfirm = { value -> createFile = false; onCreateFile(value) },
+            onDismiss = { createFile = false },
+        )
     }
 
     renameEntry?.let { target ->

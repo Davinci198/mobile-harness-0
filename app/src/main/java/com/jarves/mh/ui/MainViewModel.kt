@@ -4504,25 +4504,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Resolves [entry] inside the project workspace, refuses anything that escapes it, and
-     * turns a failure into a toast. The file list is re-read only when the change landed.
+     * Creates an empty text file at the workspace root and hands it straight to the editor:
+     * the button that asks for a new file wants somewhere to type, not a file to tap twice.
+     * A name without an extension becomes a `.txt`, and an existing file is never
+     * overwritten — the toast says so instead.
+     */
+    fun createWorkspaceTextFile(rawName: String) {
+        val project = _state.value.activeProject ?: return
+        val typed = rawName.trim()
+        if (typed.isEmpty() || '/' in typed || '\\' in typed || typed == "." || typed == "..") return
+        val name = if ('.' in typed) typed else "$typed.txt"
+        viewModelScope.launch(Dispatchers.IO) {
+            var created = false
+            withWorkspacePath(project, name, name) { _, target ->
+                when {
+                    target.exists() -> s(R.string.files_exists, name)
+                    !target.createNewFile() -> s(R.string.files_op_fail, name)
+                    else -> {
+                        created = true
+                        null
+                    }
+                }
+            }
+            if (created) openFile(WorkspaceEntry(name, name, false, 0), startEditing = true)
+        }
+    }
+
+    /**
+     * Resolves [relativePath] inside the project workspace, refuses anything that escapes it,
+     * and turns a failure into a toast. The file list is re-read only when the change landed.
      */
     private suspend fun withFileOfWork(
         project: Project,
         entry: WorkspaceEntry,
         change: (File, File) -> String?,
+    ) = withWorkspacePath(project, entry.path, entry.name, change)
+
+    private suspend fun withWorkspacePath(
+        project: Project,
+        relativePath: String,
+        label: String,
+        change: (File, File) -> String?,
     ) {
         val outcome = runCatching {
             val root = projectWorkspaceRoot(project).canonicalFile
-            val target = File(root, entry.path).canonicalFile
+            val target = File(root, relativePath).canonicalFile
             if (!target.path.startsWith(root.path + File.separator)) {
-                s(R.string.files_op_fail, entry.name)
+                s(R.string.files_op_fail, label)
             } else {
                 val failure = change(root, target)
                 if (failure == null) refreshProjectFiles()
                 failure
             }
-        }.getOrElse { error -> s(R.string.files_op_fail, error.message ?: entry.name) }
+        }.getOrElse { error -> s(R.string.files_op_fail, error.message ?: label) }
         if (outcome != null) _state.update { it.copy(toastMessage = outcome) }
     }
 
