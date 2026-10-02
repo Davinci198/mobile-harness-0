@@ -1330,7 +1330,7 @@ private fun remedyLabel(remedy: FsRemedy): Int = when (remedy) {
 }
 
 @Composable
-private fun FmpPromptDialog(title: String, initial: String = "", onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+internal fun FmpPromptDialog(title: String, initial: String = "", onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
     var value by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,

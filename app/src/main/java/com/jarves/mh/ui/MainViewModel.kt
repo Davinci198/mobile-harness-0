@@ -257,6 +257,11 @@ data class AppUiState(
     val openedFilePath: String? = null,
     val openedFileContent: String? = null,
     val fileContentLoading: Boolean = false,
+    val fileContentSaving: Boolean = false,
+    /** The menu opened this file to be written to, not just looked at. */
+    val openedFileEditing: Boolean = false,
+    /** Too large to read whole: the draft on screen is not the file, so it must not go back. */
+    val openedFileTruncated: Boolean = false,
     val messages: List<ChatMessage> = listOf(
         ChatMessage(fromUser = false, text = "Hi! Tell me what you want to build or change."),
     ),
@@ -4408,17 +4413,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun openFile(entry: WorkspaceEntry) {
+    fun openFile(entry: WorkspaceEntry) = openFile(entry, startEditing = false)
+
+    /** The menu's Edit asks for the editor, which waits for the bytes before it opens. */
+    fun editFile(entry: WorkspaceEntry) = openFile(entry, startEditing = true)
+
+    private fun openFile(entry: WorkspaceEntry, startEditing: Boolean) {
         if (entry.isDirectory) return
         val project = _state.value.activeProject ?: return
-        _state.update { it.copy(openedFilePath = entry.path, openedFileContent = null, fileContentLoading = true) }
+        _state.update {
+            it.copy(
+                openedFilePath = entry.path,
+                openedFileContent = null,
+                fileContentLoading = true,
+                openedFileEditing = startEditing,
+                openedFileTruncated = false,
+            )
+        }
         viewModelScope.launch {
+            val file = File(projectWorkspaceRoot(project), entry.path)
+            val tooLarge = withContext(Dispatchers.IO) { file.length() > MAX_OPEN_FILE_BYTES }
             val content = withContext(Dispatchers.IO) {
-                val file = File(projectWorkspaceRoot(project), entry.path)
                 runCatching {
-                    if (file.length() > 512_000L) {
+                    if (tooLarge) {
                         file.inputStream().use { stream ->
-                            val buf = ByteArray(512_000)
+                            val buf = ByteArray(MAX_OPEN_FILE_BYTES.toInt())
                             val read = stream.read(buf)
                             String(buf, 0, read)
                         } + "\n\n[File truncated — too large to display fully]"
@@ -4427,12 +4446,97 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }.getOrElse { s(R.string.file_read_fail, it.message) }
             }
-            _state.update { it.copy(openedFileContent = content, fileContentLoading = false) }
+            _state.update {
+                it.copy(openedFileContent = content, fileContentLoading = false, openedFileTruncated = tooLarge)
+            }
         }
     }
 
+    /**
+     * Writes the viewer's draft back to the workspace file. The screen is told by way of
+     * [AppUiState.fileContentSaving]: the editor stays open until the bytes are on disk,
+     * because a failed save that looks like a successful one is how a draft disappears.
+     */
+    fun saveOpenedFile(text: String) {
+        val project = _state.value.activeProject ?: return
+        val path = _state.value.openedFilePath ?: return
+        if (_state.value.fileContentSaving) return
+        _state.update { it.copy(fileContentSaving = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { File(projectWorkspaceRoot(project), path).writeText(text) }
+                .onSuccess {
+                    _state.update { it.copy(fileContentSaving = false, openedFileContent = text) }
+                }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(
+                            fileContentSaving = false,
+                            toastMessage = s(R.string.file_write_fail, error.message ?: ""),
+                        )
+                    }
+                }
+        }
+    }
+
+    fun renameWorkspaceEntry(entry: WorkspaceEntry, newName: String) {
+        val project = _state.value.activeProject ?: return
+        val name = newName.trim()
+        if (name.isEmpty() || '/' in name || '\\' in name || name == entry.name) return
+        viewModelScope.launch(Dispatchers.IO) {
+            withFileOfWork(project, entry) { root, target ->
+                val destination = File(target.parentFile ?: root, name)
+                when {
+                    destination.exists() -> s(R.string.files_exists, name)
+                    !target.renameTo(destination) -> s(R.string.files_op_fail, name)
+                    else -> null
+                }
+            }
+        }
+    }
+
+    fun deleteWorkspaceEntry(entry: WorkspaceEntry) {
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            withFileOfWork(project, entry) { _, target ->
+                if (!target.deleteRecursively()) s(R.string.files_op_fail, entry.name) else null
+            }
+        }
+    }
+
+    /**
+     * Resolves [entry] inside the project workspace, refuses anything that escapes it, and
+     * turns a failure into a toast. The file list is re-read only when the change landed.
+     */
+    private suspend fun withFileOfWork(
+        project: Project,
+        entry: WorkspaceEntry,
+        change: (File, File) -> String?,
+    ) {
+        val outcome = runCatching {
+            val root = projectWorkspaceRoot(project).canonicalFile
+            val target = File(root, entry.path).canonicalFile
+            if (!target.path.startsWith(root.path + File.separator)) {
+                s(R.string.files_op_fail, entry.name)
+            } else {
+                val failure = change(root, target)
+                if (failure == null) refreshProjectFiles()
+                failure
+            }
+        }.getOrElse { error -> s(R.string.files_op_fail, error.message ?: entry.name) }
+        if (outcome != null) _state.update { it.copy(toastMessage = outcome) }
+    }
+
     fun closeFile() {
-        _state.update { it.copy(openedFilePath = null, openedFileContent = null, fileContentLoading = false) }
+        _state.update {
+            it.copy(
+                openedFilePath = null,
+                openedFileContent = null,
+                fileContentLoading = false,
+                fileContentSaving = false,
+                openedFileEditing = false,
+                openedFileTruncated = false,
+            )
+        }
     }
 
 
@@ -5208,6 +5312,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         private const val MINIMUM_INITIALIZATION_SCREEN_MS = 400L
         private const val MAX_VISIBLE_WORKSPACE_ENTRIES = 2_000
+        /** Past this the viewer shows a head of the file only, so it can never be written back. */
+        internal const val MAX_OPEN_FILE_BYTES = 512_000L
         private const val MAX_PROJECT_TERMINAL_HISTORY = 100
         private const val MAX_PROJECT_TERMINAL_OUTPUT = 200_000
         private const val MAX_ATTACHMENTS_PER_MESSAGE = 5

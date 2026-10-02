@@ -483,6 +483,8 @@
     <string name="files_delete_title">Delete this?</string>
     <string name="files_name">Name</string>
     <string name="files_save">Save</string>
+    <string name="files_op_fail">Could not change %1$s</string>
+    <string name="files_exists">%1$s already exists</string>
     <string name="files_error_all_files">Shared storage needs all-files access</string>
     <string name="files_error_shizuku">The device filesystem needs Shizuku access</string>
     <string name="files_error_no_folder">Add a folder to browse outside the workspace</string>
@@ -777,6 +779,7 @@
     <string name="export_open_fail">The selected location could not be opened</string>
     <string name="export_failed">Export failed: %1$s</string>
     <string name="file_read_fail">Could not read file: %1$s</string>
+    <string name="file_write_fail">Could not write file: %1$s</string>
     <string name="attach_max">You can attach up to %1$d files per message</string>
     <string name="attach_fail">Could not attach file</string>
     <string name="attach_more_one">Only %1$d more file could be added</string>
