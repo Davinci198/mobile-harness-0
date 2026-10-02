@@ -483,6 +483,8 @@
     <string name="files_delete_title">Ștergi asta?</string>
     <string name="files_name">Nume</string>
     <string name="files_save">Salvează</string>
+    <string name="files_op_fail">Nu s-a putut modifica %1$s</string>
+    <string name="files_exists">%1$s există deja</string>
     <string name="files_error_all_files">Stocarea partajată are nevoie de acces la toate fișierele</string>
     <string name="files_error_shizuku">Sistemul de fișiere al telefonului are nevoie de acces Shizuku</string>
     <string name="files_error_no_folder">Adaugă un folder ca să navighezi în afara workspace-ului</string>
@@ -777,6 +779,7 @@
     <string name="export_open_fail">Locația selectată nu a putut fi deschisă</string>
     <string name="export_failed">Exportul a eșuat: %1$s</string>
     <string name="file_read_fail">Nu s-a putut citi fișierul: %1$s</string>
+    <string name="file_write_fail">Nu s-a putut scrie fișierul: %1$s</string>
     <string name="attach_max">Poți atașa maximum %1$d fișiere pe mesaj</string>
     <string name="attach_fail">Nu s-a putut atașa fișierul</string>
     <string name="attach_more_one">Mai poate fi adăugat doar %1$d fișier</string>

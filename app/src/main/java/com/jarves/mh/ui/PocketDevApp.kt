@@ -94,6 +94,7 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
@@ -220,6 +221,7 @@ import com.jarves.mh.runtime.RuntimeExecutionService.Companion.ACTION_KEEPALIVE
 import com.jarves.mh.runtime.RuntimeExecutionService.Companion.EXTRA_PROJECT_NAME
 import com.jarves.mh.runtime.RuntimeInstaller
 import com.jarves.mh.runtime.RuntimeSetupService
+import com.jarves.mh.storage.FsFileTypes
 import com.jarves.mh.storage.FsRemedy
 import com.jarves.mh.runtime.StudioServerManager
 import com.jarves.mh.runtime.supportsArm64Runtime
@@ -367,6 +369,10 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onRefreshFiles = viewModel::refreshProjectFiles,
             onOpenFile = viewModel::openFile,
             onCloseFile = viewModel::closeFile,
+            onEditFile = viewModel::editFile,
+            onRenameFile = viewModel::renameWorkspaceEntry,
+            onDeleteFile = viewModel::deleteWorkspaceEntry,
+            onSaveOpenedFile = viewModel::saveOpenedFile,
             onUndoChanges = viewModel::undoLastChanges,
             onKeepChanges = viewModel::keepLastChanges,
             onUndoFileChange = viewModel::undoFileChange,
@@ -4002,6 +4008,10 @@ private fun WorkspaceScreen(
     onRefreshFiles: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
     onCloseFile: () -> Unit,
+    onEditFile: (WorkspaceEntry) -> Unit,
+    onRenameFile: (WorkspaceEntry, String) -> Unit,
+    onDeleteFile: (WorkspaceEntry) -> Unit,
+    onSaveOpenedFile: (String) -> Unit,
     onUndoChanges: () -> Unit,
     onKeepChanges: () -> Unit,
     onUndoFileChange: (String) -> Unit,
@@ -4107,10 +4117,14 @@ private fun WorkspaceScreen(
             filePath = state.openedFilePath,
             content = state.openedFileContent,
             loading = state.fileContentLoading,
+            saving = state.fileContentSaving,
+            startEditing = state.openedFileEditing,
+            truncated = state.openedFileTruncated,
             onClose = {
                 onCloseFile()
                 selectedTab = WorkspaceTab.FILES
             },
+            onSave = onSaveOpenedFile,
         )
         return
     }
@@ -4269,6 +4283,9 @@ private fun WorkspaceScreen(
                     suggestedProjectRoot = state.suggestedProjectRoot,
                     onRefresh = onRefreshFiles,
                     onOpenFile = onOpenFile,
+                    onEditFile = onEditFile,
+                    onRenameFile = onRenameFile,
+                    onDeleteFile = onDeleteFile,
                     onUseSuggestedProjectRoot = onUseSuggestedProjectRoot,
                     onExport = {
                         exportProjectLauncher.launch("${state.activeProject?.slug ?: "project"}.zip")
@@ -4384,7 +4401,13 @@ internal fun FileViewerScreen(
     filePath: String,
     content: String?,
     loading: Boolean,
+    saving: Boolean,
+    /** The menu opened this file to be written to, not just looked at. */
+    startEditing: Boolean,
+    /** The read stopped early: what is on screen is a head of the file, not the file. */
+    truncated: Boolean,
     onClose: () -> Unit,
+    onSave: (String) -> Unit,
 ) {
     val fileName = filePath.substringAfterLast('/')
     val ext = fileName.substringAfterLast('.', "")
@@ -4392,6 +4415,45 @@ internal fun FileViewerScreen(
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(content.orEmpty()) }
+    var pendingEdit by remember { mutableStateOf(startEditing) }
+    var underway by remember { mutableStateOf(false) }
+
+    // The menu can ask for the editor before the bytes have arrived, and switching straight
+    // away would open an empty draft over a file that has content — saving it would wipe
+    // the file. The switch waits, and never happens over a truncated read.
+    LaunchedEffect(pendingEdit, content, loading, truncated) {
+        if (!pendingEdit) return@LaunchedEffect
+        if (truncated) {
+            pendingEdit = false
+        } else if (content != null && !loading) {
+            draft = content
+            editing = true
+            pendingEdit = false
+        }
+    }
+
+    fun leaveEditor() {
+        draft = content.orEmpty()
+        editing = false
+        underway = false
+    }
+
+    // Leaving the editor costs the draft, so back cancels the edit first and the file only
+    // afterwards: a half-typed line is not a reason to lose the screen it is on.
+    BackHandler(enabled = editing) { leaveEditor() }
+
+    // The write is asynchronous and can be refused. The editor stays open until the bytes
+    // are on disk, because a failed save that looks like a successful one loses the draft.
+    LaunchedEffect(saving, content) {
+        if (saving) {
+            underway = true
+        } else if (underway) {
+            underway = false
+            if (content == draft) editing = false
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -4403,19 +4465,37 @@ internal fun FileViewerScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.files_close)) }
+                    IconButton(onClick = { if (editing) leaveEditor() else onClose() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.files_close))
+                    }
                 },
                 actions = {
-                    if (!content.isNullOrEmpty()) {
-                        IconButton(onClick = {
-                            clipboard.setText(AnnotatedString(content))
-                            copied = true
-                            scope.launch { delay(2000); copied = false }
-                        }) {
+                    if (editing) {
+                        IconButton(onClick = { underway = true; onSave(draft) }, enabled = !saving) {
+                            Icon(Icons.Default.Check, stringResource(R.string.files_save), tint = PocketAccent)
+                        }
+                    } else {
+                        if (!content.isNullOrEmpty()) {
+                            IconButton(onClick = {
+                                clipboard.setText(AnnotatedString(content))
+                                copied = true
+                                scope.launch { delay(2000); copied = false }
+                            }) {
+                                Icon(
+                                    if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                                    stringResource(R.string.files_copy),
+                                    tint = if (copied) PocketAccent else MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = { draft = content.orEmpty(); editing = true },
+                            enabled = !loading && content != null && !truncated,
+                        ) {
                             Icon(
-                                if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-                                stringResource(R.string.files_copy),
-                                tint = if (copied) PocketAccent else MaterialTheme.colorScheme.onSurface,
+                                Icons.Default.Edit,
+                                stringResource(R.string.files_edit),
+                                tint = MaterialTheme.colorScheme.onSurface,
                             )
                         }
                     }
@@ -4433,6 +4513,21 @@ internal fun FileViewerScreen(
                 }
                 content == null -> {
                     EmptyState(Icons.Default.Description, stringResource(R.string.files_no_content), stringResource(R.string.files_couldnt_read))
+                }
+                editing -> {
+                    Column(Modifier.fillMaxSize()) {
+                        if (saving) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        BasicTextField(
+                            value = draft,
+                            onValueChange = { draft = it },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(12.dp),
+                            textStyle = TextStyle(color = Color(0xFFE2E8F0), fontSize = 13.sp, lineHeight = 19.sp),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        )
+                    }
                 }
                 isMarkdown -> {
                     LazyColumn(
@@ -4495,10 +4590,16 @@ private fun FilesTab(
     suggestedProjectRoot: String?,
     onRefresh: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
+    onEditFile: (WorkspaceEntry) -> Unit,
+    onRenameFile: (WorkspaceEntry, String) -> Unit,
+    onDeleteFile: (WorkspaceEntry) -> Unit,
     onUseSuggestedProjectRoot: () -> Unit,
     onExport: () -> Unit,
 ) {
     var expandedDirectories by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var menuEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
+    var renameEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
+    var deleteEntry by remember { mutableStateOf<WorkspaceEntry?>(null) }
     LaunchedEffect(files.map { it.path }) {
         val directories = files.asSequence().filter { it.isDirectory }.map { it.path }.toSet()
         expandedDirectories = expandedDirectories.filter { it in directories }
@@ -4574,60 +4675,136 @@ private fun FilesTab(
             item { EmptyState(Icons.Default.Folder, stringResource(R.string.files_none), stringResource(R.string.files_ask_agent)) }
         }
         items(visibleFiles, key = { it.path }) { entry ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable {
+            Box {
+                Column {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(
+                                onClick = {
+                                    if (entry.isDirectory) {
+                                        expandedDirectories = if (entry.path in expandedSet) {
+                                            expandedDirectories.filterNot { it == entry.path || it.startsWith("${entry.path}/") }
+                                        } else {
+                                            expandedDirectories + entry.path
+                                        }
+                                    } else {
+                                        onOpenFile(entry)
+                                    }
+                                },
+                                onLongClick = { menuEntry = entry },
+                            )
+                            .padding(start = (entry.depth * 20).dp)
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         if (entry.isDirectory) {
-                            expandedDirectories = if (entry.path in expandedSet) {
-                                expandedDirectories.filterNot { it == entry.path || it.startsWith("${entry.path}/") }
-                            } else {
-                                expandedDirectories + entry.path
-                            }
-                        } else {
-                            onOpenFile(entry)
+                            Icon(
+                                if (entry.path in expandedSet) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                if (entry.path in expandedSet) stringResource(R.string.files_collapse_folder) else stringResource(R.string.files_expand_folder),
+                                Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(5.dp))
+                        }
+                        Icon(
+                            if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Description,
+                            null,
+                            tint = if (entry.isDirectory) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(11.dp))
+                        Text(
+                            if (entry.isDirectory) "${entry.name} (${directChildCounts[entry.path] ?: 0})" else entry.name,
+                            Modifier.weight(1f),
+                            color = if (!entry.isDirectory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        )
+                        if (!entry.isDirectory) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(formatFileSize(entry.sizeBytes), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
-                    .padding(start = (entry.depth * 20).dp)
-                    .padding(vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (entry.isDirectory) {
-                    Icon(
-                        if (entry.path in expandedSet) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        if (entry.path in expandedSet) stringResource(R.string.files_collapse_folder) else stringResource(R.string.files_expand_folder),
-                        Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(5.dp))
+                    if (!entry.isDirectory) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), modifier = Modifier.padding(start = (entry.depth * 20 + 42).dp))
+                    }
                 }
-                Icon(
-                    if (entry.isDirectory) Icons.Default.Folder else Icons.Default.Description,
-                    null,
-                    tint = if (entry.isDirectory) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                WorkspaceEntryMenu(
+                    entry = entry,
+                    expanded = menuEntry?.path == entry.path,
+                    onDismiss = { menuEntry = null },
+                    onEdit = { menuEntry = null; onEditFile(entry) },
+                    onRename = { menuEntry = null; renameEntry = entry },
+                    onDelete = { menuEntry = null; deleteEntry = entry },
                 )
-                Spacer(Modifier.width(11.dp))
-                Text(
-                    if (entry.isDirectory) "${entry.name} (${directChildCounts[entry.path] ?: 0})" else entry.name,
-                    Modifier.weight(1f),
-                    color = if (!entry.isDirectory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                )
-                if (!entry.isDirectory) {
-                    Spacer(Modifier.width(8.dp))
-                    Text(formatFileSize(entry.sizeBytes), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(4.dp))
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (!entry.isDirectory) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), modifier = Modifier.padding(start = (entry.depth * 20 + 42).dp))
             }
         }
+    }
+
+    renameEntry?.let { target ->
+        FmpPromptDialog(
+            title = stringResource(R.string.files_rename),
+            initial = target.name,
+            onConfirm = { value -> renameEntry = null; onRenameFile(target, value) },
+            onDismiss = { renameEntry = null },
+        )
+    }
+
+    deleteEntry?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteEntry = null },
+            title = { Text(stringResource(R.string.files_delete_title)) },
+            text = { Text(target.name) },
+            confirmButton = {
+                TextButton(onClick = { deleteEntry = null; onDeleteFile(target) }) {
+                    Text(stringResource(R.string.files_delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { deleteEntry = null }) { Text(stringResource(R.string.settings_cancel)) } },
+        )
+    }
+}
+
+/**
+ * What a long press offers in the project's own file list. Copy and cut wait until there is
+ * somewhere to paste them, and a file the viewer cannot hold — or one too large to read
+ * whole — is never offered for editing, because its draft would not be the file.
+ */
+@Composable
+private fun WorkspaceEntryMenu(
+    entry: WorkspaceEntry,
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        if (!entry.isDirectory &&
+            FsFileTypes.opensInViewer(entry.name) &&
+            entry.sizeBytes <= MainViewModel.MAX_OPEN_FILE_BYTES
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.files_edit), fontSize = 13.sp) },
+                leadingIcon = { Icon(Icons.Default.Edit, null, Modifier.size(18.dp)) },
+                onClick = onEdit,
+            )
+        }
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.files_rename), fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null, Modifier.size(18.dp)) },
+            onClick = onRename,
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.files_delete), fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.Delete, null, Modifier.size(18.dp)) },
+            onClick = onDelete,
+        )
     }
 }
 
