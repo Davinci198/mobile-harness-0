@@ -254,6 +254,10 @@ data class AppUiState(
     val workspaceFiles: List<WorkspaceEntry> = emptyList(),
     val androidProjectDetected: Boolean = false,
     val filesLoading: Boolean = false,
+    /** Workspace-relative path staged by the menu's Copy/Move; null when nothing is staged. */
+    val workspaceClipboardPath: String? = null,
+    /** Staged as a move: paste renames the source away instead of writing a copy. */
+    val workspaceClipboardCut: Boolean = false,
     val openedFilePath: String? = null,
     val openedFileContent: String? = null,
     val fileContentLoading: Boolean = false,
@@ -3474,6 +3478,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 workspaceFiles = emptyList(),
                 androidProjectDetected = false,
                 filesLoading = true,
+                workspaceClipboardPath = null,
+                workspaceClipboardCut = false,
                 projectTerminalLines = terminal.lines,
                 projectTerminalLiveOutput = "",
                 projectTerminalRunning = false,
@@ -3551,6 +3557,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 workspaceFiles = emptyList(),
                 androidProjectDetected = false,
                 filesLoading = false,
+                workspaceClipboardPath = null,
+                workspaceClipboardCut = false,
                 isRunning = false,
                 activeSessionId = null,
                 pendingApproval = null,
@@ -3634,6 +3642,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 workspaceFiles = emptyList(),
                 androidProjectDetected = false,
                 filesLoading = true,
+                workspaceClipboardPath = null,
+                workspaceClipboardCut = false,
                 projectTerminalLines = emptyList(),
                 projectTerminalLiveOutput = "",
                 projectTerminalRunning = false,
@@ -4504,19 +4514,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Creates an empty text file at the workspace root and hands it straight to the editor:
-     * the button that asks for a new file wants somewhere to type, not a file to tap twice.
-     * A name without an extension becomes a `.txt`, and an existing file is never
-     * overwritten — the toast says so instead.
+     * Creates an empty text file in [directory] — the folder the list is showing — and hands
+     * it straight to the editor: the button that asks for a new file wants somewhere to type,
+     * not a file to tap twice. A name without an extension becomes a `.txt`, and an existing
+     * file is never overwritten — the toast says so instead.
      */
-    fun createWorkspaceTextFile(rawName: String) {
+    fun createWorkspaceTextFile(directory: String, rawName: String) {
         val project = _state.value.activeProject ?: return
         val typed = rawName.trim()
         if (typed.isEmpty() || '/' in typed || '\\' in typed || typed == "." || typed == "..") return
         val name = if ('.' in typed) typed else "$typed.txt"
+        val relativePath = if (directory.isEmpty()) name else "$directory/$name"
         viewModelScope.launch(Dispatchers.IO) {
             var created = false
-            withWorkspacePath(project, name, name) { _, target ->
+            withWorkspacePath(project, relativePath, name) { _, target ->
                 when {
                     target.exists() -> s(R.string.files_exists, name)
                     !target.createNewFile() -> s(R.string.files_op_fail, name)
@@ -4526,20 +4537,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-            if (created) openFile(WorkspaceEntry(name, name, false, 0), startEditing = true)
+            if (created) openFile(WorkspaceEntry(relativePath, name, false, 0), startEditing = true)
         }
     }
 
     /**
-     * Creates a folder at the workspace root. The name goes through the same rules as a
-     * file's: one segment, no separators, never `.` or `..`.
+     * Creates a folder in [directory]. The name goes through the same rules as a file's:
+     * one segment, no separators, never `.` or `..`.
      */
-    fun createWorkspaceFolder(rawName: String) {
+    fun createWorkspaceFolder(directory: String, rawName: String) {
         val project = _state.value.activeProject ?: return
         val name = rawName.trim()
         if (name.isEmpty() || '/' in name || '\\' in name || name == "." || name == "..") return
+        val relativePath = if (directory.isEmpty()) name else "$directory/$name"
         viewModelScope.launch(Dispatchers.IO) {
-            withWorkspacePath(project, name, name) { _, target ->
+            withWorkspacePath(project, relativePath, name) { _, target ->
                 when {
                     target.exists() -> s(R.string.files_exists, name)
                     !target.mkdirs() && !target.isDirectory -> s(R.string.files_op_fail, name)
@@ -4547,6 +4559,84 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    /** Stages the entry for the paste button: Copy keeps the source where it is. */
+    fun stageWorkspaceCopy(entry: WorkspaceEntry) = stageWorkspaceClipboard(entry, cut = false)
+
+    /** Stages the entry as a move: the paste renames it away from here. */
+    fun stageWorkspaceCut(entry: WorkspaceEntry) = stageWorkspaceClipboard(entry, cut = true)
+
+    private fun stageWorkspaceClipboard(entry: WorkspaceEntry, cut: Boolean) {
+        _state.update { it.copy(workspaceClipboardPath = entry.path, workspaceClipboardCut = cut) }
+    }
+
+    /**
+     * Writes the staged entry into [directory] — the folder the list is showing. A move
+     * clears the board once the rename landed; a copy leaves it staged, because a file is
+     * usually dropped in more than one place. Anything that would put a folder inside its
+     * own subtree is refused: the walk would never finish.
+     */
+    fun pasteWorkspaceEntry(directory: String) {
+        val project = _state.value.activeProject ?: return
+        val sourcePath = _state.value.workspaceClipboardPath ?: return
+        val cut = _state.value.workspaceClipboardCut
+        val sourceName = sourcePath.substringAfterLast('/')
+        viewModelScope.launch(Dispatchers.IO) {
+            var moved = false
+            withWorkspacePath(project, sourcePath, sourceName) { root, source ->
+                val parent = File(root, directory).canonicalFile
+                if (parent.path != root.path && !parent.path.startsWith(root.path + File.separator)) {
+                    s(R.string.files_op_fail, sourceName)
+                } else if (!parent.isDirectory) {
+                    s(R.string.files_op_fail, directory.ifEmpty { sourceName })
+                } else {
+                    val target = File(parent, sourceName)
+                    when {
+                        target.path.startsWith(source.path + File.separator) ->
+                            s(R.string.files_op_fail, sourceName)
+                        cut && target.path == source.path ->
+                            s(R.string.files_op_fail, sourceName)
+                        cut && target.exists() ->
+                            s(R.string.files_exists, sourceName)
+                        cut && source.renameTo(target) -> {
+                            moved = true
+                            null
+                        }
+                        !cut -> {
+                            val destination = File(parent, freeWorkspaceName(parent, sourceName))
+                            if (source.copyRecursively(destination, overwrite = false)) {
+                                moved = true
+                                null
+                            } else {
+                                s(R.string.files_op_fail, sourceName)
+                            }
+                        }
+                        else -> s(R.string.files_op_fail, sourceName)
+                    }
+                }
+            }
+            if (moved && cut) {
+                _state.update { it.copy(workspaceClipboardPath = null, workspaceClipboardCut = false) }
+            }
+        }
+    }
+
+    /**
+     * The name a paste can write: `note.txt`, then `note-2.txt`, `note-3.txt` — the file
+     * already in the folder is never the one a paste overwrites.
+     */
+    private fun freeWorkspaceName(parent: File, name: String): String {
+        val dot = name.lastIndexOf('.')
+        val stem = if (dot > 0) name.substring(0, dot) else name
+        val suffix = if (dot > 0) name.substring(dot) else ""
+        var candidate = name
+        var attempt = 2
+        while (File(parent, candidate).exists()) {
+            candidate = "$stem-$attempt$suffix"
+            attempt++
+        }
+        return candidate
     }
 
     /**
