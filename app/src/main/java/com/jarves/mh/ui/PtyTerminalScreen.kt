@@ -103,7 +103,7 @@ fun PtyTerminalScreen(
     installer: RuntimeInstaller,
     projectSlug: String,
     modifier: Modifier = Modifier,
-    quickCommands: List<String> = listOf("uname -a", "ls -la", "pwd", "mtop"),
+    quickCommands: List<String> = listOf("uname -a", "ls -la", "pwd", "mtop --adb"),
 ) {
     val context = LocalContext.current
     var error by remember { mutableStateOf<String?>(null) }
