@@ -1350,6 +1350,24 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     /**
+     * Instaleaza comanda `mtop` in guest (assets/mtop.py -> usr/local/bin/mtop).
+     * E un monitor de procese care citeste /proc direct, fara /proc/stat pe care
+     * SELinux il interzice aplicatiilor (htop si w nu pot merge in container).
+     * Markerul forteaza rescrierea cand scriptul din assets se schimba.
+     */
+    fun ensureMtop() {
+        val marker = File(rootfs, ".pocket-mtop-version")
+        if (marker.readTextOrNull() == MTOP_VERSION) return
+        val target = File(rootfs, "usr/local/bin/mtop")
+        target.parentFile?.mkdirs()
+        context.assets.open("mtop.py").use { input ->
+            target.outputStream().use { output -> input.copyTo(output) }
+        }
+        target.setExecutable(true)
+        marker.writeText(MTOP_VERSION)
+    }
+
+    /**
      * One-time upgrade path from the old single-bundle layout: devices that already
      * installed every tool keep all stacks without re-downloading anything.
      */
@@ -1744,6 +1762,7 @@ class RuntimeInstaller(private val context: Context) {
         // Self-heal devices whose Android tools were installed by an older app
         // version before the global AAPT2 override was persisted.
         writeAndroidGradleConfiguration(rootfs)
+        ensureMtop()
         ensureWorkspaceTrust(guestWorkspacePath)
         val bridge = File(context.filesDir, "runtime-bridge").apply { mkdirs() }
         val args = buildList {
@@ -2341,6 +2360,7 @@ fi
         private const val CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
         private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
         private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
+        private const val MTOP_VERSION = "2procwatch-1"
         private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
         private const val ANDROID_ASSET_BASE = "https://appdevforall.org/dev-assets/debug"
         private const val ANDROID_SDK_URL = "$ANDROID_ASSET_BASE/android-sdk-arm64-v8a.zip"
