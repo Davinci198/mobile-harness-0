@@ -4583,6 +4583,7 @@ internal fun FileViewerScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FilesTab(
     files: List<WorkspaceEntry>,
