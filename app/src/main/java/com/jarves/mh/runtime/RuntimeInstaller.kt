@@ -1415,8 +1415,11 @@ class RuntimeInstaller(private val context: Context) {
         // Only the offline flavor ships the bundle archives as assets; the online
         // build has an empty assets/runtime/. Reading one there throws and takes the
         // whole install down, so fall back to the release URL when it is absent.
-        val useEmbedded = !forceDownload && (preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES) &&
-            runCatching { context.assets.open("runtime/${bundle.fileName}") }.isSuccess
+        val wantsEmbedded = !forceDownload && (preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES)
+        val useEmbedded = wantsEmbedded && hasEmbeddedBundle(bundle)
+        if (wantsEmbedded && !useEmbedded) {
+            android.util.Log.w("RuntimeInstaller", "Embedded ${bundle.fileName} is missing; downloading it")
+        }
         if (useEmbedded) {
             onProgress(RuntimeInstallProgress("Loading ${bundle.label} bundle", from, 0, bundle.compressedBytes))
             val temporary = File(downloads, "${bundle.fileName}.part")
@@ -1450,6 +1453,10 @@ class RuntimeInstaller(private val context: Context) {
         }
         return destination
     }
+
+    private fun hasEmbeddedBundle(bundle: RuntimeBundle): Boolean =
+        runCatching { context.assets.list("runtime").orEmpty().contains(bundle.fileName) }
+            .getOrDefault(false)
 
     private suspend fun installZipAsset(
         url: String,
