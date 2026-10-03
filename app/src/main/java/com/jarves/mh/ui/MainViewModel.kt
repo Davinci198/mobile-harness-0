@@ -3284,6 +3284,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         secret: String,
         models: List<com.jarves.mh.network.DiscoveredModel>,
     ): ConnectionValidation {
+        // The Hermes free tier needs no endpoint and no key: the CLI mints its
+        // anonymous identity at boot and picks the model itself.
+        if (profile.kind == ProviderKind.FREE) {
+            return ConnectionValidation.Success(s(R.string.agent_free_tier_ready))
+        }
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
         return providerApi.validate(
             profile.baseUrl,
@@ -3300,6 +3305,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val profile = _state.value.provider
+        if (profile.kind == ProviderKind.FREE) {
+            _state.update { it.copy(apiPingStatus = ApiPingStatus.OK, apiPingMessage = s(R.string.agent_free_tier_ready)) }
+            return
+        }
         if (profile.baseUrl.isBlank() || profile.model.isBlank()) return
         if (_state.value.apiPingStatus == ApiPingStatus.PINGING) return
         _state.update { it.copy(apiPingStatus = ApiPingStatus.PINGING, apiPingMessage = s(R.string.prov_test_sending)) }

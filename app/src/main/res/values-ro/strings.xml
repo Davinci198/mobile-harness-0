@@ -144,6 +144,7 @@
     <string name="settings_access_install">Instalează Shizuku</string>
     <string name="settings_current_url">Curent: %1$s</string>
     <string name="agent_api_key_first">Mai întâi introdu sau salvează o cheie API pentru a descoperi modele.</string>
+    <string name="agent_free_tier_ready">Free tier Hermes e gata — modelele se aleg automat.</string>
     <string name="agent_select_model">Selectează modelul</string>
     <string name="agent_search_series">Caută model sau serie</string>
     <string name="agent_no_models">Nu s-au găsit modele potrivite</string>
