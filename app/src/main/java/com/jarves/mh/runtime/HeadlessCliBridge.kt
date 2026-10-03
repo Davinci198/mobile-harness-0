@@ -125,8 +125,8 @@ internal abstract class HeadlessCliBridge(
         pushForegroundProgress("Starting ${kind.title}…")
 
         val secret = secretFor(provider).orEmpty()
-        // A loopback gateway on this device runs keyless; only remote providers need a saved key.
-        if (provider.kind != ProviderKind.FREE && secret.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) {
+        // A loopback gateway, FREE, or OpenCode Zen's keyless free tier need no saved key.
+        if (secret.isBlank() && requiresSavedSecret(provider)) {
             eventBus.emit(
                 RuntimeEvent.SessionFailed(sessionId, "No API key is saved for ${provider.kind.title}."),
             )
@@ -683,6 +683,16 @@ internal abstract class HeadlessCliBridge(
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
     }
 }
+
+/**
+ * True when a blank secret must stop the session: remote providers need a saved
+ * key. FREE and OpenCode Zen are keyless by design (the guest falls back to its
+ * bundled free-tier credentials), and a loopback gateway ignores the header.
+ */
+internal fun requiresSavedSecret(provider: ProviderProfile): Boolean =
+    provider.kind != ProviderKind.FREE &&
+        provider.kind != ProviderKind.OPENCODE_ZEN &&
+        !isLoopbackBaseUrl(provider.resolvedBaseUrl)
 
 private data class CliRunResult(val failed: String?, val sawAnyOutput: Boolean = false)
 

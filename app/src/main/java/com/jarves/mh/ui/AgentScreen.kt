@@ -2976,7 +2976,8 @@ private fun AgentProviderCard(
     }
     SecondaryActionButton(
         onClick = onValidate,
-        enabled = (apiKey.isNotBlank() || loopbackEndpoint) && !isDiscovering && !isValidating &&
+        enabled = (apiKey.isNotBlank() || loopbackEndpoint || selectedKind == ProviderKind.OPENCODE_ZEN) &&
+            !isDiscovering && !isValidating &&
             (selectedKind == ProviderKind.CLAUDE || (baseUrl.isNotBlank() && model.isNotBlank())),
         modifier = Modifier.fillMaxWidth().height(48.dp),
     ) {
