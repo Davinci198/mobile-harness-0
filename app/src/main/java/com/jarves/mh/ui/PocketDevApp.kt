@@ -2853,7 +2853,7 @@ private fun ProviderCredentialsStep(
     val modelSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val hasKey = apiKey.isNotBlank() || hasStoredSecret
     val loopbackTarget = isLoopbackBaseUrl(if (provider.fixedBaseUrl) provider.defaultBaseUrl else baseUrl)
-    val canUseEndpoint = hasKey || loopbackTarget
+    val canUseEndpoint = hasKey || loopbackTarget || provider == ProviderKind.OPENCODE_ZEN
     val requestPreview = remember(provider, baseUrl, model, dshApi, agentKind) {
         if (provider.fixedBaseUrl) ""
         else ProviderApiClient().requestPreviewUrl(

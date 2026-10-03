@@ -109,7 +109,9 @@ internal class OpenCodeRuntimeBridge(
                 environment["ANTHROPIC_API_KEY"] = key
                 environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
             }
-            ProviderKind.OPENCODE_ZEN -> environment["OPENCODE_ZEN_API_KEY"] = key
+            // Zen's provider id in the OpenCode catalog is `opencode`, which reads
+            // OPENCODE_API_KEY — there is no `opencode-zen` provider or env var.
+            ProviderKind.OPENCODE_ZEN -> environment["OPENCODE_API_KEY"] = key
             ProviderKind.NVIDIA_NIM -> {
                 environment["NIM_API_KEY"] = key
                 environment["NVIDIA_API_KEY"] = key
@@ -170,7 +172,9 @@ internal fun opencodeModelPrefix(kind: ProviderKind): String? = when (kind) {
     ProviderKind.DEEPSEEK -> "deepseek"
     ProviderKind.ANTHROPIC, ProviderKind.KIMI -> "anthropic"
     ProviderKind.LLM_ROUTER -> "openrouter"
-    ProviderKind.OPENCODE_ZEN -> "opencode-zen"
+    // The catalog provider for Zen is `opencode`, so the CLI flag must be
+    // `opencode/<model>`; `opencode-zen/…` resolves to nothing ("Unexpected server error").
+    ProviderKind.OPENCODE_ZEN -> "opencode"
     ProviderKind.NVIDIA_NIM -> "nvidia"
     ProviderKind.CUSTOM -> null
     ProviderKind.FREE -> null

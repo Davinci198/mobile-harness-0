@@ -221,6 +221,21 @@ class ProviderApiClient {
         val cleanBaseUrl = normalizeBaseUrl(baseUrl)
         val cleanKey = sanitizeApiKey(apiKey)
         if (cleanBaseUrl.isBlank() || models.isEmpty()) return@withContext emptyList()
+        // Zen gates completion probes to the OpenCode client, so every chat probe
+        // would fail there; health instead means "listed in the live catalog".
+        // A failed catalog fetch reports nothing rather than marking it all broken.
+        if (isOpenCodeZen(cleanBaseUrl)) {
+            val listed = zenCatalogIds(cleanBaseUrl, cleanKey, protocol) ?: return@withContext emptyList()
+            val health = models.map { model ->
+                if (model.id in listed) {
+                    ModelHealth(model.id, ModelHealthStatus.OK, 0L, 200, "listed in catalog")
+                } else {
+                    ModelHealth(model.id, ModelHealthStatus.FAIL, 0L, 0, "not in the live catalog")
+                }
+            }
+            health.forEach { onProgress(it) }
+            return@withContext health
+        }
         val endpoints = messagesEndpointCandidates(cleanBaseUrl, protocol)
         val results = Collections.synchronizedList(mutableListOf<ModelHealth>())
         val semaphore = Semaphore(concurrency.coerceIn(1, 10))
@@ -298,10 +313,14 @@ class ProviderApiClient {
         val cleanModel = model.trim()
         val cleanKey = sanitizeApiKey(apiKey)
         // A loopback gateway on this device answers without credentials, so a
-        // missing key is only an error for remote endpoints.
-        val keyRequired = !isLoopbackBaseUrl(cleanBaseUrl)
+        // missing key is only an error for remote endpoints. OpenCode Zen's free
+        // tier is designed to run without a key, and its catalog answers anonymously.
+        val keyRequired = !isLoopbackBaseUrl(cleanBaseUrl) && !isOpenCodeZen(cleanBaseUrl)
         if (cleanBaseUrl.isBlank() || cleanModel.isBlank() || (keyRequired && cleanKey.isBlank())) {
             return@withContext ConnectionValidation.Failure("Base URL, model, and API key are required.")
+        }
+        if (isOpenCodeZen(cleanBaseUrl)) {
+            return@withContext validateZenCatalog(cleanBaseUrl, cleanKey, protocol)
         }
         val body = validationBody(cleanModel, protocol)
         // Probe candidate paths so a base URL that already ends in /v1 or
@@ -381,6 +400,68 @@ class ProviderApiClient {
         }
     }
 
+    /** Live Zen catalog ids, or null when the list could not be fetched. */
+    private suspend fun zenCatalogIds(
+        baseUrl: String,
+        apiKey: String,
+        protocol: ProviderProtocol,
+    ): Set<String>? {
+        for (endpoint in modelEndpoints(baseUrl, protocol)) {
+            val response = request(endpoint, "GET", apiKey, protocol = protocol)
+            if (response.code in 200..299) {
+                return ModelResponseParser.parse(response.body).mapTo(mutableSetOf()) { it.id }
+            }
+            if (response.code == 404) continue
+            return null
+        }
+        return null
+    }
+
+    /**
+     * OpenCode Zen refuses completion probes from outside the OpenCode client
+     * (HTTP 401/403 regardless of the key), so "Test connection" there proves
+     * reachability through the anonymously served model list instead. The saved
+     * key, when present, is still forwarded — Zen accepts it for model listing.
+     */
+    private suspend fun validateZenCatalog(
+        baseUrl: String,
+        apiKey: String,
+        protocol: ProviderProtocol,
+    ): ConnectionValidation {
+        var lastCode = 0
+        var lastBody = ""
+        var lastError: String? = null
+        for (endpoint in modelEndpoints(baseUrl, protocol)) {
+            val response = request(endpoint, "GET", apiKey, protocol = protocol)
+            if (response.code in 200..299) {
+                val count = ModelResponseParser.parse(response.body).size
+                return ConnectionValidation.Success("Connected to OpenCode Zen. $count models available.")
+            }
+            if (response.code == 404) continue
+            lastCode = response.code
+            lastBody = response.body
+            lastError = response.error
+            break
+        }
+        return when {
+            lastCode == 401 || lastCode == 403 -> ConnectionValidation.Failure(
+                "Check this API key or select another saved key.",
+                providerErrorMessage(lastBody),
+                "Rejected",
+            )
+            lastCode > 0 -> ConnectionValidation.Failure(
+                "Check the Base URL and selected gateway protocol.",
+                providerErrorMessage(lastBody),
+                "Endpoint error",
+            )
+            else -> ConnectionValidation.Failure(
+                "Check your internet connection and provider settings.",
+                lastError,
+                "Network error",
+            )
+        }
+    }
+
     private fun request(
         endpoint: String,
         method: String,
@@ -443,6 +524,14 @@ class ProviderApiClient {
         }
         return base
     }
+
+    /**
+     * OpenCode Zen (provider id `opencode`) publishes its model list anonymously
+     * but rejects completion probes made from outside the OpenCode client, so
+     * connection checks and health scans there must go through the catalog.
+     */
+    internal fun isOpenCodeZen(baseUrl: String): Boolean =
+        normalizeBaseUrl(baseUrl).startsWith("https://opencode.ai/zen", ignoreCase = true)
 
     private fun sanitizeApiKey(raw: String): String =
         raw.trim().removePrefix("Bearer ").removePrefix("bearer ").trim()

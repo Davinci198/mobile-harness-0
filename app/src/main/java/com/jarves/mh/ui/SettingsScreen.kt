@@ -623,7 +623,9 @@ private fun LegacySettingsScreen(
                             isValidating = false
                         }
                     },
-                    enabled = baseUrl.isNotBlank() && model.isNotBlank() && apiKey.isNotBlank() && !isDiscovering && !isValidating,
+                    enabled = baseUrl.isNotBlank() && model.isNotBlank() &&
+                        (apiKey.isNotBlank() || selectedKind == ProviderKind.OPENCODE_ZEN) &&
+                        !isDiscovering && !isValidating,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),
