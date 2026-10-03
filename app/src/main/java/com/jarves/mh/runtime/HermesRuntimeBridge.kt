@@ -53,58 +53,7 @@ internal class HermesRuntimeBridge(
         provider: ProviderProfile,
         secret: String?,
         gatewayUrl: String?,
-    ): Map<String, String> {
-        val environment = linkedMapOf<String, String>("HOME" to "/root")
-        val kind = provider.kind
-        if (kind == ProviderKind.FREE) return environment
-        val rawKey = secret.orEmpty()
-        // A loopback gateway on this device runs keyless: keep the guest pointed
-        // at it instead of falling back to the provider's public endpoint.
-        if (rawKey.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return environment
-        // Guest CLIs refuse to boot with an empty key variable, while a loopback
-        // gateway ignores the header — send a placeholder instead of nothing.
-        val key = rawKey.ifBlank { "loopback" }
-        if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
-            environment["OPENAI_API_KEY"] = key
-            environment["OPENAI_BASE_URL"] = gatewayUrl
-            return environment
-        }
-        when (kind) {
-            ProviderKind.DEEPSEEK -> environment["DEEPSEEK_API_KEY"] = key
-            ProviderKind.ANTHROPIC -> {
-                environment["ANTHROPIC_API_KEY"] = key
-                if (provider.resolvedBaseUrl.isNotBlank() && "api.anthropic.com" !in provider.resolvedBaseUrl) {
-                    environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
-                }
-            }
-            ProviderKind.LLM_ROUTER -> environment["OPENROUTER_API_KEY"] = key
-            ProviderKind.KIMI -> {
-                environment["ANTHROPIC_API_KEY"] = key
-                environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
-            }
-            ProviderKind.OPENCODE_ZEN -> {
-                environment["OPENAI_API_KEY"] = key
-                environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
-            }
-            ProviderKind.NVIDIA_NIM -> {
-                environment["OPENAI_API_KEY"] = key
-                environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
-            }
-            ProviderKind.CUSTOM -> {
-                val api = provider.dshApi.ifBlank { "anthropic-messages" }
-                if (api == "openai-completions" || api == "openai-responses") {
-                    environment["OPENAI_API_KEY"] = key
-                    environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
-                } else {
-                    environment["ANTHROPIC_API_KEY"] = key
-                    environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
-                }
-            }
-            ProviderKind.CLAUDE -> Unit
-            ProviderKind.FREE -> Unit
-        }
-        return environment
-    }
+    ): Map<String, String> = hermesEnvironmentFor(provider, secret, gatewayUrl)
 
     override fun parseJsonlLine(line: String, sessionId: String): CliParsed =
         HermesJsonlParser.parseLine(line, sessionId)
@@ -154,4 +103,70 @@ internal class HermesRuntimeBridge(
             ProviderKind.FREE -> ""
         }
     }
+}
+
+/**
+ * Process environment for a Hermes Agent turn. The Free provider carries no
+ * key: it opens the free-tier gate so the guest mints its anonymous Nous
+ * identity (`hermes_cli.guest_enabled()` reads `HERMES_GUEST_ONBOARDING`)
+ * instead of falling back to provider config already on disk.
+ */
+internal fun hermesEnvironmentFor(
+    provider: ProviderProfile,
+    secret: String?,
+    gatewayUrl: String?,
+): Map<String, String> {
+    val environment = linkedMapOf<String, String>("HOME" to "/root")
+    val kind = provider.kind
+    if (kind == ProviderKind.FREE) {
+        environment["HERMES_GUEST_ONBOARDING"] = "1"
+        return environment
+    }
+    val rawKey = secret.orEmpty()
+    // A loopback gateway on this device runs keyless: keep the guest pointed
+    // at it instead of falling back to the provider's public endpoint.
+    if (rawKey.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return environment
+    // Guest CLIs refuse to boot with an empty key variable, while a loopback
+    // gateway ignores the header — send a placeholder instead of nothing.
+    val key = rawKey.ifBlank { "loopback" }
+    if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
+        environment["OPENAI_API_KEY"] = key
+        environment["OPENAI_BASE_URL"] = gatewayUrl
+        return environment
+    }
+    when (kind) {
+        ProviderKind.DEEPSEEK -> environment["DEEPSEEK_API_KEY"] = key
+        ProviderKind.ANTHROPIC -> {
+            environment["ANTHROPIC_API_KEY"] = key
+            if (provider.resolvedBaseUrl.isNotBlank() && "api.anthropic.com" !in provider.resolvedBaseUrl) {
+                environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
+            }
+        }
+        ProviderKind.LLM_ROUTER -> environment["OPENROUTER_API_KEY"] = key
+        ProviderKind.KIMI -> {
+            environment["ANTHROPIC_API_KEY"] = key
+            environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
+        }
+        ProviderKind.OPENCODE_ZEN -> {
+            environment["OPENAI_API_KEY"] = key
+            environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
+        }
+        ProviderKind.NVIDIA_NIM -> {
+            environment["OPENAI_API_KEY"] = key
+            environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
+        }
+        ProviderKind.CUSTOM -> {
+            val api = provider.dshApi.ifBlank { "anthropic-messages" }
+            if (api == "openai-completions" || api == "openai-responses") {
+                environment["OPENAI_API_KEY"] = key
+                environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
+            } else {
+                environment["ANTHROPIC_API_KEY"] = key
+                environment["ANTHROPIC_BASE_URL"] = provider.resolvedBaseUrl
+            }
+        }
+        ProviderKind.CLAUDE -> Unit
+        ProviderKind.FREE -> Unit
+    }
+    return environment
 }
