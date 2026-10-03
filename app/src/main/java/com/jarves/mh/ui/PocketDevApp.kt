@@ -4321,6 +4321,7 @@ private fun WorkspaceScreen(
                             RuntimeInstaller(ptyContext.applicationContext)
                         },
                         projectSlug = state.activeProject?.slug ?: "pocket",
+                        projectId = state.activeProject?.id,
                     )
                 } else TerminalScreen(
                     lines = state.projectTerminalLines,
