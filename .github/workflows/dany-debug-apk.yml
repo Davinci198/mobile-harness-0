@@ -41,6 +41,22 @@ jobs:
       - name: Unit tests
         if: github.event_name != 'release'
         run: ./gradlew :app:testOnlineDebugUnitTest :app:testOfflineDebugUnitTest
+      # dist/runtime-bundles/*.tar.zst is gitignored, so without this step the
+      # offline flavor assembles an APK with zero embedded bundles and every
+      # on-demand stack install fails with a missing-asset error. Keep the base
+      # URL in sync with runtimeReleaseBaseUrl in app/build.gradle.kts.
+      - name: Fetch runtime bundles for the offline APK
+        run: |
+          set -euo pipefail
+          base="https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
+          jq -r '.bundles[] | "\(.file) \(.sha256)"' dist/runtime-bundles/manifest.json > "$RUNNER_TEMP/runtime-bundles.sha256"
+          while read -r file sha; do
+            echo "::group::${file}"
+            curl -fL --retry 3 --retry-delay 2 -o "dist/runtime-bundles/${file}" "${base}/${file}"
+            echo "${sha}  dist/runtime-bundles/${file}" | sha256sum --check -
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/runtime-bundles.sha256"
+          ls -la dist/runtime-bundles
       - name: Build debug APK
         run: ./gradlew assembleDebug
       - name: Upload APK artifact

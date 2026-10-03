@@ -306,6 +306,8 @@ data class AppUiState(
     val devStackInstalling: DevStack? = null,
     val devStackRemoving: Boolean = false,
     val devStackMessage: String? = null,
+    val devStackFailed: Boolean = false,
+    val devStackMessageStack: DevStack? = null,
     val devStackProgress: Float = 0f,
     val devStackBytes: Pair<Long, Long>? = null,
     val devStackBytesPerSecond: Long? = null,
@@ -3141,6 +3143,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 devStackInstalling = stack,
                 devStackRemoving = false,
                 devStackMessage = s(R.string.agent_preparing, stack.label),
+                devStackMessageStack = stack,
+                devStackFailed = false,
                 devStackProgress = 0f,
                 devStackBytes = null,
                 devStackBytesPerSecond = null,
@@ -3193,11 +3197,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     devStackProgress = 0f,
                     devStackBytes = null,
                     devStackBytesPerSecond = null,
+                    devStackFailed = result.isFailure,
                     devStackMessage = result.fold(
                         onSuccess = { s(R.string.stack_ready, stack.label) },
                         onFailure = { _ -> result.exceptionOrNull()?.message?.take(200) ?: s(R.string.agent_install_fail, stack.label) },
                     ),
                 )
+            }
+            result.onFailure { error ->
+                android.util.Log.e("MainViewModel", "DevStack ${stack.name} install failed", error)
             }
         }
     }
@@ -3214,6 +3222,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 devStackInstalling = stack,
                 devStackRemoving = true,
                 devStackMessage = s(R.string.stack_removing, stack.label),
+                devStackMessageStack = stack,
+                devStackFailed = false,
                 devStackProgress = 0.1f,
                 devStackBytes = null,
                 devStackBytesPerSecond = null,
@@ -3243,6 +3253,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     devStackInstalling = null,
                     devStackRemoving = false,
                     devStackProgress = 0f,
+                    devStackFailed = result.isFailure,
                     devStackMessage = result.fold(
                         onSuccess = { s(R.string.stack_removed, stack.label) },
                         onFailure = { result.exceptionOrNull()?.message?.take(200) ?: s(R.string.stack_remove_fail, stack.label) },

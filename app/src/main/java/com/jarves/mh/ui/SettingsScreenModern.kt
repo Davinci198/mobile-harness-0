@@ -501,6 +501,17 @@ fun SettingsScreen(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
+                        val finishedMessage = state.devStackMessage
+                        if (!installing && state.devStackMessageStack == stack && finishedMessage != null) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                finishedMessage,
+                                fontSize = 11.sp,
+                                color = if (state.devStackFailed) MaterialTheme.colorScheme.error else PocketAccent,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         if (index != DevStack.entries.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     }
                 }

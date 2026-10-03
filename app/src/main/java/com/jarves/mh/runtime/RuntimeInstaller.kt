@@ -1208,7 +1208,11 @@ class RuntimeInstaller(private val context: Context) {
     ): File {
         downloads.mkdirs()
         val destination = File(downloads, bundle.fileName)
-        val useEmbedded = !forceDownload && (preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES)
+        val wantsEmbedded = !forceDownload && (preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES)
+        val useEmbedded = wantsEmbedded && hasEmbeddedBundle(bundle)
+        if (wantsEmbedded && !useEmbedded) {
+            android.util.Log.w("RuntimeInstaller", "Embedded ${bundle.fileName} is missing; downloading it")
+        }
         if (useEmbedded) {
             onProgress(RuntimeInstallProgress("Loading ${bundle.label} bundle", from, 0, bundle.compressedBytes))
             val temporary = File(downloads, "${bundle.fileName}.part")
@@ -1242,6 +1246,10 @@ class RuntimeInstaller(private val context: Context) {
         }
         return destination
     }
+
+    private fun hasEmbeddedBundle(bundle: RuntimeBundle): Boolean =
+        runCatching { context.assets.list("runtime").orEmpty().contains(bundle.fileName) }
+            .getOrDefault(false)
 
     private suspend fun installZipAsset(
         url: String,
