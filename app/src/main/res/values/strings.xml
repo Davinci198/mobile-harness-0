@@ -144,6 +144,7 @@
     <string name="settings_access_install">Install Shizuku</string>
     <string name="settings_current_url">Current: %1$s</string>
     <string name="agent_api_key_first">Please enter or save an API key first to discover models.</string>
+    <string name="agent_free_tier_ready">The Hermes free tier is ready — models are chosen automatically.</string>
     <string name="agent_select_model">Select Model</string>
     <string name="agent_search_series">Search model or series</string>
     <string name="agent_no_models">No matching models found</string>

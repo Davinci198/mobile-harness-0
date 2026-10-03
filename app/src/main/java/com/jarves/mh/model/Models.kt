@@ -44,8 +44,8 @@ enum class ProviderKind(
         fixedProtocol = true,
     ),
     FREE(
-        "Free (no key)",
-        "Works without an API key",
+        "Hermes",
+        "Free tier, works without an API key",
         ProviderProtocol.ANTHROPIC_GATEWAY,
         "",
         "",
@@ -179,12 +179,16 @@ fun dshApiForProtocol(protocol: ProviderProtocol): String = when (protocol) {
 /** Providers usable with OpenCode and Hermes: the same keyed set as DeepSeek Harness plus a key-free option. */
 val OPENCODE_PROVIDERS: Set<ProviderKind> = DEEPSEEK_HARNESS_PROVIDERS + ProviderKind.FREE
 
-/** Provider choices shown for the selected coding agent. */
+/**
+ * Provider choices shown for the selected coding agent. The key-free tier
+ * (FREE, displayed as "Hermes") belongs to the Hermes agent alone: the other
+ * agents route keyless access through their own provider.
+ */
 fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
     AgentKind.DEEPSEEK_HARNESS -> ProviderKind.entries.filter { it in DEEPSEEK_HARNESS_PROVIDERS }
-    AgentKind.OPENCODE -> ProviderKind.entries.filter { it in OPENCODE_PROVIDERS }
+    AgentKind.OPENCODE -> ProviderKind.entries.filter { it in OPENCODE_PROVIDERS && it != ProviderKind.FREE }
     AgentKind.HERMES -> ProviderKind.entries.filter { it in OPENCODE_PROVIDERS }
-    AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { it == ProviderKind.OPENCODE_ZEN }
+    AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { it == ProviderKind.OPENCODE_ZEN || it == ProviderKind.FREE }
     AgentKind.ANTIGRAVITY -> emptyList()
 }
 

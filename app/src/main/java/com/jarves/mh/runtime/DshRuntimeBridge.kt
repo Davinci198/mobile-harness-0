@@ -649,7 +649,7 @@ internal object DshRouteMapper {
                 custom = DshCustomRoute(profile.dshApi.ifBlank { "anthropic-messages" }, profile.resolvedBaseUrl),
             )
             ProviderKind.CLAUDE -> throw IllegalArgumentException("Claude subscription login is not supported by DeepSeek Harness")
-            ProviderKind.FREE -> throw IllegalArgumentException("The Free provider is only available for OpenCode and Hermes")
+            ProviderKind.FREE -> throw IllegalArgumentException("The Free provider is only available for Hermes")
         }
     }
 }

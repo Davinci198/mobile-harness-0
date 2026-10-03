@@ -1197,7 +1197,9 @@ private fun ConnectionSettings(
     }
     Button(
         onClick = onValidate,
-        enabled = baseUrl.isNotBlank() && model.isNotBlank() && apiKey.isNotBlank() && !isDiscovering && !isValidating,
+        enabled = (selectedKind == ProviderKind.FREE ||
+            (baseUrl.isNotBlank() && model.isNotBlank() && apiKey.isNotBlank())) &&
+            !isDiscovering && !isValidating,
         modifier = Modifier.fillMaxWidth().height(52.dp),
     ) {
         if (isValidating) {

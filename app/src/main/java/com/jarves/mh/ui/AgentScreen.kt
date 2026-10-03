@@ -407,6 +407,12 @@ fun AgentScreen(
     }
 
     fun discoverModels() {
+        if (selectedKind == ProviderKind.FREE) {
+            status = context.getString(R.string.agent_free_tier_ready)
+            statusOk = true
+            statusProviderMessage = null
+            return
+        }
         val effectiveKey = apiKey.trim().ifBlank { newApiKey.trim() }
         val supportsPublicDiscovery = selectedKind == ProviderKind.LLM_ROUTER ||
             selectedKind == ProviderKind.OPENCODE_ZEN
@@ -2976,9 +2982,11 @@ private fun AgentProviderCard(
     }
     SecondaryActionButton(
         onClick = onValidate,
-        enabled = (apiKey.isNotBlank() || loopbackEndpoint || selectedKind == ProviderKind.OPENCODE_ZEN) &&
+        enabled = (apiKey.isNotBlank() || loopbackEndpoint || selectedKind == ProviderKind.OPENCODE_ZEN ||
+            selectedKind == ProviderKind.FREE) &&
             !isDiscovering && !isValidating &&
-            (selectedKind == ProviderKind.CLAUDE || (baseUrl.isNotBlank() && model.isNotBlank())),
+            (selectedKind == ProviderKind.CLAUDE || selectedKind == ProviderKind.FREE ||
+                (baseUrl.isNotBlank() && model.isNotBlank())),
         modifier = Modifier.fillMaxWidth().height(48.dp),
     ) {
         if (isValidating) {
