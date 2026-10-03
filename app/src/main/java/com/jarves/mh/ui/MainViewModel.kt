@@ -4254,6 +4254,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             File(filesDir, "workspaces/${project.id}").deleteRecursively()
             File(filesDir, "change-history/${project.id}").deleteRecursively()
             File(filesDir, "checkpoints/${project.id}").deleteRecursively()
+            if (_state.value.projects.none { it.slug == project.slug }) {
+                File(filesDir, "workspace/${project.slug}").deleteRecursively()
+            }
             terminalHistoryFile(project.id).delete()
             preferences.deleteProjectChats(project.id)
         }

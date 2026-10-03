@@ -102,6 +102,7 @@ private fun showKeyboardWhenServed(
 fun PtyTerminalScreen(
     installer: RuntimeInstaller,
     projectSlug: String,
+    projectId: String? = null,
     modifier: Modifier = Modifier,
     quickCommands: List<String> = listOf("uname -a", "ls -la", "pwd", "mtop --adb"),
 ) {
@@ -118,10 +119,10 @@ fun PtyTerminalScreen(
     // Prima sesiune pentru acest proiect se creaza la deschiderea tabului.
     // Sesiunile traiesc in registry (obiect de top-level) -> la iesirea din tab
     // procesele (opencode/freebuff) raman deschise.
-    LaunchedEffect(projectSlug) {
+    LaunchedEffect(projectSlug, projectId) {
         if (PtyTerminalRegistry.sessions(projectSlug).isEmpty() && error == null) {
             try {
-                PtyTerminalRegistry.newSession(installer, context, projectSlug)
+                PtyTerminalRegistry.newSession(installer, context, projectSlug, projectId)
             } catch (e: Exception) {
                 error = e.message ?: e.toString()
             }
@@ -203,7 +204,7 @@ fun PtyTerminalScreen(
                 )
             }
             SessionChip(label = "+", active = false, onClick = {
-                runCatching { PtyTerminalRegistry.newSession(installer, context, projectSlug) }
+                runCatching { PtyTerminalRegistry.newSession(installer, context, projectSlug, projectId) }
                     .onFailure { error = it.message ?: it.toString() }
             }, onLongClick = {})
         }
@@ -253,7 +254,7 @@ fun PtyTerminalScreen(
                         state = viewState,
                         context = context,
                         onHorizontal = { setVerticalKeys(false) },
-                        onNewSession = { runCatching { PtyTerminalRegistry.newSession(installer, context, projectSlug) }.onFailure { error = it.message ?: it.toString() } },
+                        onNewSession = { runCatching { PtyTerminalRegistry.newSession(installer, context, projectSlug, projectId) }.onFailure { error = it.message ?: it.toString() } },
                         sessions = backendSessions,
                         activeSession = backend,
                         onSelectSession = { PtyTerminalRegistry.select(it) },
@@ -268,7 +269,7 @@ fun PtyTerminalScreen(
                 state = viewState,
                 context = context,
                 onVertical = { setVerticalKeys(true) },
-                onNewSession = { runCatching { PtyTerminalRegistry.newSession(installer, context, projectSlug) }.onFailure { error = it.message ?: it.toString() } },
+                onNewSession = { runCatching { PtyTerminalRegistry.newSession(installer, context, projectSlug, projectId) }.onFailure { error = it.message ?: it.toString() } },
                 sessions = backendSessions,
                 activeSession = backend,
                 onSelectSession = { PtyTerminalRegistry.select(it) },
@@ -310,8 +311,13 @@ private object PtyTerminalRegistry {
         return backends.getOrNull(idx)?.takeIf { it.projectSlug == projectSlug }
     }
 
-    fun newSession(installer: RuntimeInstaller, context: android.content.Context, projectSlug: String): PtyTerminalBackend {
-        val backend = PtyTerminalBackend(installer, context, projectSlug)
+    fun newSession(
+        installer: RuntimeInstaller,
+        context: android.content.Context,
+        projectSlug: String,
+        projectId: String?,
+    ): PtyTerminalBackend {
+        val backend = PtyTerminalBackend(installer, context, projectSlug, projectId)
         backends.add(backend)
         activeByProject[projectSlug] = backends.lastIndex
         KeepAliveTracker.acquire(PTY_SESSION_HOLD)
@@ -603,6 +609,7 @@ private class PtyTerminalBackend(
     installer: RuntimeInstaller,
     context: android.content.Context,
     val projectSlug: String,
+    val projectId: String?,
 ) {
     val session: TerminalSession
     private val appContext = context.applicationContext
@@ -616,7 +623,12 @@ private class PtyTerminalBackend(
         // Self-heal la fiecare sesiune de terminal: pune comanda mtop in PATH.
         installer.ensureMtop()
         val guestWorkspacePath = "/workspace/$projectSlug"
-        val workspace = File(appContext.filesDir, "workspace/$projectSlug").apply { mkdirs() }
+        // Proiectele stau in workspaces/<projectId> (clone, chat, file-browser);
+        // workspace/<slug> e doar fallback pentru terminalul global, fara proiect.
+        val workspace = projectId
+            ?.let { File(appContext.filesDir, "workspaces/$it") }
+            ?.apply { mkdirs() }
+            ?: File(appContext.filesDir, "workspace/$projectSlug").apply { mkdirs() }
         File(installed.rootfs, guestWorkspacePath.removePrefix("/")).mkdirs()
         val prootTemp = File(appContext.cacheDir, "proot-tmp").apply { mkdirs() }
         val bridge = File(appContext.filesDir, "runtime-bridge").apply { mkdirs() }
