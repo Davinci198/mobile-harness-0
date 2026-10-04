@@ -265,7 +265,7 @@ class ProviderApiClient(
         }
         // Without a guest token the free tier refuses completion probes; health
         // there falls back to "listed in the live catalog". With a token the
-        // probes below run for real, so paid or retired models show as broken.
+        // probes below run for real, so retired free models show as broken.
         if (freeTier && cleanKey.isBlank()) {
             val listed = nousCatalogIds(cleanBaseUrl, protocol) ?: return@withContext emptyList()
             val health = models.map { model ->
@@ -280,22 +280,40 @@ class ProviderApiClient(
         }
         val endpoints = messagesEndpointCandidates(cleanBaseUrl, protocol)
         val results = Collections.synchronizedList(mutableListOf<ModelHealth>())
-        val semaphore = Semaphore(concurrency.coerceIn(1, 10))
+        // The guest endpoint only serves its free catalog: paid models answer
+        // 404 for every caller, so probing them would spend the shared
+        // fair-share quota on a known answer. Record them and probe the free
+        // models gently — two at a time and without 429 retries, because the
+        // retry window is minutes long and would starve live Agent turns.
+        val (toProbe, unprobed) = if (freeTier) {
+            models.partition(DiscoveredModel::isFree)
+        } else {
+            models to emptyList<DiscoveredModel>()
+        }
+        unprobed.forEach { model ->
+            val health = ModelHealth(model.id, ModelHealthStatus.FAIL, 0L, 404, "not served by the free tier")
+            results.add(health)
+            onProgress(health)
+        }
+        val probed = Collections.synchronizedList(mutableListOf<ModelHealth>())
+        val limit = if (freeTier) minOf(concurrency, 2) else concurrency
+        val semaphore = Semaphore(limit.coerceIn(1, 10))
         coroutineScope {
-            models.map { model ->
+            toProbe.map { model ->
                 async {
                     semaphore.withPermit {
-                        val health = probeModel(endpoints, model.id, cleanKey, protocol)
+                        val health = probeModel(endpoints, model.id, cleanKey, protocol, retryOn429 = !freeTier)
+                        probed.add(health)
                         results.add(health)
                         onProgress(health)
                     }
                 }
             }.awaitAll()
         }
-        // A guest token that expires mid-scan answers 401/403 for every model;
-        // that says nothing about the models themselves, so report no health
-        // instead of flagging the whole catalog as broken.
-        if (freeTier && results.isNotEmpty() && results.all { it.httpCode == 401 || it.httpCode == 403 }) {
+        // A guest token that expires mid-scan answers 401/403 for every probed
+        // model; that says nothing about the models themselves, so report no
+        // health instead of flagging the whole catalog as broken.
+        if (freeTier && probed.isNotEmpty() && probed.all { it.httpCode == 401 || it.httpCode == 403 }) {
             return@withContext emptyList()
         }
         results.toList()
@@ -306,6 +324,7 @@ class ProviderApiClient(
         modelId: String,
         apiKey: String,
         protocol: ProviderProtocol,
+        retryOn429: Boolean = true,
     ): ModelHealth {
         val body = validationBody(modelId, protocol)
         var last: ModelHealth = ModelHealth(modelId, ModelHealthStatus.ERROR, 0L, 0, "No endpoint")
@@ -320,7 +339,7 @@ class ProviderApiClient(
                 lastCode = response.code
                 last = healthFromResponse(modelId, response.code, response.body, response.error, elapsed)
                 // Retry 429 with exponential backoff (max 3 attempts)
-                if (response.code == 429 && attempt < 3) {
+                if (retryOn429 && response.code == 429 && attempt < 3) {
                     val delayMs = (500L * (1L shl (attempt - 1))).coerceAtMost(4000L)
                     kotlinx.coroutines.delay(delayMs)
                     continue

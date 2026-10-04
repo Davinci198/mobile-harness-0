@@ -2609,8 +2609,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun finishOnboarding(profile: ProviderProfile, secret: String) {
         vault.put(profile.kind.name, secret)
-        val saved = profile.copy(
-            hasSecret = secret.isNotBlank() || vault.contains(profile.kind.name),
+        // Saving never pins a free-tier model the last scan proved broken: the
+        // Agent Execution that follows this save would otherwise back off for
+        // minutes on a known-bad id.
+        val saved = preferences.resolveFreeTierModel(
+            profile.copy(
+                hasSecret = secret.isNotBlank() || vault.contains(profile.kind.name),
+            ),
+            _state.value.agentKind,
         )
         preferences.saveProvider(saved, _state.value.agentKind)
         preferences.onboardingComplete = true
@@ -2732,8 +2738,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(modelScanLines = it.modelScanLines + "✓ testing ${catalog.size} models")
                 }
             }
+            // The guest endpoint shares one fair-share quota with live Agent
+            // turns, so free-tier scans probe gently; every other provider may
+            // fan out at the full concurrency.
+            val probeConcurrency = if (profile.kind == ProviderKind.FREE) 2 else 5
             _state.update {
-                it.copy(modelScanLines = it.modelScanLines + "$ concurrency 5, timeout 30s, 429 backoff")
+                it.copy(modelScanLines = it.modelScanLines + "$ concurrency $probeConcurrency, timeout 30s, 429 backoff")
             }
             val protocol = providerProtocolForAgent(profile, agent)
             val results = providerApi.validateModels(
@@ -2741,7 +2751,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 apiKey = key,
                 protocol = protocol,
                 models = catalog,
-                concurrency = 5,
+                concurrency = probeConcurrency,
                 onProgress = { health ->
                     _state.update { state ->
                         state.copy(modelScanLines = state.modelScanLines + formatModelHealthLine(health))
@@ -2772,6 +2782,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     brokenModelIds = broken,
                     autoScanDone = true,
                     modelCatalogs = preferences.loadModelCatalogs(agent),
+                    // The scan just re-proved which free models answer; the
+                    // active profile may have been pinned to one that failed.
+                    provider = if (it.agentKind == agent) {
+                        preferences.resolveFreeTierModel(it.provider, agent)
+                    } else {
+                        it.provider
+                    },
                     modelScanLines = it.modelScanLines +
                         "Done: $okCount/${results.size} work · ${broken.size} broken",
                 )
