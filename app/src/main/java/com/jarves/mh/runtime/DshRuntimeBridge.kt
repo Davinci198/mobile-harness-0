@@ -706,7 +706,13 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
     fun parseLine(line: String): DshSdkProtocolEvent {
         val frame = runCatching { JSONObject(line) }.getOrNull()
             ?: return if (line.startsWith("dsh:", ignoreCase = true)) {
-                DshSdkProtocolEvent.Failed(line.removePrefix("dsh:").trim())
+                val body = line.removePrefix("dsh:").trim()
+                // Boot warnings are informational; dsh continues past them.
+                if (body.startsWith("warning:", ignoreCase = true)) {
+                    DshSdkProtocolEvent.Ignored
+                } else {
+                    DshSdkProtocolEvent.Failed(body)
+                }
             } else {
                 DshSdkProtocolEvent.Ignored
             }
