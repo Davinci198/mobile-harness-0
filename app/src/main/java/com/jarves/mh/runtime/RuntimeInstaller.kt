@@ -799,6 +799,17 @@ class RuntimeInstaller(private val context: Context) {
     fun guestFile(relativePath: String): File = File(rootfs, relativePath.removePrefix("/"))
 
     /**
+     * The anonymous Nous access token the guest mints for the Hermes free tier
+     * (`/root/.hermes/auth.json`, refreshed by Hermes itself while it chats),
+     * or null when the guest never signed in or the token already expired.
+     */
+    fun nousAccessToken(): String? = runCatching {
+        val file = guestFile("root/.hermes/auth.json")
+        if (!file.isFile) null
+        else com.jarves.mh.network.parseNousAccessToken(file.readText(), System.currentTimeMillis() / 1000)
+    }.getOrNull()
+
+    /**
      * True when the extracted bundle is on disk. The version marker is
      * deliberately not required here: [ensureStudioInstalled] writes it only
      * after this verification passes, so including it would make the check

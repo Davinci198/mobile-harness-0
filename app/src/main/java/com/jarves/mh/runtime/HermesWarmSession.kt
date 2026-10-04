@@ -6,6 +6,8 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.LinkedBlockingQueue
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal data class WarmTurnResult(
     val failed: String?,
@@ -34,6 +36,10 @@ internal class HermesWarmSession(
     private var outputOffset = 0L
     private val lineBuffer = StringBuilder()
     private val pendingHooks = LinkedBlockingQueue<org.json.JSONObject>()
+    // A save-time prewarm and the next Agent Execution can ask for the session
+    // at the same time; the second caller must wait for the first boot instead
+    // of spawning a second process over it.
+    private val ensureMutex = Mutex()
 
     /** True while a spawned session is still running. */
     val isActive: Boolean get() = process?.isAlive == true
@@ -41,23 +47,26 @@ internal class HermesWarmSession(
     /**
      * Returns a running session matching [signature], spawning one (and waiting
      * for it to come up) when needed; null means "fall back to cold".
+     * [onBooting] fires once per actual spawn, never on the reuse path.
      */
     suspend fun ensureStarted(
         signature: String,
         spawn: (hookUrl: String) -> Process,
-    ): Process? {
+        onBooting: (() -> Unit)? = null,
+    ): Process? = ensureMutex.withLock {
         val current = process
         if (current != null && current.isAlive && this.signature == signature) {
             Log.d("HermesWarmSession", "reusing warm session pid=${current.spawnPid()}")
             if (!awaitReusableSession(current)) {
                 close()
             } else {
-                return current
+                return@withLock current
             }
         } else if (current != null) {
             Log.i("HermesWarmSession", "warm session unusable, respawning")
             close()
         }
+        onBooting?.invoke()
         val listener = HermesHookServer { payload -> pendingHooks.offer(payload) }.start()
         val spawned = runCatching {
             ensureHookConfig(listener.url)
@@ -65,7 +74,7 @@ internal class HermesWarmSession(
         }.getOrNull()
         if (spawned == null) {
             listener.close()
-            return null
+            return@withLock null
         }
         server = listener
         process = spawned
@@ -77,9 +86,9 @@ internal class HermesWarmSession(
         // readiness signal for a fresh spawn as well as a reused one.
         if (!awaitInteractivePrompt(spawned)) {
             close()
-            return null
+            return@withLock null
         }
-        return spawned
+        spawned
     }
 
     /** Runs one turn: pastes [prompt] into the session and waits for the reply. */

@@ -306,6 +306,95 @@ internal abstract class HeadlessCliBridge(
         runCatching { installer.killGuestOrphans() }
     }
 
+    /** Warm-session identity: any change to these inputs forces a respawn. */
+    private fun warmSignature(
+        provider: ProviderProfile,
+        gatewayUrl: String?,
+        guestWorkspacePath: String,
+        environment: Map<String, String>,
+    ): String = listOf(
+        provider.kind.name,
+        provider.model,
+        provider.resolvedBaseUrl,
+        provider.dshApi,
+        gatewayUrl.orEmpty(),
+        guestWorkspacePath,
+        environment.toString(),
+    ).joinToString("|")
+
+    /** One interactive spawn, shared by the save-time prewarm and the turn path. */
+    private fun spawnWarmProcess(
+        workspace: File,
+        installed: InstalledRuntime,
+        guestWorkspacePath: String,
+        environment: Map<String, String>,
+        command: List<String>,
+    ): Process = installer.process(
+        installed.proot,
+        installed.rootfs,
+        workspace,
+        environment,
+        command,
+        guestWorkspacePath = guestWorkspacePath,
+        emulateHardLinks = false,
+        pseudoTerminal = true,
+        ptyRows = 40,
+        ptyColumns = 120,
+        // The interactive TUI reads its input raw: without this the
+        // terminal answers it expects never leave the line discipline.
+        rawInput = true,
+    )
+
+    /**
+     * Boots the warm session for [provider] right after a provider save so the
+     * next Agent Execution pays model latency instead of the 22-26s TUI boot.
+     * Mirrors the turn's spawn inputs (workspace, environment, proxy) so the
+     * session it starts is the one the turn reuses. Best effort: a cold-only
+     * bridge, an agent that is not installed or an execution already in flight
+     * makes this a silent no-op.
+     */
+    suspend fun prewarmSession(
+        provider: ProviderProfile,
+        projectId: String,
+        projectSlug: String,
+    ) {
+        withContext(Dispatchers.IO) {
+            val secret = secretFor(provider).orEmpty()
+            if (supportsWarmSession() && activeSessionId == null &&
+                (secret.isNotBlank() || !requiresSavedSecret(provider))
+            ) {
+                runCatching {
+                    if (!installer.isAgentInstalled(kind)) return@runCatching
+                    val installed = installer.installedRuntime()
+                    runCatching { installer.ensureAgentWrappers() }
+                    if (kind == AgentKind.HERMES) runCatching { installer.parkMissingHermesMcpServers() }
+                    runCatching { installer.killGuestOrphans() }
+                    val gatewayUrl = openAiProxyFor(provider, secret)?.url
+                    val workspace = checkpoints.ensureWorkspace(projectId)
+                    val guestWorkspacePath = "/workspace/$projectSlug"
+                    val environment = environmentFor(provider, secret, gatewayUrl)
+                    val process = warmSession.ensureStarted(
+                        warmSignature(provider, gatewayUrl, guestWorkspacePath, environment),
+                        spawn = { _ ->
+                            spawnWarmProcess(
+                                workspace = workspace,
+                                installed = installed,
+                                guestWorkspacePath = guestWorkspacePath,
+                                environment = environment,
+                                command = warmCommandFor("", provider, secret, guestWorkspacePath, gatewayUrl),
+                            )
+                        },
+                    )
+                    Log.i(
+                        "HeadlessBridge",
+                        if (process != null) "${kind.title} session prewarmed for $projectSlug"
+                        else "Prewarm could not start ${kind.title}; the turn falls back to a cold start",
+                    )
+                }.onFailure { Log.w("HeadlessBridge", "Prewarm skipped", it) }
+            }
+        }
+    }
+
     /**
      * Runs the turn on the long-lived interactive session when this bridge
      * supports one. Returns null when the turn must run through the cold
@@ -325,32 +414,29 @@ internal abstract class HeadlessCliBridge(
     ): WarmTurnResult? {
         if (!supportsWarmSession()) return null
         val environment = environmentFor(provider, secret, gatewayUrl)
-        val signature = listOf(
-            provider.kind.name,
-            provider.model,
-            provider.resolvedBaseUrl,
-            provider.dshApi,
-            gatewayUrl.orEmpty(),
-            guestWorkspacePath,
-            environment.toString(),
-        ).joinToString("|")
-        val process = warmSession.ensureStarted(signature) { _ ->
-            installer.process(
-                installed.proot,
-                installed.rootfs,
-                workspace,
-                environment,
-                warmCommandFor(contextPrompt, provider, secret, guestWorkspacePath, gatewayUrl),
-                guestWorkspacePath = guestWorkspacePath,
-                emulateHardLinks = false,
-                pseudoTerminal = true,
-                ptyRows = 40,
-                ptyColumns = 120,
-                // The interactive TUI reads its input raw: without this the
-                // terminal answers it expects never leave the line discipline.
-                rawInput = true,
-            )
-        } ?: return null
+        val signature = warmSignature(provider, gatewayUrl, guestWorkspacePath, environment)
+        val process = warmSession.ensureStarted(
+            signature,
+            spawn = { _ ->
+                spawnWarmProcess(
+                    workspace = workspace,
+                    installed = installed,
+                    guestWorkspacePath = guestWorkspacePath,
+                    environment = environment,
+                    command = warmCommandFor(contextPrompt, provider, secret, guestWorkspacePath, gatewayUrl),
+                )
+            },
+            // Fires only when this turn starts a fresh boot, never on reuse.
+            onBooting = {
+                eventBus.tryEmit(
+                    RuntimeEvent.RuntimeLog(
+                        sessionId,
+                        "Booting ${kind.title}",
+                        "Starting a fresh interactive session (first boot takes about 20 seconds).",
+                    ),
+                )
+            },
+        ) ?: return null
         activeProcess = process
         if (userStopRequested) process.destroy()
         Log.d("HeadlessBridge", "${kind.title} warm turn starting (pid=${process.spawnPid()})")

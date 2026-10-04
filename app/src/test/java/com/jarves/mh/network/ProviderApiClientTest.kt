@@ -1,10 +1,14 @@
 package com.jarves.mh.network
 
 import com.jarves.mh.model.ProviderProtocol
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -182,5 +186,36 @@ class ProviderApiClientTest {
                 ProviderProtocol.ANTHROPIC_GATEWAY,
             ),
         )
+    }
+
+    @Test
+    fun nousAccessTokenParsesTheGuestAuthFile() {
+        val now = 1_000_000_000L
+
+        assertEquals("guest-token", parseNousAccessToken(nousAuthJson(now + 3_600), now))
+        // No expiry recorded: trust the token and let the server reject it if stale.
+        assertEquals("guest-token", parseNousAccessToken(nousAuthJson(expiresAt = null), now))
+    }
+
+    @Test
+    fun nousAccessTokenRejectsExpiredOrBrokenAuthFiles() {
+        val now = 1_000_000_000L
+
+        // Already expired, or about to expire inside the safety margin.
+        assertNull(parseNousAccessToken(nousAuthJson(now - 60), now))
+        assertNull(parseNousAccessToken(nousAuthJson(now + 10), now))
+        // Blank token, missing identity, malformed file.
+        assertNull(parseNousAccessToken(nousAuthJson(now + 3_600, token = ""), now))
+        assertNull(parseNousAccessToken("""{"providers":{}}""", now))
+        assertNull(parseNousAccessToken("not json at all", now))
+    }
+
+    private fun nousAuthJson(expiresAtEpoch: Long?, token: String = "guest-token"): String {
+        val expiresAt = expiresAtEpoch?.let {
+            OffsetDateTime.ofInstant(Instant.ofEpochSecond(it), ZoneOffset.UTC).toString()
+        }
+        val nous = JSONObject().put("access_token", token)
+        if (expiresAt != null) nous.put("expires_at", expiresAt)
+        return JSONObject().put("providers", JSONObject().put("nous", nous)).toString()
     }
 }

@@ -444,6 +444,11 @@ fun AgentScreen(
                     statusOk = true
                     statusProviderMessage = null
                     showModels = true
+                    // The free-tier catalog lists mostly paid models; probe them right
+                    // away so broken entries surface without a second tap.
+                    if (kind == ProviderKind.FREE) {
+                        onScanModels(profile, effectiveKey, result.models)
+                    }
                 }
                 is ModelDiscoveryResult.Failure -> {
                     status = result.message
