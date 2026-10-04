@@ -41,25 +41,29 @@ jobs:
       - name: Unit tests
         if: github.event_name != 'release'
         run: ./gradlew :app:testOnlineDebugUnitTest :app:testOfflineDebugUnitTest
+      # APKs are built only on branch pushes, release tagging and manual runs —
+      # merges to main and PR updates run tests only. Only the online debug
+      # variant is produced.
       - name: Build debug APK
-        run: ./gradlew assembleDebug
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'release' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
+        run: ./gradlew assembleOnlineDebug
       - name: Upload APK artifact
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
         uses: actions/upload-artifact@v4
         with:
           name: mh-dany-debug
-          path: app/build/outputs/apk/**/*.apk
+          path: app/build/outputs/apk/online/debug/*.apk
           retention-days: 7
-      # One rolling release instead of one per push: the previous debug-main release and
-      # its tag are removed first, so the releases page stays at a single, always-current
-      # entry. Older APKs are still available as run artifacts.
+      # The debug-main rolling release is manual now: run this workflow from
+      # main (workflow_dispatch) to replace it with a fresh online debug APK.
       - name: Drop previous rolling release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release delete debug-main --yes --cleanup-tag 2>/dev/null || echo "no previous rolling release"
       - name: Publish main release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: debug-main
@@ -67,7 +71,6 @@ jobs:
           make_latest: true
           files: |
             app/build/outputs/apk/online/debug/*.apk
-            app/build/outputs/apk/offline/debug/*.apk
           fail_on_unmatched_files: true
       - name: Attach APKs to release
         if: github.event_name == 'release'
@@ -75,4 +78,3 @@ jobs:
         with:
           files: |
             app/build/outputs/apk/online/debug/*.apk
-            app/build/outputs/apk/offline/debug/*.apk
