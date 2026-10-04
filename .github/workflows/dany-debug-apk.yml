@@ -48,6 +48,7 @@ jobs:
         with:
           name: mh-dany-debug
           path: app/build/outputs/apk/**/*.apk
+          retention-days: 7
       # One rolling release instead of one per push: the previous debug-main release and
       # its tag are removed first, so the releases page stays at a single, always-current
       # entry. Older APKs are still available as run artifacts.
