@@ -445,8 +445,9 @@ fun AgentScreen(
                     statusProviderMessage = null
                     showModels = true
                     // The free-tier catalog lists mostly paid models; probe them right
-                    // away so broken entries surface without a second tap.
-                    if (kind == ProviderKind.FREE) {
+                    // away so broken entries surface without a second tap — but only
+                    // when the user left the model scan enabled.
+                    if (kind == ProviderKind.FREE && state.autoScanEnabled) {
                         onScanModels(profile, effectiveKey, result.models)
                     }
                 }

@@ -18,6 +18,7 @@ import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.EndpointModelCatalog
+import com.jarves.mh.network.ModelHealthStatus
 import com.jarves.mh.network.mergeCatalogModels
 import org.json.JSONArray
 import org.json.JSONObject
@@ -262,26 +263,38 @@ class AppPreferences(private val context: Context) {
         } else {
             savedModel
         }
-        return ProviderProfile(
-            kind = kind,
-            // Profiles saved before a provider shipped defaults stored "" here;
-            // an empty base URL or model would disable discovery and validation,
-            // so fall back to the kind's defaults whenever the slot is blank.
-            baseUrl = if (useStoredValues) {
-                preferences.getString("${sourcePrefix}base_url", kind.defaultBaseUrl) ?: kind.defaultBaseUrl
-            } else {
-                kind.defaultBaseUrl
-            }.ifBlank { kind.defaultBaseUrl },
-            model = model.ifBlank { kind.defaultModel },
-            hasSecret = vault.contains(kind.name),
-            dshApi = if (useStoredValues) {
-                preferences.getString("${sourcePrefix}dsh_api", defaultDshApiForProvider(kind))
-                    ?: defaultDshApiForProvider(kind)
-            } else {
-                defaultDshApiForProvider(kind)
-            },
+        return resolveFreeTierModel(
+            ProviderProfile(
+                kind = kind,
+                // Profiles saved before a provider shipped defaults stored "" here;
+                // an empty base URL or model would disable discovery and validation,
+                // so fall back to the kind's defaults whenever the slot is blank.
+                baseUrl = if (useStoredValues) {
+                    preferences.getString("${sourcePrefix}base_url", kind.defaultBaseUrl) ?: kind.defaultBaseUrl
+                } else {
+                    kind.defaultBaseUrl
+                }.ifBlank { kind.defaultBaseUrl },
+                model = model.ifBlank { kind.defaultModel },
+                hasSecret = vault.contains(kind.name),
+                dshApi = if (useStoredValues) {
+                    preferences.getString("${sourcePrefix}dsh_api", defaultDshApiForProvider(kind))
+                        ?: defaultDshApiForProvider(kind)
+                } else {
+                    defaultDshApiForProvider(kind)
+                },
+            ),
+            agent,
         )
     }
+
+    /**
+     * The free tier only accepts models its endpoint actually serves. When the
+     * last health scan proves the stored/default choice broken or unknown,
+     * swap it for the first model that scan measured working, so an Agent
+     * Execution never pins a model that answers 404/429 into a retry backoff.
+     */
+    fun resolveFreeTierModel(profile: ProviderProfile, agent: AgentKind?): ProviderProfile =
+        if (agent == null) profile else applyFreeTierModel(profile, loadModelCatalogs(agent))
 
     private fun providerPrefix(agent: AgentKind): String = "provider_${agent.stableId.replace('-', '_')}_"
 
@@ -638,4 +651,25 @@ class AppPreferences(private val context: Context) {
         val clean = replace(Regex("\\s+"), " ").trim()
         return if (clean.length <= 42) clean else clean.take(39).trimEnd() + "…"
     }
+}
+
+/**
+ * Pure part of [AppPreferences.resolveFreeTierModel], separated so unit tests
+ * can drive it with fixtures. The free tier only serves models its endpoint
+ * actually answers: when the last health scan proves the stored/default choice
+ * broken or unknown, swap it for the first model that scan measured working,
+ * so an Agent Execution never pins a model that answers 404/429 into a retry
+ * backoff. Profiles without a scan (or non-free providers) pass through.
+ */
+internal fun applyFreeTierModel(
+    profile: ProviderProfile,
+    catalogs: List<EndpointModelCatalog>,
+): ProviderProfile {
+    if (profile.kind != ProviderKind.FREE) return profile
+    val catalog = catalogs.firstOrNull { it.kindName == ProviderKind.FREE.name } ?: return profile
+    val healthy = catalog.models
+        .filter { it.isFree && it.health == ModelHealthStatus.OK.name }
+        .map { it.id }
+    if (healthy.isEmpty() || profile.model in healthy) return profile
+    return profile.copy(model = healthy.first())
 }
