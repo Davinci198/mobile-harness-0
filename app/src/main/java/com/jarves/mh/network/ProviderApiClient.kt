@@ -108,7 +108,9 @@ class ProviderApiClient {
         protocol: ProviderProtocol,
     ): ModelDiscoveryResult = withContext(Dispatchers.IO) {
         val cleanBaseUrl = normalizeBaseUrl(baseUrl)
-        val cleanKey = sanitizeApiKey(apiKey)
+        // The Hermes free tier (Nous inference) serves its catalog anonymously:
+        // drop any account-scoped saved key so it never shrinks the list.
+        val cleanKey = if (isNousFreeTier(baseUrl)) "" else sanitizeApiKey(apiKey)
         if (cleanBaseUrl.isBlank()) {
             return@withContext ModelDiscoveryResult.Failure("Enter a base URL first.")
         }
@@ -117,11 +119,11 @@ class ProviderApiClient {
         var lastMessage = "This provider did not expose a model list. You can enter a custom model name."
         var lastProviderMessage: String? = null
         for (endpoint in modelEndpoints(cleanBaseUrl, protocol)) {
-            // OpenRouter's complete catalog is public, and the Hermes free tier
-            // (Nous inference) serves its catalog anonymously. Fetch both without
-            // a key so an account-scoped saved key never shrinks the list.
-            // The saved key is still used for validation and inference requests.
-            val discoveryKey = if (isOpenRouterCatalogEndpoint(endpoint) || isNousFreeTier(endpoint)) "" else cleanKey
+            // OpenRouter's complete catalog is public. Fetch it anonymously even when
+            // OpenRouter is configured through Custom API so an account-scoped key does
+            // not reduce discovery to the models allowed by that key's preferences.
+            // The saved key is still used for validation and all inference requests.
+            val discoveryKey = if (isOpenRouterCatalogEndpoint(endpoint)) "" else cleanKey
             val response = request(endpoint, "GET", discoveryKey, protocol = protocol)
             when {
                 response.code == 401 || response.code == 403 -> {
@@ -221,14 +223,25 @@ class ProviderApiClient {
         val cleanBaseUrl = normalizeBaseUrl(baseUrl)
         val cleanKey = sanitizeApiKey(apiKey)
         if (cleanBaseUrl.isBlank() || models.isEmpty()) return@withContext emptyList()
-        // Zen gates completion probes to the OpenCode client, and the Hermes free
-        // tier serves anonymous catalog listings but no keyless completions, so
-        // every chat probe would fail there; health instead means "listed in the
-        // live catalog". A failed catalog fetch reports nothing rather than
-        // marking it all broken.
-        if (isOpenCodeZen(cleanBaseUrl) || isNousFreeTier(cleanBaseUrl)) {
-            val catalogKey = if (isNousFreeTier(cleanBaseUrl)) "" else cleanKey
-            val listed = catalogIds(cleanBaseUrl, catalogKey, protocol) ?: return@withContext emptyList()
+        // Zen gates completion probes to the OpenCode client, so every chat probe
+        // would fail there; health instead means "listed in the live catalog".
+        // A failed catalog fetch reports nothing rather than marking it all broken.
+        if (isOpenCodeZen(cleanBaseUrl)) {
+            val listed = zenCatalogIds(cleanBaseUrl, cleanKey, protocol) ?: return@withContext emptyList()
+            val health = models.map { model ->
+                if (model.id in listed) {
+                    ModelHealth(model.id, ModelHealthStatus.OK, 0L, 200, "listed in catalog")
+                } else {
+                    ModelHealth(model.id, ModelHealthStatus.FAIL, 0L, 0, "not in the live catalog")
+                }
+            }
+            health.forEach { onProgress(it) }
+            return@withContext health
+        }
+        // The Hermes free tier serves its catalog anonymously but refuses keyless
+        // completion probes; health there also means "listed in the live catalog".
+        if (isNousFreeTier(cleanBaseUrl)) {
+            val listed = nousCatalogIds(cleanBaseUrl, protocol) ?: return@withContext emptyList()
             val health = models.map { model ->
                 if (model.id in listed) {
                     ModelHealth(model.id, ModelHealthStatus.OK, 0L, 200, "listed in catalog")
@@ -317,20 +330,18 @@ class ProviderApiClient {
         val cleanKey = sanitizeApiKey(apiKey)
         // A loopback gateway on this device answers without credentials, so a
         // missing key is only an error for remote endpoints. OpenCode Zen's free
-        // tier and the Hermes Nous endpoint are designed to run without a key,
-        // and both catalogs answer anonymously.
+        // tier is designed to run without a key, and its catalog answers anonymously.
+        // The Hermes Nous endpoint likewise serves its catalog without a key.
         val keyRequired = !isLoopbackBaseUrl(cleanBaseUrl) && !isOpenCodeZen(cleanBaseUrl) &&
             !isNousFreeTier(cleanBaseUrl)
         if (cleanBaseUrl.isBlank() || cleanModel.isBlank() || (keyRequired && cleanKey.isBlank())) {
             return@withContext ConnectionValidation.Failure("Base URL, model, and API key are required.")
         }
         if (isOpenCodeZen(cleanBaseUrl)) {
-            return@withContext validateCatalog(cleanBaseUrl, cleanKey, protocol, label = "OpenCode Zen")
+            return@withContext validateZenCatalog(cleanBaseUrl, cleanKey, protocol)
         }
         if (isNousFreeTier(cleanBaseUrl)) {
-            // The Hermes free tier requires no key: prove reachability through the
-            // anonymously served catalog (completion probes need an account).
-            return@withContext validateCatalog(cleanBaseUrl, "", protocol, label = "the Hermes free tier")
+            return@withContext validateNousFreeCatalog(cleanBaseUrl, protocol)
         }
         val body = validationBody(cleanModel, protocol)
         // Probe candidate paths so a base URL that already ends in /v1 or
@@ -410,8 +421,8 @@ class ProviderApiClient {
         }
     }
 
-    /** Live catalog ids, or null when the list could not be fetched. */
-    private suspend fun catalogIds(
+    /** Live Zen catalog ids, or null when the list could not be fetched. */
+    private suspend fun zenCatalogIds(
         baseUrl: String,
         apiKey: String,
         protocol: ProviderProtocol,
@@ -427,18 +438,32 @@ class ProviderApiClient {
         return null
     }
 
+    /** Live catalog ids of the keyless Hermes free tier, fetched anonymously. */
+    private suspend fun nousCatalogIds(
+        baseUrl: String,
+        protocol: ProviderProtocol,
+    ): Set<String>? {
+        for (endpoint in modelEndpoints(baseUrl, protocol)) {
+            val response = request(endpoint, "GET", "", protocol = protocol)
+            if (response.code in 200..299) {
+                return ModelResponseParser.parse(response.body).mapTo(mutableSetOf()) { it.id }
+            }
+            if (response.code == 404) continue
+            return null
+        }
+        return null
+    }
+
     /**
-     * Zen refuses completion probes from outside the OpenCode client (HTTP
-     * 401/403 regardless of the key), and the Hermes free tier serves anonymous
-     * listings only, so "Test connection" there proves reachability through the
-     * model list instead. A saved key, when present, is still forwarded — Zen
-     * accepts it for model listing.
+     * OpenCode Zen refuses completion probes from outside the OpenCode client
+     * (HTTP 401/403 regardless of the key), so "Test connection" there proves
+     * reachability through the anonymously served model list instead. The saved
+     * key, when present, is still forwarded — Zen accepts it for model listing.
      */
-    private suspend fun validateCatalog(
+    private suspend fun validateZenCatalog(
         baseUrl: String,
         apiKey: String,
         protocol: ProviderProtocol,
-        label: String,
     ): ConnectionValidation {
         var lastCode = 0
         var lastBody = ""
@@ -447,7 +472,7 @@ class ProviderApiClient {
             val response = request(endpoint, "GET", apiKey, protocol = protocol)
             if (response.code in 200..299) {
                 val count = ModelResponseParser.parse(response.body).size
-                return ConnectionValidation.Success("Connected to $label. $count models available.")
+                return ConnectionValidation.Success("Connected to OpenCode Zen. $count models available.")
             }
             if (response.code == 404) continue
             lastCode = response.code
@@ -463,6 +488,49 @@ class ProviderApiClient {
             )
             lastCode > 0 -> ConnectionValidation.Failure(
                 "Check the Base URL and selected gateway protocol.",
+                providerErrorMessage(lastBody),
+                "Endpoint error",
+            )
+            else -> ConnectionValidation.Failure(
+                "Check your internet connection and provider settings.",
+                lastError,
+                "Network error",
+            )
+        }
+    }
+
+    /**
+     * The Hermes free tier has no key to test: "Test connection" proves
+     * reachability through the anonymously served Nous catalog (completion
+     * probes there need an account).
+     */
+    private suspend fun validateNousFreeCatalog(
+        baseUrl: String,
+        protocol: ProviderProtocol,
+    ): ConnectionValidation {
+        var lastCode = 0
+        var lastBody = ""
+        var lastError: String? = null
+        for (endpoint in modelEndpoints(baseUrl, protocol)) {
+            val response = request(endpoint, "GET", "", protocol = protocol)
+            if (response.code in 200..299) {
+                val count = ModelResponseParser.parse(response.body).size
+                return ConnectionValidation.Success("Connected to the Hermes free tier. $count models available.")
+            }
+            if (response.code == 404) continue
+            lastCode = response.code
+            lastBody = response.body
+            lastError = response.error
+            break
+        }
+        return when {
+            lastCode == 401 || lastCode == 403 -> ConnectionValidation.Failure(
+                "The Hermes free tier rejected this endpoint.",
+                providerErrorMessage(lastBody),
+                "Rejected",
+            )
+            lastCode > 0 -> ConnectionValidation.Failure(
+                "The Hermes free tier endpoint did not answer. Check the connection.",
                 providerErrorMessage(lastBody),
                 "Endpoint error",
             )

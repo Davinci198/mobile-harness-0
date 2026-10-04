@@ -686,8 +686,8 @@ internal abstract class HeadlessCliBridge(
 
 /**
  * True when a blank secret must stop the session: remote providers need a saved
- * key. FREE and OpenCode Zen are keyless by design (the Hermes guest mints its
- * anonymous free-tier identity), and a loopback gateway ignores the header.
+ * key. FREE and OpenCode Zen are keyless by design (the guest falls back to its
+ * bundled free-tier credentials), and a loopback gateway ignores the header.
  */
 internal fun requiresSavedSecret(provider: ProviderProfile): Boolean =
     provider.kind != ProviderKind.FREE &&
