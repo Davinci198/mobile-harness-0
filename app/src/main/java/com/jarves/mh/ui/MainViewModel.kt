@@ -390,7 +390,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     private val agentRegistry = AgentRegistry.builtIns(claudeRuntime, dshRuntime, antigravityRuntime, openCodeRuntime, hermesRuntime)
     private val agentWork = AgentWork(agentRegistry.all(), changeHistory)
-    private val providerApi = ProviderApiClient()
+    private val providerApi = ProviderApiClient(nousAccessToken = { installer.nousAccessToken() })
     private fun appUpdater(): AppUpdater = AppUpdater(
         getApplication(),
         if (BuildConfig.DEBUG) preferences.debugUpdateManifestUrl else "",
@@ -2618,6 +2618,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshActiveApiKey(profile.kind)
         pingApi()
         maybeAutoScanFirstIntegration(saved, secret)
+        prewarmWarmSession(saved)
+    }
+
+    /**
+     * Boots the agent's warm session right after a provider save so the next
+     * turn does not pay the interactive boot (~20s) again. Skipped while a
+     * turn runs (that turn boots with the new config itself) or without a
+     * project (no workspace to key the session on).
+     */
+    private fun prewarmWarmSession(profile: ProviderProfile) {
+        if (_state.value.isRunning) return
+        val project = _state.value.activeProject ?: return
+        val agent = _state.value.agentKind
+        viewModelScope.launch { agentWork.prewarm(agent, project.id, project.slug, profile) }
     }
 
     /** First successful key save for an agent → discover + health-scan models once. */

@@ -97,6 +97,21 @@ class AgentWork(
 
     fun handleFor(sessionId: String): AgentExecutionHandle? = handles[sessionId]
 
+    /**
+     * Boots the warm session for the next Agent Execution right after a
+     * provider save. Cold-only runtimes and agents without a driver are a
+     * no-op; the execution itself pays the boot then.
+     */
+    suspend fun prewarm(
+        agent: AgentKind,
+        projectId: String,
+        projectSlug: String,
+        provider: ProviderProfile,
+    ) {
+        val runtime = driversByAgent[agent]?.runtime as? HeadlessCliBridge ?: return
+        runtime.prewarmSession(provider, projectId, projectSlug)
+    }
+
     fun configureProjectRoot(projectId: String, rootPath: String): Boolean =
         changeHistory.configureProjectRoot(projectId, rootPath)
 

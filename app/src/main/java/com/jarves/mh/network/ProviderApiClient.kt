@@ -7,6 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.OffsetDateTime
 import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -101,7 +102,28 @@ data class EndpointDetection(
     val failure: String? = null,
 )
 
-class ProviderApiClient {
+/**
+ * Anonymous Nous access token of the guest Hermes free-tier identity
+ * (`~/.hermes/auth.json`), refreshed by Hermes itself as it chats. Returns
+ * null when the file is missing, malformed or the token is already expired,
+ * so callers keep the keyless catalog fallback.
+ */
+internal fun parseNousAccessToken(json: String, nowEpochSeconds: Long): String? = runCatching {
+    val nous = JSONObject(json).optJSONObject("providers")?.optJSONObject("nous") ?: return@runCatching null
+    val token = nous.optString("access_token").trim()
+    if (token.isEmpty()) return@runCatching null
+    val expiresAt = runCatching {
+        OffsetDateTime.parse(nous.optString("expires_at")).toInstant().epochSecond
+    }.getOrDefault(0L)
+    if (expiresAt != 0L && expiresAt <= nowEpochSeconds + EXPIRES_MARGIN_SECONDS) null else token
+}.getOrNull()
+
+private const val EXPIRES_MARGIN_SECONDS = 30L
+
+class ProviderApiClient(
+    /** Supplier of the guest's anonymous Nous token; blank/null keeps the keyless probes. */
+    private val nousAccessToken: () -> String? = { null },
+) {
     suspend fun discoverModels(
         baseUrl: String,
         apiKey: String,
@@ -221,7 +243,10 @@ class ProviderApiClient {
         onProgress: suspend (ModelHealth) -> Unit = {},
     ): List<ModelHealth> = withContext(Dispatchers.IO) {
         val cleanBaseUrl = normalizeBaseUrl(baseUrl)
-        val cleanKey = sanitizeApiKey(apiKey)
+        val freeTier = isNousFreeTier(cleanBaseUrl)
+        // Free-tier probes authenticate with the guest's anonymous Nous token,
+        // never with a saved key (FREE.pool keys belong to a different service).
+        val cleanKey = if (freeTier) nousAccessToken().orEmpty().trim() else sanitizeApiKey(apiKey)
         if (cleanBaseUrl.isBlank() || models.isEmpty()) return@withContext emptyList()
         // Zen gates completion probes to the OpenCode client, so every chat probe
         // would fail there; health instead means "listed in the live catalog".
@@ -238,9 +263,10 @@ class ProviderApiClient {
             health.forEach { onProgress(it) }
             return@withContext health
         }
-        // The Hermes free tier serves its catalog anonymously but refuses keyless
-        // completion probes; health there also means "listed in the live catalog".
-        if (isNousFreeTier(cleanBaseUrl)) {
+        // Without a guest token the free tier refuses completion probes; health
+        // there falls back to "listed in the live catalog". With a token the
+        // probes below run for real, so paid or retired models show as broken.
+        if (freeTier && cleanKey.isBlank()) {
             val listed = nousCatalogIds(cleanBaseUrl, protocol) ?: return@withContext emptyList()
             val health = models.map { model ->
                 if (model.id in listed) {
@@ -265,6 +291,12 @@ class ProviderApiClient {
                     }
                 }
             }.awaitAll()
+        }
+        // A guest token that expires mid-scan answers 401/403 for every model;
+        // that says nothing about the models themselves, so report no health
+        // instead of flagging the whole catalog as broken.
+        if (freeTier && results.isNotEmpty() && results.all { it.httpCode == 401 || it.httpCode == 403 }) {
+            return@withContext emptyList()
         }
         results.toList()
     }
@@ -327,20 +359,23 @@ class ProviderApiClient {
     ): ConnectionValidation = withContext(Dispatchers.IO) {
         val cleanBaseUrl = normalizeBaseUrl(baseUrl)
         val cleanModel = model.trim()
-        val cleanKey = sanitizeApiKey(apiKey)
+        val freeTier = isNousFreeTier(cleanBaseUrl)
+        // The free tier probes with the guest's anonymous Nous token when one
+        // exists; the saved key never applies there (FREE.pool is another service).
+        val cleanKey = if (freeTier) nousAccessToken().orEmpty().trim() else sanitizeApiKey(apiKey)
         // A loopback gateway on this device answers without credentials, so a
         // missing key is only an error for remote endpoints. OpenCode Zen's free
         // tier is designed to run without a key, and its catalog answers anonymously.
         // The Hermes Nous endpoint likewise serves its catalog without a key.
         val keyRequired = !isLoopbackBaseUrl(cleanBaseUrl) && !isOpenCodeZen(cleanBaseUrl) &&
-            !isNousFreeTier(cleanBaseUrl)
+            !freeTier
         if (cleanBaseUrl.isBlank() || cleanModel.isBlank() || (keyRequired && cleanKey.isBlank())) {
             return@withContext ConnectionValidation.Failure("Base URL, model, and API key are required.")
         }
         if (isOpenCodeZen(cleanBaseUrl)) {
             return@withContext validateZenCatalog(cleanBaseUrl, cleanKey, protocol)
         }
-        if (isNousFreeTier(cleanBaseUrl)) {
+        if (freeTier && cleanKey.isBlank()) {
             return@withContext validateNousFreeCatalog(cleanBaseUrl, protocol)
         }
         val body = validationBody(cleanModel, protocol)
@@ -356,10 +391,11 @@ class ProviderApiClient {
             val response = request(endpoint, "POST", cleanKey, body, protocol, connectTimeoutMs = 12_000, readTimeoutMs = 45_000)
             when {
                 response.code in 200..299 -> return@withContext ConnectionValidation.Success(
-                    if (protocol == ProviderProtocol.ANTHROPIC || protocol == ProviderProtocol.ANTHROPIC_GATEWAY || protocol == ProviderProtocol.OPENROUTER) {
-                        "Anthropic Messages endpoint verified. Claude Code settings are ready."
-                    } else {
-                        "Connection successful. Claude Code settings are ready."
+                    when {
+                        freeTier -> "Connected. $cleanModel answered on the Hermes free tier."
+                        protocol == ProviderProtocol.ANTHROPIC || protocol == ProviderProtocol.ANTHROPIC_GATEWAY || protocol == ProviderProtocol.OPENROUTER ->
+                            "Anthropic Messages endpoint verified. Claude Code settings are ready."
+                        else -> "Connection successful. Claude Code settings are ready."
                     },
                 )
                 response.code == 401 || response.code == 403 -> {
@@ -381,7 +417,11 @@ class ProviderApiClient {
         }
         when {
             authRejected -> ConnectionValidation.Failure(
-                "Check this API key or select another saved key.",
+                if (freeTier) {
+                    "The free-tier session expired. Send one chat message to renew it, then retry."
+                } else {
+                    "Check this API key or select another saved key."
+                },
                 providerErrorMessage(lastBody),
                 "Rejected",
             )
@@ -391,7 +431,11 @@ class ProviderApiClient {
                 "Model error",
             )
             lastCode == 404 -> ConnectionValidation.Failure(
-                "Check the Base URL and selected gateway protocol.",
+                if (freeTier) {
+                    "This model is not available on the Hermes free tier. Pick another model."
+                } else {
+                    "Check the Base URL and selected gateway protocol."
+                },
                 providerErrorMessage(lastBody),
                 "Endpoint error",
             )
