@@ -194,7 +194,7 @@ class ProviderApiClientTest {
 
         assertEquals("guest-token", parseNousAccessToken(nousAuthJson(now + 3_600), now))
         // No expiry recorded: trust the token and let the server reject it if stale.
-        assertEquals("guest-token", parseNousAccessToken(nousAuthJson(expiresAt = null), now))
+        assertEquals("guest-token", parseNousAccessToken(nousAuthJson(expiresAtEpoch = null), now))
     }
 
     @Test
