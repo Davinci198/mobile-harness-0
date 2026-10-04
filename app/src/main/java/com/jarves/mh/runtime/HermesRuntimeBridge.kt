@@ -10,7 +10,8 @@ import com.jarves.mh.model.isLoopbackBaseUrl
  * Headless Hermes bridge (Nous Research): `hermes chat --quiet
  * --format stream-json [--provider X] [--model Y] -q "<prompt>"` prints
  * newline-delimited events. Model routing uses Hermes' own provider names and
- * the matching API-key environment variables; the Free provider omits them.
+ * the matching API-key environment variables; the Free provider routes to the
+ * keyless `nous` provider and omits every key variable.
  */
 internal class HermesRuntimeBridge(
     context: Context,
@@ -31,20 +32,7 @@ internal class HermesRuntimeBridge(
         add("--quiet")
         add("--format")
         add("stream-json")
-        val providerName = hermesProviderName(provider)
-        if (providerName.isNotBlank()) {
-            add("--provider")
-            add(providerName)
-        }
-        // FREE uses the guest's configured Nous OAuth free tier; forcing a
-        // stale model id (e.g. auto/coding:free) 404s on the portal.
-        if (provider.kind != ProviderKind.FREE) {
-            val model = provider.model.ifBlank { provider.kind.defaultModel }
-            if (model.isNotBlank()) {
-                add("--model")
-                add(model)
-            }
-        }
+        addAll(hermesProviderOptions(provider))
         add("-q")
         add(prompt)
     }
@@ -74,34 +62,39 @@ internal class HermesRuntimeBridge(
     ): List<String> = buildList {
         add(guestExecutable)
         add("chat")
-        val providerName = hermesProviderName(provider)
-        if (providerName.isNotBlank()) {
-            add("--provider")
-            add(providerName)
-        }
-        if (provider.kind != ProviderKind.FREE) {
-            val model = provider.model.ifBlank { provider.kind.defaultModel }
-            if (model.isNotBlank()) {
-                add("--model")
-                add(model)
-            }
-        }
+        addAll(hermesProviderOptions(provider))
     }
+}
 
-    private fun hermesProviderName(provider: ProviderProfile): String {
-        if (provider.kind == ProviderKind.FREE) return ""
-        return when (provider.kind) {
-            ProviderKind.DEEPSEEK -> "deepseek"
-            ProviderKind.ANTHROPIC, ProviderKind.KIMI -> "anthropic"
-            ProviderKind.LLM_ROUTER -> "openrouter"
-            ProviderKind.OPENCODE_ZEN, ProviderKind.NVIDIA_NIM -> "openai"
-            ProviderKind.CUSTOM -> {
-                val api = provider.dshApi.ifBlank { "anthropic-messages" }
-                if (api == "openai-completions" || api == "openai-responses") "openai" else "anthropic"
-            }
-            ProviderKind.CLAUDE -> ""
-            ProviderKind.FREE -> ""
-        }
+/**
+ * Hermes' own provider name for a profile. The Free provider (displayed as
+ * "Hermes") routes to the keyless Nous inference endpoint; anonymous callers
+ * carry no API-key environment variable — only the free-tier gate below.
+ */
+internal fun hermesProviderName(provider: ProviderProfile): String = when (provider.kind) {
+    ProviderKind.FREE -> "nous"
+    ProviderKind.DEEPSEEK -> "deepseek"
+    ProviderKind.ANTHROPIC, ProviderKind.KIMI -> "anthropic"
+    ProviderKind.LLM_ROUTER -> "openrouter"
+    ProviderKind.OPENCODE_ZEN, ProviderKind.NVIDIA_NIM -> "openai"
+    ProviderKind.CUSTOM -> {
+        val api = provider.dshApi.ifBlank { "anthropic-messages" }
+        if (api == "openai-completions" || api == "openai-responses") "openai" else "anthropic"
+    }
+    ProviderKind.CLAUDE -> ""
+}
+
+/** `--provider`/`--model` flag pair for `hermes chat`, shared by cold and warm starts. */
+internal fun hermesProviderOptions(provider: ProviderProfile): List<String> = buildList {
+    val providerName = hermesProviderName(provider)
+    if (providerName.isNotBlank()) {
+        add("--provider")
+        add(providerName)
+    }
+    val model = provider.model.ifBlank { provider.kind.defaultModel }
+    if (model.isNotBlank()) {
+        add("--model")
+        add(model)
     }
 }
 

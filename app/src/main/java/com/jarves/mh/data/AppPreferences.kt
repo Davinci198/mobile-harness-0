@@ -264,12 +264,15 @@ class AppPreferences(private val context: Context) {
         }
         return ProviderProfile(
             kind = kind,
+            // Profiles saved before a provider shipped defaults stored "" here;
+            // an empty base URL or model would disable discovery and validation,
+            // so fall back to the kind's defaults whenever the slot is blank.
             baseUrl = if (useStoredValues) {
                 preferences.getString("${sourcePrefix}base_url", kind.defaultBaseUrl) ?: kind.defaultBaseUrl
             } else {
                 kind.defaultBaseUrl
-            },
-            model = model,
+            }.ifBlank { kind.defaultBaseUrl },
+            model = model.ifBlank { kind.defaultModel },
             hasSecret = vault.contains(kind.name),
             dshApi = if (useStoredValues) {
                 preferences.getString("${sourcePrefix}dsh_api", defaultDshApiForProvider(kind))

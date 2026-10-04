@@ -407,15 +407,10 @@ fun AgentScreen(
     }
 
     fun discoverModels() {
-        if (selectedKind == ProviderKind.FREE) {
-            status = context.getString(R.string.agent_free_tier_ready)
-            statusOk = true
-            statusProviderMessage = null
-            return
-        }
         val effectiveKey = apiKey.trim().ifBlank { newApiKey.trim() }
         val supportsPublicDiscovery = selectedKind == ProviderKind.LLM_ROUTER ||
-            selectedKind == ProviderKind.OPENCODE_ZEN
+            selectedKind == ProviderKind.OPENCODE_ZEN ||
+            selectedKind == ProviderKind.FREE
         // A loopback gateway on this device serves its model list without credentials.
         val loopbackTarget = isLoopbackBaseUrl(if (selectedKind.fixedBaseUrl) selectedKind.defaultBaseUrl else baseUrl)
         if (effectiveKey.isBlank() && !supportsPublicDiscovery && !loopbackTarget) {
@@ -1960,7 +1955,14 @@ fun AgentScreen(
                         onValidate = {
                             scope.launch {
                                 isValidating = true
-                                val activeKeyId = savedKeys.firstOrNull { it.isActive }?.id
+                                val kind = selectedKind
+                                // The free tier has no credential UI: report its
+                                // result as the section status, not per-key chips.
+                                val activeKeyId = if (kind == ProviderKind.FREE) {
+                                    null
+                                } else {
+                                    savedKeys.firstOrNull { it.isActive }?.id
+                                }
                                 if (activeKeyId != null) {
                                     keyConnectionStatuses = keyConnectionStatuses +
                                         (activeKeyId to KeyConnectionStatus(context.getString(R.string.agent_checking_connection)))
@@ -1969,7 +1971,6 @@ fun AgentScreen(
                                     status = context.getString(R.string.agent_checking_connection)
                                     statusOk = true
                                 }
-                                val kind = selectedKind
                                 val url = if (kind.fixedBaseUrl) kind.defaultBaseUrl else withDefaultScheme(baseUrl)
                                 val profile = ProviderProfile(kind, url, model.trim(), dshApi = dshApi)
                                 if (kind == ProviderKind.CLAUDE) {
@@ -2803,161 +2804,163 @@ private fun AgentProviderCard(
                 }
             }
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+            if (selectedKind != ProviderKind.FREE) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
 
-            PremiumSummaryRow(
-                icon = Icons.Default.Key,
-                title = if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_subscription_token) else stringResource(R.string.agent_credentials),
-                subtitle = buildString {
-                    append(activeKey?.name ?: if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_no_token) else stringResource(R.string.agent_no_key))
-                    if (activeKey != null) append(stringResource(R.string.agent_active_suffix))
-                    activeKeyStatus?.let {
-                        append(" · ")
-                        append(when (it.successful) { true -> stringResource(R.string.agent_verified); false -> stringResource(R.string.agent_failed); null -> stringResource(R.string.agent_checking) })
-                    }
-                },
-                positive = activeKeyStatus?.successful == true,
-                error = activeKeyStatus?.successful == false,
-                expanded = keysExpanded,
-                onClick = { keysExpanded = !keysExpanded },
-            )
+                PremiumSummaryRow(
+                    icon = Icons.Default.Key,
+                    title = if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_subscription_token) else stringResource(R.string.agent_credentials),
+                    subtitle = buildString {
+                        append(activeKey?.name ?: if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_no_token) else stringResource(R.string.agent_no_key))
+                        if (activeKey != null) append(stringResource(R.string.agent_active_suffix))
+                        activeKeyStatus?.let {
+                            append(" · ")
+                            append(when (it.successful) { true -> stringResource(R.string.agent_verified); false -> stringResource(R.string.agent_failed); null -> stringResource(R.string.agent_checking) })
+                        }
+                    },
+                    positive = activeKeyStatus?.successful == true,
+                    error = activeKeyStatus?.successful == false,
+                    expanded = keysExpanded,
+                    onClick = { keysExpanded = !keysExpanded },
+                )
 
-            activeKeyStatus?.let { keyStatus ->
-                if (!keysExpanded) {
-                    Text(
-                        keyStatus.message,
-                        fontSize = 10.sp,
-                        lineHeight = 14.sp,
-                        color = when (keyStatus.successful) {
-                            true -> Color(0xFF2E9D72)
-                            false -> MaterialTheme.colorScheme.error
-                            null -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier.padding(start = 48.dp, end = 8.dp, bottom = 8.dp),
-                    )
-                    keyStatus.providerMessage?.let { providerMessage ->
+                activeKeyStatus?.let { keyStatus ->
+                    if (!keysExpanded) {
                         Text(
-                            stringResource(R.string.agent_provider_msg, providerMessage),
+                            keyStatus.message,
                             fontSize = 10.sp,
                             lineHeight = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = when (keyStatus.successful) {
+                                true -> Color(0xFF2E9D72)
+                                false -> MaterialTheme.colorScheme.error
+                                null -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                             modifier = Modifier.padding(start = 48.dp, end = 8.dp, bottom = 8.dp),
                         )
+                        keyStatus.providerMessage?.let { providerMessage ->
+                            Text(
+                                stringResource(R.string.agent_provider_msg, providerMessage),
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 48.dp, end = 8.dp, bottom = 8.dp),
+                            )
+                        }
                     }
                 }
-            }
 
-            AnimatedVisibility(keysExpanded) {
-                Column(
-                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_saved_tokens, savedKeys.size) else stringResource(R.string.agent_saved_keys, savedKeys.size), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                        Text(
-                            if (addKeyExpanded) stringResource(R.string.settings_cancel) else stringResource(R.string.agent_add_key),
-                            fontSize = 11.sp,
-                            color = PocketAccent,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable { addKeyExpanded = !addKeyExpanded }.padding(6.dp),
-                        )
-                    }
-                    savedKeys.forEach { key ->
-                        val keyStatus = keyConnectionStatuses[key.id]
-                        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)) {
-                            Column {
-                                Row(
-                                    Modifier.fillMaxWidth().clickable { onActivateKey(key.id) }.padding(start = 12.dp, top = 7.dp, bottom = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(key.name, fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                                        Text(if (key.isActive) stringResource(R.string.settings_active) else stringResource(R.string.settings_key_tap_activate), fontSize = 10.sp, color = if (key.isActive) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant)
-                                        keySecrets.firstOrNull { it.id == key.id }?.let { credential ->
-                                            Row(
-                                                Modifier.padding(top = 3.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                Text(
-                                                    credential.secret,
-                                                    Modifier.weight(1f),
-                                                    fontSize = 11.sp,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    maxLines = 3,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                )
-                                                IconButton(
-                                                    onClick = {
-                                                        keyClipboard.setText(AnnotatedString(credential.secret))
-                                                        keyCopiedId = key.id
-                                                    },
-                                                    modifier = Modifier.size(30.dp).padding(start = 4.dp),
+                AnimatedVisibility(keysExpanded) {
+                    Column(
+                        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_saved_tokens, savedKeys.size) else stringResource(R.string.agent_saved_keys, savedKeys.size), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                            Text(
+                                if (addKeyExpanded) stringResource(R.string.settings_cancel) else stringResource(R.string.agent_add_key),
+                                fontSize = 11.sp,
+                                color = PocketAccent,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.clickable { addKeyExpanded = !addKeyExpanded }.padding(6.dp),
+                            )
+                        }
+                        savedKeys.forEach { key ->
+                            val keyStatus = keyConnectionStatuses[key.id]
+                            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)) {
+                                Column {
+                                    Row(
+                                        Modifier.fillMaxWidth().clickable { onActivateKey(key.id) }.padding(start = 12.dp, top = 7.dp, bottom = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(key.name, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                                            Text(if (key.isActive) stringResource(R.string.settings_active) else stringResource(R.string.settings_key_tap_activate), fontSize = 10.sp, color = if (key.isActive) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            keySecrets.firstOrNull { it.id == key.id }?.let { credential ->
+                                                Row(
+                                                    Modifier.padding(top = 3.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
                                                 ) {
-                                                    Icon(
-                                                        if (keyCopiedId == key.id) Icons.Default.Check else Icons.Default.ContentCopy,
-                                                        stringResource(if (keyCopiedId == key.id) R.string.agent_key_copied else R.string.agent_key_copy),
-                                                        Modifier.size(15.dp),
-                                                        tint = if (keyCopiedId == key.id) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    Text(
+                                                        credential.secret,
+                                                        Modifier.weight(1f),
+                                                        fontSize = 11.sp,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        maxLines = 3,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     )
+                                                    IconButton(
+                                                        onClick = {
+                                                            keyClipboard.setText(AnnotatedString(credential.secret))
+                                                            keyCopiedId = key.id
+                                                        },
+                                                        modifier = Modifier.size(30.dp).padding(start = 4.dp),
+                                                    ) {
+                                                        Icon(
+                                                            if (keyCopiedId == key.id) Icons.Default.Check else Icons.Default.ContentCopy,
+                                                            stringResource(if (keyCopiedId == key.id) R.string.agent_key_copied else R.string.agent_key_copy),
+                                                            Modifier.size(15.dp),
+                                                            tint = if (keyCopiedId == key.id) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
+                                        AgentSelectionDot(key.isActive)
+                                        IconButton(onClick = { onRemoveKey(key.id) }) {
+                                            Icon(Icons.Default.DeleteSweep, stringResource(R.string.settings_remove), Modifier.size(17.dp))
+                                        }
                                     }
-                                    AgentSelectionDot(key.isActive)
-                                    IconButton(onClick = { onRemoveKey(key.id) }) {
-                                        Icon(Icons.Default.DeleteSweep, stringResource(R.string.settings_remove), Modifier.size(17.dp))
-                                    }
-                                }
-                                keyStatus?.let {
-                                    Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        if (it.successful == null) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 1.5.dp)
-                                        else Icon(if (it.successful) Icons.Default.CheckCircle else Icons.Default.Warning, null, tint = if (it.successful) Color(0xFF2E9D72) else MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
-                                        Spacer(Modifier.width(7.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text(it.message, fontSize = 10.sp, lineHeight = 14.sp, color = if (it.successful == false) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-                                            it.providerMessage?.let { providerMessage ->
-                                                Text(stringResource(R.string.agent_provider_msg, providerMessage), fontSize = 10.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    keyStatus?.let {
+                                        Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            if (it.successful == null) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 1.5.dp)
+                                            else Icon(if (it.successful) Icons.Default.CheckCircle else Icons.Default.Warning, null, tint = if (it.successful) Color(0xFF2E9D72) else MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
+                                            Spacer(Modifier.width(7.dp))
+                                            Column(Modifier.weight(1f)) {
+                                                Text(it.message, fontSize = 10.sp, lineHeight = 14.sp, color = if (it.successful == false) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                                                it.providerMessage?.let { providerMessage ->
+                                                    Text(stringResource(R.string.agent_provider_msg, providerMessage), fontSize = 10.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    AnimatedVisibility(addKeyExpanded) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = newKeyName,
-                                onValueChange = { input ->
-                                    if ((input.startsWith("sk-") || input.startsWith("ant-") || input.length > 30) && !input.contains(" ") && newApiKey.isBlank()) {
-                                        onNewApiKey(input.trim())
-                                        onNewKeyName(context.getString(R.string.agent_key_for, selectedKind.title))
-                                    } else onNewKeyName(input)
-                                },
-                                label = { Text(if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_token_name) else stringResource(R.string.settings_key_name)) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                            )
-                            OutlinedTextField(
-                                value = newApiKey,
-                                onValueChange = onNewApiKey,
-                                label = { Text(if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_setup_token_label) else stringResource(R.string.settings_api_key)) },
-                                singleLine = true,
-                                visualTransformation = if (newKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                                trailingIcon = { IconButton(onClick = onToggleNewKey) { Icon(if (newKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(R.string.agent_toggle_visibility)) } },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                            )
-                            Button(
-                                onClick = { onAddKey(); addKeyExpanded = false },
-                                enabled = newKeyName.isNotBlank() && newApiKey.isNotBlank(),
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                            ) { Text(if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_save_token) else stringResource(R.string.settings_save_api_key)) }
+                        AnimatedVisibility(addKeyExpanded) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = newKeyName,
+                                    onValueChange = { input ->
+                                        if ((input.startsWith("sk-") || input.startsWith("ant-") || input.length > 30) && !input.contains(" ") && newApiKey.isBlank()) {
+                                            onNewApiKey(input.trim())
+                                            onNewKeyName(context.getString(R.string.agent_key_for, selectedKind.title))
+                                        } else onNewKeyName(input)
+                                    },
+                                    label = { Text(if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_token_name) else stringResource(R.string.settings_key_name)) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                )
+                                OutlinedTextField(
+                                    value = newApiKey,
+                                    onValueChange = onNewApiKey,
+                                    label = { Text(if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_setup_token_label) else stringResource(R.string.settings_api_key)) },
+                                    singleLine = true,
+                                    visualTransformation = if (newKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                    trailingIcon = { IconButton(onClick = onToggleNewKey) { Icon(if (newKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(R.string.agent_toggle_visibility)) } },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                )
+                                Button(
+                                    onClick = { onAddKey(); addKeyExpanded = false },
+                                    enabled = newKeyName.isNotBlank() && newApiKey.isNotBlank(),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                ) { Text(if (selectedKind == ProviderKind.CLAUDE) stringResource(R.string.agent_save_token) else stringResource(R.string.settings_save_api_key)) }
+                            }
                         }
                     }
                 }

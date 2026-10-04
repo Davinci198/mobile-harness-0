@@ -3065,19 +3065,22 @@ private fun ProviderCredentialsStep(
                     if (provider in DSH_PROTOCOL_PROVIDERS && !provider.fixedProtocol) {
                         DshApiProtocolPicker(selected = dshApi, onSelected = { onDshApi(it); status = null })
                     }
-                    OutlinedTextField(
-                        apiKey,
-                        { onApiKey(it); status = null; statusDetails = null },
-                        label = { Text(stringResource(R.string.settings_api_key)) },
-                        placeholder = { Text(if (hasStoredSecret) stringResource(R.string.prov_keep_blank) else stringResource(R.string.prov_enter_key)) },
-                        supportingText = {
-                            if (hasStoredSecret && apiKey.isBlank()) Text(stringResource(R.string.prov_key_ready))
-                        },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    // The Hermes free tier is keyless: no credential field.
+                    if (provider != ProviderKind.FREE) {
+                        OutlinedTextField(
+                            apiKey,
+                            { onApiKey(it); status = null; statusDetails = null },
+                            label = { Text(stringResource(R.string.settings_api_key)) },
+                            placeholder = { Text(if (hasStoredSecret) stringResource(R.string.prov_keep_blank) else stringResource(R.string.prov_enter_key)) },
+                            supportingText = {
+                                if (hasStoredSecret && apiKey.isBlank()) Text(stringResource(R.string.prov_key_ready))
+                            },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     OutlinedTextField(
                         model,
                         { onModel(it); status = null; statusDetails = null },

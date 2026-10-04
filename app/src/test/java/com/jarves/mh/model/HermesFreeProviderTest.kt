@@ -19,4 +19,12 @@ class HermesFreeProviderTest {
         assertFalse(ProviderKind.FREE in providersForAgent(AgentKind.DEEPSEEK_HARNESS))
         assertFalse(ProviderKind.FREE in providersForAgent(AgentKind.ANTIGRAVITY))
     }
+
+    @Test
+    fun freeTierShipsTheNousEndpointAndFreeDefaultModel() {
+        assertEquals("https://inference-api.nousresearch.com/v1", ProviderKind.FREE.defaultBaseUrl)
+        assertEquals("stepfun/step-3.7-flash:free", ProviderKind.FREE.defaultModel)
+        assertTrue(ProviderKind.FREE.fixedBaseUrl)
+        assertTrue(ProviderKind.FREE.fixedProtocol)
+    }
 }
