@@ -47,9 +47,11 @@ enum class ProviderKind(
         "Hermes",
         "Free tier, works without an API key",
         ProviderProtocol.ANTHROPIC_GATEWAY,
-        "",
-        "",
+        "https://inference-api.nousresearch.com/v1",
+        "stepfun/step-3.7-flash:free",
         experimental = true,
+        fixedBaseUrl = true,
+        fixedProtocol = true,
     ),
     CUSTOM("Custom API", "Anthropic-compatible endpoint", ProviderProtocol.ANTHROPIC_GATEWAY, "", "", true),
 }

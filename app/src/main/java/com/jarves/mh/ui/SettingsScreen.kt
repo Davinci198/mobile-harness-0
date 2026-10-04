@@ -514,7 +514,11 @@ private fun LegacySettingsScreen(
                                 when (val result = onDiscoverModels(profile, apiKey.trim())) {
                                     is ModelDiscoveryResult.Success -> {
                                         discoveredModels = result.models
-                                        result.models.firstOrNull()?.let { model = it.id }
+                                        // The free tier keeps its keyless default model
+                                        // instead of swapping to the first catalog entry.
+                                        if (selectedKind != ProviderKind.FREE) {
+                                            result.models.firstOrNull()?.let { model = it.id }
+                                        }
                                         validationStatus = "Discovered ${result.models.size} models. Selected ${model}."
                                         validationOk = true
                                     }
@@ -539,32 +543,34 @@ private fun LegacySettingsScreen(
                         }
                     }
                 }
-
                 Spacer(Modifier.height(10.dp))
 
-                // API Key with eye toggle
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it; validationStatus = null },
-                    label = { Text("API Key") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    trailingIcon = {
-                        IconButton(onClick = { keyVisible = !keyVisible }) {
-                            Icon(
-                                if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = "Toggle API Key Visibility",
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = PocketAccent,
-                    ),
-                )
+                // The Hermes free tier is keyless: no credential field.
+                if (selectedKind != ProviderKind.FREE) {
+                    // API Key with eye toggle
+                    OutlinedTextField(
+                        value = apiKey,
+                        onValueChange = { apiKey = it; validationStatus = null },
+                        label = { Text("API Key") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(onClick = { keyVisible = !keyVisible }) {
+                                Icon(
+                                    if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = "Toggle API Key Visibility",
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = PocketAccent,
+                        ),
+                    )
+                }
 
                 // Status banner
                 AnimatedVisibility(visible = validationStatus != null) {

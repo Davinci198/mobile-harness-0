@@ -155,4 +155,32 @@ class ProviderApiClientTest {
 
         assertTrue(result is ConnectionValidation.Failure)
     }
+
+    @Test
+    fun nousFreeTierEndpointIsRecognizedByHostOnly() {
+        val client = ProviderApiClient()
+
+        assertTrue(client.isNousFreeTier("https://inference-api.nousresearch.com/v1"))
+        assertTrue(client.isNousFreeTier("https://inference-api.nousresearch.com/v1/"))
+        assertTrue(client.isNousFreeTier("https://inference-api.nousresearch.com/v1/models"))
+        assertTrue(client.isNousFreeTier("http://inference-api.nousresearch.com"))
+        assertFalse(client.isNousFreeTier("https://inference-api.nousresearch.com.evil.example/v1"))
+        assertFalse(client.isNousFreeTier("https://api.nousresearch.com/v1"))
+        assertFalse(client.isNousFreeTier("https://opencode.ai/zen/v1"))
+        assertFalse(client.isNousFreeTier(""))
+    }
+
+    @Test
+    fun nousFreeTierCatalogProbesV1ModelsAndIgnoresTheDoubledPath() {
+        assertEquals(
+            listOf(
+                "https://inference-api.nousresearch.com/v1/v1/models",
+                "https://inference-api.nousresearch.com/v1/models",
+            ),
+            ProviderApiClient().modelEndpoints(
+                "https://inference-api.nousresearch.com/v1",
+                ProviderProtocol.ANTHROPIC_GATEWAY,
+            ),
+        )
+    }
 }

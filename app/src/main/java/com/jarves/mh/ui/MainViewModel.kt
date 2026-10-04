@@ -2626,7 +2626,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (agent == AgentKind.ANTIGRAVITY) return
         if (!preferences.autoScanEnabled(agent) || preferences.autoScanDone(agent)) return
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
-        if (key.isBlank()) return
+        if (key.isBlank() && profile.kind != ProviderKind.FREE) return
         viewModelScope.launch {
             runModelScan(profile, key, models = emptyList())
         }
@@ -2670,7 +2670,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun scanModels(profile: ProviderProfile, secret: String, models: List<DiscoveredModel>) {
         if (_state.value.isModelScanning) return
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
-        if (key.isBlank() && !isLoopbackBaseUrl(profile.resolvedBaseUrl)) {
+        // The Hermes free tier scans anonymously; every other remote provider
+        // needs a key (or a loopback gateway) before probing its models.
+        if (key.isBlank() && profile.kind != ProviderKind.FREE && !isLoopbackBaseUrl(profile.resolvedBaseUrl)) {
             _state.update {
                 it.copy(
                     modelScanLines = it.modelScanLines + "! API key required for model scan",
@@ -3284,10 +3286,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         secret: String,
         models: List<com.jarves.mh.network.DiscoveredModel>,
     ): ConnectionValidation {
-        // The Hermes free tier needs no endpoint and no key: the CLI mints its
-        // anonymous identity at boot and picks the model itself.
         if (profile.kind == ProviderKind.FREE) {
-            return ConnectionValidation.Success(s(R.string.agent_free_tier_ready))
+            // The Hermes free tier ships a fixed endpoint: prove reachability
+            // through the anonymously served catalog, never through a saved key.
+            return providerApi.validate(
+                ProviderKind.FREE.defaultBaseUrl,
+                profile.model.ifBlank { ProviderKind.FREE.defaultModel },
+                "",
+                providerProtocolForAgent(profile, _state.value.agentKind),
+                models,
+            )
         }
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
         return providerApi.validate(
