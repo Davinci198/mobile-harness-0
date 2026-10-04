@@ -861,51 +861,55 @@ class RuntimeInstaller(private val context: Context) {
      * `--link2symlink` workaround is unsuitable here because DSH immediately
      * deletes its staging file, leaving the published symlink dangling.
      *
-     * The bundled, pinned DSH build can use COPYFILE_EXCL for the same
-     * no-clobber guarantee. Existing-file edits continue to use atomic rename.
+     * The publication calls are rewritten to COPYFILE_EXCL, which keeps the
+     * same no-clobber guarantee; existing-file edits continue to use atomic
+     * rename. Rules cover both the bundled 0.1.2-rc.1 release and the npm
+     * 0.2.0-rc.2 update, whose sources moved call sites and import shapes.
      */
     fun ensureDshAndroidCompatibility() {
         if (!isAgentInstalled(com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS)) return
-        val persistence = File(
-            rootfs,
-            "usr/local/lib/dsh/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js",
-        )
-        val localFs = File(
-            rootfs,
-            "usr/local/lib/dsh/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js",
+        val dshModules = File(rootfs, "usr/local/lib/dsh/node_modules/@deepseek-ai")
+        patchDshHardLinkPublication(
+            file = File(dshModules, "dsh-session-persistence-jsonl/lib/index.js"),
+            importVariants = DSH_PERSISTENCE_IMPORT_VARIANTS,
+            callVariants = DSH_PERSISTENCE_CALL_VARIANTS,
         )
         patchDshHardLinkPublication(
-            file = persistence,
-            importBefore = "import { link, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from \"node:fs/promises\";",
-            importAfter = "import { copyFile, link, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, truncate } from \"node:fs/promises\";",
-            callBefore = "await link(tmp, finalPath);",
-            callAfter = "await copyFile(tmp, finalPath, 1);",
+            file = File(dshModules, "dsh-fs-local/lib/index.js"),
+            importVariants = DSH_FS_LOCAL_IMPORT_VARIANTS,
+            callVariants = DSH_FS_LOCAL_CALL_VARIANTS,
         )
-        patchDshHardLinkPublication(
-            file = localFs,
-            importBefore = "import { chmod, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from \"node:fs/promises\";",
-            importAfter = "import { chmod, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from \"node:fs/promises\";",
-            callBefore = "await linkFile(tempPath, absolutePath);",
-            callAfter = "await copyFile(tempPath, absolutePath, 1);",
-        )
+        // Attachment objects are published by hard link as well; bundles that
+        // do not ship the package skip this patch.
+        File(dshModules, "dsh-attachment-local/lib/index.js").takeIf { it.isFile }?.let { attachment ->
+            patchDshHardLinkPublication(
+                file = attachment,
+                importVariants = DSH_ATTACHMENT_IMPORT_VARIANTS,
+                callVariants = DSH_ATTACHMENT_CALL_VARIANTS,
+            )
+        }
         dshAndroidCompatibilityMarker.writeText(DSH_ANDROID_COMPATIBILITY_VERSION)
     }
 
     private fun patchDshHardLinkPublication(
         file: File,
-        importBefore: String,
-        importAfter: String,
-        callBefore: String,
-        callAfter: String,
+        importVariants: List<Pair<String, String>>,
+        callVariants: List<Pair<String, String>>,
     ) {
         check(file.isFile) { "DeepSeek Harness compatibility file is missing: ${file.name}" }
-        var source = file.readText()
-        if (callAfter in source && importAfter in source) return
-        check(callBefore in source && importBefore in source) {
-            "DeepSeek Harness $DSH_VERSION is not compatible with this PocketDev build"
-        }
-        source = source.replace(importBefore, importAfter).replace(callBefore, callAfter)
-        file.writeText(source)
+        val original = file.readText()
+        val patched = patchDshHardLinkSource(
+            source = original,
+            importVariants = importVariants,
+            callVariants = callVariants,
+            incompatible = { dshIncompatibleMessage() },
+        )
+        if (patched != original) file.writeText(patched)
+    }
+
+    private fun dshIncompatibleMessage(): String {
+        val installed = dshMarker.readTextOrNull()?.trim()?.takeIf { it.isNotEmpty() } ?: DSH_VERSION
+        return "DeepSeek Harness $installed is not compatible with this PocketDev build"
     }
 
     /**

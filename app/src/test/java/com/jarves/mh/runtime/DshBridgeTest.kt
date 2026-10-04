@@ -163,6 +163,30 @@ class DshSdkProtocolParserTest {
         assertEquals(DshSdkProtocolEvent.TurnCompleted, completed)
     }
 
+    @Test
+    fun bootWarningLineIsIgnored() {
+        assertEquals(
+            DshSdkProtocolEvent.Ignored,
+            parser.parseLine("dsh: warning: 5 entries did not activate"),
+        )
+    }
+
+    @Test
+    fun bootFailureLineStillFails() {
+        assertEquals(
+            DshSdkProtocolEvent.Failed("startup failed: 1 required plugin did not activate"),
+            parser.parseLine("dsh: startup failed: 1 required plugin did not activate"),
+        )
+    }
+
+    @Test
+    fun warningDiagnosticContinuationIsIgnored() {
+        assertEquals(
+            DshSdkProtocolEvent.Ignored,
+            parser.parseLine("tool-fs (@deepseek-ai/dsh-tool-fs): pending (waiting for service: fs)"),
+        )
+    }
+
     private fun sessionEvent(type: String, data: JSONObject): String = notification(
         "session.event",
         JSONObject().put("sessionId", "session-1").put(
