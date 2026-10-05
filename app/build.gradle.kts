@@ -28,7 +28,7 @@ val hasUploadSigning = listOf(
 ).all { !it.isNullOrBlank() }
 val runtimeReleaseBaseUrl =
     findProperty("runtimeReleaseBaseUrl") as String?
-        ?: "https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4"
+        ?: "https://github.com/Davinci198/Proxmox-VE-Laptop-Hybrid-Setup/releases/download/runtime-2026.10.1"
 val appUpdateManifestUrl =
     "https://github.com/techjarves/Mobile-Harness/releases/latest/download/mobile-harness-update.json"
 val runtimeBundleDir = rootProject.layout.projectDirectory.dir("dist/runtime-bundles")
