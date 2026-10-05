@@ -108,10 +108,18 @@ fix_shims
 #
 # The usr/lib/cargo/bin farm is deliberately left as real files. Collapsing the 115
 # copies of the multi-call coreutils binary into symlinks does shrink the rootfs from
-# 1.6 GB to 445 MB, but proot then refuses them: its execve check compares the
-# requested utility name with the resolved file name, so coreutils/env -> basename
-# dies with "Requested utility `env` does not match executable name". The canonical
-# build keeps them as hardlinks, which tar stores as link entries.
+# 1.6 GB to 430 MB, but proot refuses them:
+#
+#   Security violation: Requested utility `env' does not match executable name:
+#     /usr/bin/coreutils
+#
+# proot compares the requested utility name with the name of the resolved executable,
+# so one inode cannot serve two names. A shell wrapper does not help either: proot
+# compares against argv[0], so `exec -a ls /usr/bin/coreutils` fails the same way
+# (dash does not even accept exec -a, bash does, and proot still rejects it). The
+# canonical build avoids the question by keeping real hard links, which tar stores as
+# link entries; link(2) is refused under /data, so here they stay byte copies.
+# This is what makes the installed rootfs ~1.6 GB. Verified experimentally, twice.
 remove_dpkg_temporaries() {
   # Covers /usr/bin shims and /var/lib/dpkg leftovers such as status-old.
   find "$ROOTFS" -name '.l2s.*' -delete 2>/dev/null || true
