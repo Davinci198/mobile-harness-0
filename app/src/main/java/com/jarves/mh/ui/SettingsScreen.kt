@@ -675,7 +675,7 @@ private fun LegacySettingsScreen(
                     ) {
                         InfoRow(icon = Icons.Default.Memory, label = "Architecture", value = "ARM64 (aarch64)")
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                        InfoRow(icon = Icons.Default.Terminal, label = "Linux Rootfs", value = "Ubuntu 20.04 PRoot")
+                        InfoRow(icon = Icons.Default.Terminal, label = "Linux Rootfs", value = "Ubuntu 26.04 PRoot")
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         InfoRow(
                             icon = Icons.Default.SmartToy,

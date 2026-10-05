@@ -7,6 +7,19 @@ so they are portable across Android phones that expose the `arm64-v8a` ABI.
 The rooted phone is only an ARM64 build host. No Motorola system files, Android
 partitions, Magisk files, device identifiers, or user data are included.
 
+## Core bundle build hosts
+
+Two interchangeable hosts produce the same Core payload:
+
+- `build-core-on-rooted-android.sh` uses a real `chroot` on a rooted ARM64 phone.
+- `build-core-on-termux-proot.sh` needs no root: PRoot replaces `chroot` plus
+  `mount --bind`, so it runs in Termux on an ordinary phone. It exists because
+  `/data` refuses `link(2)`, which the rooted build relies on. See the script
+  header for the three constraints that follow from that: `--link2symlink` is
+  enabled only for apt, the resulting `.l2s.*` shims are copied back to real
+  files, and zstd runs with `--long=24` so it can collapse the base image's 115
+  hard links to one 10.6 MB multi-call coreutils binary.
+
 ## Bundle layout
 
 - `core`: Ubuntu, Node, npm, Git, and shared runtime support. It contains no
@@ -47,8 +60,8 @@ installation.
 
 ## Release requirements
 
-1. Build on a clean ARM64 Linux environment or a rooted ARM64 Android phone
-   using a clean Ubuntu chroot.
+1. Build on a clean ARM64 Linux environment, a rooted ARM64 Android phone using a
+   clean Ubuntu chroot, or Termux with PRoot via `build-core-on-termux-proot.sh`.
 2. Verify every downloaded source archive against its pinned SHA-256 checksum.
 3. Remove package caches, logs, temporary files, resolver state, SSH host keys,
    machine IDs, and shell histories.
@@ -56,3 +69,7 @@ installation.
 5. Extract each completed archive into a fresh directory and execute its tools.
 6. Publish the archive and manifest together. Sign the manifest with a private
    release key kept outside this repository before production distribution.
+
+The extraction must be verified with `zstd -t`, plus a check that the archive
+contains no absolute symlinks into the build host's storage and no `.l2s.*`
+leftovers: both break the installation on a device with a different path.

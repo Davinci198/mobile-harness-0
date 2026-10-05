@@ -53,6 +53,44 @@ private data class RuntimeBundle(
     val compressedBytes: Long,
 )
 
+/** Recursively removes a file, directory or symlink, failing loudly if it survives. */
+internal fun removePathFrom(file: File) {
+    if (file.isDirectory && !java.nio.file.Files.isSymbolicLink(file.toPath())) {
+        check(file.deleteRecursively()) { "Could not remove ${file.name}" }
+    } else if (file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())) {
+        check(file.delete()) { "Could not remove ${file.name}" }
+    }
+}
+
+/**
+ * Removes the optional Python overlay from a rootfs.
+ *
+ * Interpreter paths carry the minor version, which changed from 3.8 to 3.14 together
+ * with the Ubuntu 26.04 base, so entries are matched by prefix rather than pinned.
+ */
+internal fun removePythonStackFrom(root: File) {
+    listOf(
+        ".pocket-python-tools-version",
+        "usr/bin/python3",
+        "usr/bin/pip",
+        "usr/bin/pip3",
+        "usr/lib/python3",
+        "usr/share/python3",
+        "usr/share/python-wheels",
+        "usr/share/python3-wheels",
+        "root/.cache/pip",
+    ).forEach { removePathFrom(File(root, it)) }
+    listOf("usr/bin", "usr/local/bin", "usr/lib", "usr/local/lib", "usr/lib/aarch64-linux-gnu")
+        .flatMap { directory ->
+            File(root, directory)
+                .listFiles()
+                .orEmpty()
+                .filter { it.name.startsWith("python3.") || it.name.startsWith("libpython3.") }
+                .map { File(root, it.absolutePath.removePrefix(root.absolutePath).removePrefix("/")) }
+        }
+        .forEach { removePathFrom(it) }
+}
+
 class RuntimeInstaller(private val context: Context) {
     private val runtimeDir = File(context.filesDir, "runtime")
     private val rootfs = File(runtimeDir, "ubuntu")
@@ -170,6 +208,7 @@ class RuntimeInstaller(private val context: Context) {
             extractZstdTar(archive, staging)
             stripMacosMetadataArtifacts(staging)
             require(File(staging, "usr/bin/bash").isFile) { "Core bundle is missing Bash" }
+            carryOverUserHome(staging)
             rootfs.deleteRecursively()
             check(staging.renameTo(rootfs)) { "Could not activate the Linux environment" }
             check(ensureRootfsCompatibilityLinks()) { "Core runtime has an invalid Linux filesystem layout" }
@@ -967,23 +1006,7 @@ class RuntimeInstaller(private val context: Context) {
         onProgress(RuntimeInstallProgress("${stack.label} removed", 1f))
     }
 
-    private fun removePythonStack() {
-        listOf(
-            ".pocket-python-tools-version",
-            "usr/bin/python3",
-            "usr/bin/python3.8",
-            "usr/bin/pip",
-            "usr/bin/pip3",
-            "usr/lib/aarch64-linux-gnu/libpython3.8.so.1",
-            "usr/lib/aarch64-linux-gnu/libpython3.8.so.1.0",
-            "usr/lib/python3",
-            "usr/lib/python3.8",
-            "usr/local/lib/python3.8",
-            "usr/share/python3",
-            "usr/share/python-wheels",
-            "root/.cache/pip",
-        ).forEach { removePath(File(rootfs, it)) }
-    }
+    private fun removePythonStack(root: File = rootfs) = removePythonStackFrom(root)
 
     private fun removeAndroidStack() {
         listOf(
@@ -1020,13 +1043,7 @@ class RuntimeInstaller(private val context: Context) {
         }
     }
 
-    private fun removePath(file: File) {
-        if (file.isDirectory && !java.nio.file.Files.isSymbolicLink(file.toPath())) {
-            check(file.deleteRecursively()) { "Could not remove ${file.name}" }
-        } else if (file.exists() || java.nio.file.Files.isSymbolicLink(file.toPath())) {
-            check(file.delete()) { "Could not remove ${file.name}" }
-        }
-    }
+    private fun removePath(file: File) = removePathFrom(file)
 
     private suspend fun applyStack(
         proot: File,
@@ -1181,6 +1198,29 @@ class RuntimeInstaller(private val context: Context) {
         stripMacosMetadataArtifacts(rootfs)
         if (archive.parentFile == downloads) archive.delete()
         onProgress(RuntimeInstallProgress("${bundle.label} tools installed", to))
+    }
+
+    /**
+     * Moves the guest home directory from the outgoing rootfs into the staged one.
+     *
+     * A new base replaces the whole rootfs, and this used to delete the old tree before
+     * activating the new one, so dotfiles, shell history and ~/.ssh were lost with no
+     * rollback. Only regenerable caches are skipped; the core bundle ships none of them,
+     * and ~/.gradle is rewritten by writeAndroidGradleConfiguration.
+     */
+    private fun carryOverUserHome(staging: File) {
+        val previous = File(rootfs, "root")
+        if (!previous.isDirectory) return
+        val incoming = File(staging, "root").apply { mkdirs() }
+        val regenerable = setOf(".cache", ".npm", ".composer", ".gradle")
+        var carried = 0
+        previous.listFiles().orEmpty()
+            .filterNot { it.name in regenerable }
+            .forEach { source ->
+                runCatching { source.copyRecursively(File(incoming, source.name), overwrite = true) }
+                    .onSuccess { carried++ }
+            }
+        if (carried > 0) android.util.Log.i("RuntimeInstaller", "Carried $carried home entries into the new rootfs")
     }
 
     /**
@@ -2177,10 +2217,9 @@ fi
                             Os.symlink(entry.linkName, target.absolutePath)
                         }
                         entry.isLink -> {
-                            target.parentFile?.mkdirs()
                             val linkTarget = safeChild(destination, entry.linkName.removePrefix("./"))
                             if (linkTarget.exists()) {
-                                linkTarget.inputStream().use { input -> FileOutputStream(target).use { input.copyTo(it) } }
+                                createHardLink(target, linkTarget)
                             } else {
                                 deferredLinks += target to linkTarget
                             }
@@ -2197,10 +2236,28 @@ fi
         }
         deferredLinks.forEach { (target, linkTarget) ->
             require(linkTarget.isFile) { "Archive hard-link target is missing" }
-            target.parentFile?.mkdirs()
-            linkTarget.inputStream().use { input -> FileOutputStream(target).use { input.copyTo(it) } }
-            runCatching { Os.chmod(target.absolutePath, android.system.Os.stat(linkTarget.absolutePath).st_mode) }
+            createHardLink(target, linkTarget)
         }
+    }
+
+    /**
+     * Materialises one archive hard link, preferring a real link over a byte copy.
+     *
+     * Best effort by design: the Core bundle published today contains no hard-link
+     * entries, and `/data` is f2fs, which denies `link(2)` to untrusted apps even for
+     * files they own, so on a normal device this falls back to copying. It still saves
+     * space on hosts that allow links, and it keeps future bundles that do ship links
+     * from filling the device with copies. Guest dpkg unlinks before writing, so
+     * replacing a linked binary does not leak into its siblings.
+     */
+    private fun createHardLink(target: File, linkTarget: File) {
+        target.parentFile?.mkdirs()
+        if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
+        val linked = runCatching { Os.link(linkTarget.absolutePath, target.absolutePath) }
+            .isSuccess
+        if (linked) return
+        linkTarget.inputStream().use { input -> FileOutputStream(target).use { input.copyTo(it) } }
+        runCatching { Os.chmod(target.absolutePath, Os.stat(linkTarget.absolutePath).st_mode) }
     }
 
     private fun extractNodeArchive(archive: File, destination: File) {
@@ -2334,6 +2391,18 @@ fi
     private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
 
     companion object {
+        // Pinned mirrors of the private constants below, so the migration invariants
+        // can be asserted without a Context. RuntimeBundle stays private on purpose.
+        internal val ROOTFS_VERSION_FOR_TEST get() = ROOTFS_VERSION
+        internal val ROOTFS_FILE_FOR_TEST get() = ROOTFS_FILE
+        internal val ROOTFS_SHA256_FOR_TEST get() = ROOTFS_SHA256
+        internal val SYSTEM_UPGRADE_VERSION_FOR_TEST get() = SYSTEM_UPGRADE_VERSION
+        internal val CORE_TOOLS_VERSION_FOR_TEST get() = CORE_TOOLS_VERSION
+        internal val LEGACY_CORE_TOOLS_VERSION_FOR_TEST get() = LEGACY_CORE_TOOLS_VERSION
+        internal val CORE_BUNDLE_FILE_NAME_FOR_TEST get() = CORE_BUNDLE.fileName
+        internal val CORE_BUNDLE_SHA256_FOR_TEST get() = CORE_BUNDLE.sha256
+        internal val CORE_BUNDLE_COMPRESSED_BYTES_FOR_TEST get() = CORE_BUNDLE.compressedBytes
+
         // PATH dirs a guest `command:` is resolved from (Debian default plus
         // the user-local bin hermes installs into).
         private val GUEST_PATH_DIRS = listOf(
@@ -2371,15 +2440,15 @@ fi
         private const val GITHUB_CLI_RELEASE_SHA256 = "ea4e7a581a32ccad6cc7923cb1576ac5859ba4b9a16ab22eb8f8a96e78e2e961"
         private const val LEGACY_README = "# Pocket Dev project\n\nThis project is managed locally on Android.\n"
         private const val LEGACY_INDEX = "<!doctype html><title>Pocket Dev</title><h1>Hello from Android</h1>\n"
-        private const val ROOTFS_VERSION = "ubuntu-20.04.5-arm64"
-        private const val ROOTFS_FILE = "ubuntu-base-20.04.5-base-arm64.tar.gz"
-        private const val ROOTFS_URL = "https://cdimage.ubuntu.com/ubuntu-base/releases/20.04/release/$ROOTFS_FILE"
-        private const val ROOTFS_SHA256 = "f9b999afb4c4b10193087ea8c11be36d688f19e609b05179b571f29357954b52"
+        private const val ROOTFS_VERSION = "ubuntu-26.04.1-arm64"
+        private const val ROOTFS_FILE = "ubuntu-base-26.04-base-arm64.tar.gz"
+        private const val ROOTFS_URL = "https://cdimage.ubuntu.com/ubuntu-base/releases/26.04.1/release/$ROOTFS_FILE"
+        private const val ROOTFS_SHA256 = "b2b46a37324ea1954e93f293fe6d7c2241daf2fc298c4022e6e4caceeed74cab"
         private const val NODE_VERSION = "v24.19.0"
         private const val LANGUAGE_TOOLS_VERSION = "node-v24.19.0-python3-v1"
-        private const val CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
-        private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.4"
-        private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v1"
+        private const val CORE_TOOLS_VERSION = "core-bundle-2026.10.1"
+        private const val LEGACY_CORE_TOOLS_VERSION = "core-bundle-2026.09.5"
+        private const val SYSTEM_UPGRADE_VERSION = "ubuntu-maintenance-v2"
         private const val MTOP_VERSION = "2procwatch-3"
         private const val ANDROID_TOOLS_VERSION = "sdk36-build-tools35-gradle8.14.3-maven-2026.09"
         private const val ANDROID_ASSET_BASE = "https://appdevforall.org/dev-assets/debug"
@@ -2398,9 +2467,9 @@ fi
         private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v1"
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
-            fileName = "pocketdev-core-arm64-2026.09.5.tar.zst",
-            sha256 = "df0cf7251c74f82d424231e3804114a4ca66b16130eea9abab11e220dc7ac012",
-            compressedBytes = 72_185_773L,
+            fileName = "pocketdev-core-arm64-2026.10.1.tar.zst",
+            sha256 = "62fcc178df8846448a648aff2842d48a21b299261ecc79eb6a8149f632c3cb49",
+            compressedBytes = 84_766_979L,
         )
         private const val CLAUDE_BUNDLED_VERSION = "2.1.263"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"

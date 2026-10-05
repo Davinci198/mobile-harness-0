@@ -4,16 +4,17 @@
   "minimumAndroidApi": 26,
   "bundles": {
     "core": {
-      "version": "2026.09.5",
-      "file": "pocketdev-core-arm64-2026.09.5.tar.zst",
-      "sha256": "df0cf7251c74f82d424231e3804114a4ca66b16130eea9abab11e220dc7ac012",
-      "compressedBytes": 72185773,
-      "uncompressedBytes": 369172480,
-      "base": "Ubuntu 20.04.5 ARM64",
+      "version": "2026.10.1",
+      "file": "pocketdev-core-arm64-2026.10.1.tar.zst",
+      "sha256": "62fcc178df8846448a648aff2842d48a21b299261ecc79eb6a8149f632c3cb49",
+      "compressedBytes": 84766979,
+      "uncompressedBytes": 1654446080,
+      "base": "Ubuntu 26.04.1 ARM64",
       "includes": [
         "Node.js 24.19.0",
         "npm 11.17.0",
-        "Git 2.25.1",
+        "Git 2.53.0",
+        "GNU Bash 5.3.9",
         "No coding agents",
         "No optional language stacks"
       ]

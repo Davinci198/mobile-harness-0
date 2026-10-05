@@ -5,11 +5,11 @@ set -euo pipefail
 # only the build host: the archive is made from an official Ubuntu ARM64 rootfs.
 ADB_SERIAL="${ADB_SERIAL:-}"
 REMOTE="${POCKETDEV_REMOTE_DIR:-/data/adb/pocketdev-bundle}"
-VERSION="${POCKETDEV_CORE_VERSION:-2026.09.5}"
+VERSION="${POCKETDEV_CORE_VERSION:-2026.10.1}"
 DNS_SERVER="${POCKETDEV_DNS:-1.1.1.1}"
-ROOTFS_FILE="ubuntu-base-20.04.5-base-arm64.tar.gz"
-ROOTFS_SHA256="f9b999afb4c4b10193087ea8c11be36d688f19e609b05179b571f29357954b52"
-ROOTFS_URL="https://cdimage.ubuntu.com/ubuntu-base/releases/20.04/release/${ROOTFS_FILE}"
+ROOTFS_FILE="ubuntu-base-26.04-base-arm64.tar.gz"
+ROOTFS_SHA256="b2b46a37324ea1954e93f293fe6d7c2241daf2fc298c4022e6e4caceeed74cab"
+ROOTFS_URL="https://cdimage.ubuntu.com/ubuntu-base/releases/26.04.1/release/${ROOTFS_FILE}"
 
 adb_cmd() {
   if [[ -n "$ADB_SERIAL" ]]; then adb -s "$ADB_SERIAL" "$@"; else adb "$@"; fi
@@ -38,10 +38,10 @@ guest() {
 
 guest "printf 'nameserver $DNS_SERVER\\n' > /etc/resolv.conf; apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y upgrade"
 guest "DEBIAN_FRONTEND=noninteractive apt-get install -y git ca-certificates curl wget unzip zip xz-utils zstd"
-guest "set -e; NODE_VERSION=v24.19.0; NODE_FILE=node-\\${NODE_VERSION}-linux-arm64.tar.gz; cd /tmp; curl -fsSLO https://nodejs.org/dist/\\${NODE_VERSION}/\\${NODE_FILE}; curl -fsSL https://nodejs.org/dist/\\${NODE_VERSION}/SHASUMS256.txt | grep \\\"  \\${NODE_FILE}\\\" | sha256sum -c -; mkdir -p /usr/local/lib/nodejs; tar -xzf \\${NODE_FILE} -C /usr/local/lib/nodejs; ln -sfn /usr/local/lib/nodejs/node-\\${NODE_VERSION} /usr/local/lib/nodejs/current; ln -sfn /usr/local/lib/nodejs/current/bin/node /usr/local/bin/node; ln -sfn /usr/local/lib/nodejs/current/bin/npm /usr/local/bin/npm; ln -sfn /usr/local/lib/nodejs/current/bin/npx /usr/local/bin/npx; rm -f /tmp/\\${NODE_FILE}"
+guest "set -e; NODE_VERSION=v24.19.0; NODE_FILE=node-\\${NODE_VERSION}-linux-arm64.tar.gz; cd /tmp; curl -fsSLO https://nodejs.org/dist/\\${NODE_VERSION}/\\${NODE_FILE}; curl -fsSL https://nodejs.org/dist/\\${NODE_VERSION}/SHASUMS256.txt | grep \\\"  \\${NODE_FILE}\\\" | sha256sum -c -; rm -rf /usr/local/lib/nodejs; mkdir -p /usr/local/lib/nodejs; tar -xzf \\${NODE_FILE} -C /usr/local/lib/nodejs --strip-components=1; for command in node npm npx corepack; do ln -sfn ../lib/nodejs/bin/\\\$command /usr/local/bin/\\\$command; done; rm -f /tmp/\\${NODE_FILE}"
 guest "apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /tmp/* /var/tmp/*"
 
-guest "mkdir -p /workspace /opt/pocketdev /root/.gradle/init.d; printf 'ubuntu-20.04.5-arm64\\n' > /.pocket-rootfs-version; printf 'core-bundle-$VERSION\\n' > /.pocket-core-tools-version; printf 'core-bundle-$VERSION\\n' > /.pocket-runtime-ready; printf 'ubuntu-maintenance-v1\\n' > /.pocket-system-upgrade-version; printf '{\\\"WEB\\\":true,\\\"PYTHON\\\":false,\\\"CPP\\\":false,\\\"PHP\\\":false,\\\"ANDROID\\\":false}\\n' > /.pocket-dev-stacks.json"
+guest "mkdir -p /workspace /opt/pocketdev /root/.gradle/init.d; printf 'ubuntu-26.04.1-arm64\\n' > /.pocket-rootfs-version; printf 'core-bundle-$VERSION\\n' > /.pocket-core-tools-version; printf 'core-bundle-$VERSION\\n' > /.pocket-runtime-ready; printf 'ubuntu-maintenance-v2\\n' > /.pocket-system-upgrade-version; printf '{\\\"WEB\\\":true,\\\"PYTHON\\\":false,\\\"CPP\\\":false,\\\"PHP\\\":false,\\\"ANDROID\\\":false}\\n' > /.pocket-dev-stacks.json"
 guest "rm -rf /root/.cache /root/.npm /root/.composer /root/.gradle/caches /root/.ssh; find /var/log -type f -delete; rm -f /etc/ssh/ssh_host_* /etc/machine-id /var/lib/dbus/machine-id /root/.bash_history"
 
 adb_cmd shell "su -c 'umount $REMOTE/rootfs/sys; umount $REMOTE/rootfs/proc; umount $REMOTE/rootfs/dev; mkdir -p $REMOTE/rootfs/output; mount --bind $REMOTE/output $REMOTE/rootfs/output'"
