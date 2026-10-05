@@ -36,7 +36,7 @@ class RuntimeRootfsMigrationTest {
     @Test
     fun rootfsAndMaintenanceMarkersArePinned() {
         assertEquals("ubuntu-26.04.1-arm64", RuntimeInstaller.ROOTFS_VERSION_FOR_TEST)
-        assertEquals("ubuntu-26.04-base-arm64.tar.gz", RuntimeInstaller.ROOTFS_FILE_FOR_TEST)
+        assertEquals("ubuntu-base-26.04-base-arm64.tar.gz", RuntimeInstaller.ROOTFS_FILE_FOR_TEST)
         assertEquals(
             "b2b46a37324ea1954e93f293fe6d7c2241daf2fc298c4022e6e4caceeed74cab",
             RuntimeInstaller.ROOTFS_SHA256_FOR_TEST,
@@ -70,7 +70,8 @@ class RuntimeRootfsMigrationTest {
             File(rootfs, path).apply { parentFile?.mkdirs(); writeText("x") }
         }
         File(rootfs, ".pocket-python-tools-version").writeText("python-3.8")
-        File(rootfs, "root/.cache/pip").apply { mkdirs(); writeText("x") }
+        // The pip cache is a directory in a real rootfs, so removal has to recurse.
+        File(rootfs, "root/.cache/pip/23/http-v2").apply { parentFile?.mkdirs(); writeText("x") }
 
         removePythonStackFrom(rootfs)
 
