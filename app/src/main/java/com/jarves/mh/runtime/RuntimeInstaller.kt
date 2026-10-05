@@ -46,6 +46,43 @@ data class AgentUpdateInfo(
 
 enum class RuntimeInstallEvent { STAGE, COMMAND, OUTPUT, DOWNLOAD, COMMAND_COMPLETED, COMPLETED }
 
+/**
+ * Repairs what `--link2symlink` leaves behind after an apt run.
+ *
+ * Every `link(2)` becomes a symlink to an absolute `/data/.../.l2s.*` file, so
+ * dpkg's `status-old` backup and the coreutils/perl shims in `usr/bin` end up as
+ * links pointing outside the rootfs. The next apt run then fails with
+ * `error creating new backup file '/var/lib/dpkg/status-old': Permission
+ * denied`, which leaves the package database half-installed and breaks every
+ * later install. Materialising the shims as real copies and dropping the
+ * temporaries is what the canonical builder does for the same reason.
+ */
+internal fun repairLink2symlinkArtifacts(rootfs: File) {
+    if (!rootfs.isDirectory) return
+    listOf("usr/bin", "usr/sbin", "bin", "sbin").forEach { dir ->
+        File(rootfs, dir).listFiles()?.forEach { link ->
+            val target = try {
+                val path = link.toPath()
+                if (!java.nio.file.Files.isSymbolicLink(path)) return@forEach
+                java.nio.file.Files.readSymbolicLink(path).toString()
+            } catch (_: Exception) {
+                return@forEach
+            }
+            if (!target.startsWith("/data/")) return@forEach
+            val resolved = File(target)
+            if (!resolved.isFile) return@forEach
+            link.delete()
+            resolved.copyTo(link, overwrite = true)
+            runCatching { link.setExecutable(true, false) }
+        }
+    }
+    rootfs.walkTopDown()
+        .filter { it.name.startsWith(".l2s.") }
+        .forEach { it.delete() }
+    File(rootfs, "var/lib/dpkg/status-old").delete()
+    File(rootfs, "var/lib/dpkg/status-new").delete()
+}
+
 private data class RuntimeBundle(
     val label: String,
     val fileName: String,
@@ -640,6 +677,7 @@ class RuntimeInstaller(private val context: Context) {
             onProgress = onProgress,
             failureMessage = "Hermes installation failed",
             emulateHardLinks = true,
+            onFinished = { repairLink2symlinkArtifacts(rootfs) },
         )
         ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
         val version = readGuestVersion(proot, "$HERMES_GUEST_PATH --version")
@@ -1263,7 +1301,11 @@ class RuntimeInstaller(private val context: Context) {
     ): File {
         downloads.mkdirs()
         val destination = File(downloads, bundle.fileName)
-        val useEmbedded = !forceDownload && (preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES)
+        // Only the offline flavor ships the bundle archives as assets; the online
+        // build has an empty assets/runtime/. Reading one there throws and takes the
+        // whole install down, so fall back to the release URL when it is absent.
+        val useEmbedded = !forceDownload && (preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES) &&
+            runCatching { context.assets.open("runtime/${bundle.fileName}") }.isSuccess
         if (useEmbedded) {
             onProgress(RuntimeInstallProgress("Loading ${bundle.label} bundle", from, 0, bundle.compressedBytes))
             val temporary = File(downloads, "${bundle.fileName}.part")
@@ -1555,6 +1597,7 @@ class RuntimeInstaller(private val context: Context) {
         runGuestCommand(
             proot = proot,
             command = command,
+            onFinished = { repairLink2symlinkArtifacts(rootfs) },
             displayCommand = "dpkg --configure -a && apt-get -f install -y && apt-get update && apt-get upgrade -y",
             fraction = 0.69f,
             timeoutMs = 35 * 60 * 1_000L,
@@ -1581,6 +1624,7 @@ class RuntimeInstaller(private val context: Context) {
         runGuestCommand(
             proot = proot,
             command = command,
+            onFinished = { repairLink2symlinkArtifacts(rootfs) },
             displayCommand = "dpkg --configure -a && apt-get -f install -y && apt-get install -y $packageNames",
             fraction = fraction,
             timeoutMs = 30 * 60 * 1_000L,
@@ -1620,6 +1664,7 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
         failureMessage: String,
         emulateHardLinks: Boolean = true,
+        onFinished: (() -> Unit)? = null,
     ) {
         onProgress(
             RuntimeInstallProgress(
@@ -1685,6 +1730,9 @@ class RuntimeInstaller(private val context: Context) {
             }
         } finally {
             if (running.isAlive) running.destroy()
+            // Runs even when apt failed: a half-applied dpkg transaction still
+            // leaves the status-old backup as a dangling shim.
+            onFinished?.invoke()
         }
         val exit = running.waitFor()
         onProgress(
