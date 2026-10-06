@@ -289,6 +289,52 @@ class DshSdkProtocolParserTest {
         .toString()
 }
 
+class DshStuckGuardTest {
+    @Test
+    fun multipleFailingResultsTriggerLoopAbort() {
+        val guard = DshStuckGuard()
+        repeat(DshStuckGuard.LIMIT - 1) {
+            assertFalse(guard.noteToolCompleted("Error: cannot read a.txt: not found"))
+        }
+        assertTrue(guard.noteToolCompleted("Error: cannot read a.txt: not found"))
+    }
+
+    @Test
+    fun consecutiveSuccessResetsLoopStreak() {
+        val guard = DshStuckGuard()
+        repeat(DshStuckGuard.LIMIT - 1) {
+            assertFalse(guard.noteToolCompleted("Error: cannot read a.txt: not found"))
+        }
+        assertFalse(guard.noteToolCompleted("done"))
+        repeat(DshStuckGuard.LIMIT - 1) {
+            assertFalse(guard.noteToolCompleted("Error: cannot read a.txt: not found"))
+        }
+        assertTrue(guard.noteToolCompleted("Error: cannot read a.txt: not found"))
+    }
+
+    @Test
+    fun resetClearsLoopStreak() {
+        val guard = DshStuckGuard()
+        repeat(DshStuckGuard.LIMIT - 1) {
+            guard.noteToolCompleted("invalid arguments: \"replace_all\" must be a boolean")
+        }
+        guard.reset()
+        repeat(DshStuckGuard.LIMIT - 1) {
+            assertFalse(guard.noteToolCompleted("invalid arguments: \"replace_all\" must be a boolean"))
+        }
+        assertTrue(guard.noteToolCompleted("invalid arguments: \"replace_all\" must be a boolean"))
+    }
+
+    @Test
+    fun missesLoopAcrossDistinctToolsDoNotAbort() {
+        val guard = DshStuckGuard()
+        repeat(DshStuckGuard.LIMIT + 2) {
+            assertFalse(guard.noteToolCompleted("wrote"))
+        }
+        assertFalse(guard.noteToolCompleted("Error: cannot read a.txt: not found"))
+    }
+}
+
 class DshRouteMapperTest {
     @Test
     fun deepseekUsesNativeRoute() {

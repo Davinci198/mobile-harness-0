@@ -213,6 +213,10 @@ class DshRuntimeBridge(
         var shutdownSentAt = 0L
         var inputClosed = false
         var failure = ""
+        // Weak models loop a failing tool call (invented file paths, malformed
+        // args) with no text; the harness itself has no step cap, so guard here
+        // and stop the session instead of letting it spin until the user stops.
+        val stuckGuard = DshStuckGuard()
 
         fun send(method: String, id: Int, params: JSONObject? = null) {
             val frame = JSONObject()
@@ -272,6 +276,7 @@ class DshRuntimeBridge(
                 }
                 is DshSdkProtocolEvent.Reasoning -> {
                     sawActivity = true
+                    stuckGuard.reset()
                     emitReasoningSummary(
                         sessionId = sessionId,
                         text = protocolEvent.text,
@@ -292,10 +297,19 @@ class DshRuntimeBridge(
                     eventBus.emit(
                         RuntimeEvent.ToolCompleted(sessionId, protocolEvent.name, protocolEvent.summary),
                     )
+                    if (stuckGuard.noteToolCompleted(protocolEvent.summary)) {
+                        failure = "The agent repeated a failing tool call ${DshStuckGuard.LIMIT} times in a row " +
+                            "without producing any response. Try a stronger model or rephrase the request."
+                        closeInput()
+                        process.destroy()
+                    }
                 }
-                is DshSdkProtocolEvent.AssistantText -> if (protocolEvent.text.isNotEmpty()) {
-                    sawActivity = true
-                    eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, protocolEvent.text))
+                is DshSdkProtocolEvent.AssistantText -> {
+                    if (protocolEvent.text.isNotEmpty()) {
+                        sawActivity = true
+                        stuckGuard.reset()
+                        eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, protocolEvent.text))
+                    }
                 }
                 is DshSdkProtocolEvent.Failed -> failure = protocolEvent.message
                 DshSdkProtocolEvent.TurnCompleted -> sawActivity = true
@@ -472,10 +486,12 @@ private suspend fun emitReasoningSummary(
             .dropLast(1)
 
         val sb = StringBuilder()
+        sb.appendLine("The <project-context> and <conversation_history> sections below are plain text provided in this message. They are NOT files on disk — do not try to read, edit, glob, or otherwise locate any file mentioned by their names (for example response.md, project-context.txt, or conversation_history.txt does not exist). Answer the user's latest message directly at the end of this conversation.")
         sb.appendLine("<project-context>")
         if (projectKind == ProjectKind.QUICK_PROJECT) {
             sb.appendLine("This is a lightweight project workspace at $guestWorkspacePath.")
-            sb.appendLine("Respond conversationally, and use terminal or file tools whenever they are useful for the request.")
+            sb.appendLine("If the user is just chatting or asking a question, reply directly without calling any tool.")
+            sb.appendLine("Use terminal or file tools only when the request actually involves files or commands.")
             sb.appendLine("Keep every file and command inside this project workspace.")
         } else {
             sb.appendLine("The current working directory $guestWorkspacePath is the project root.")
@@ -733,6 +749,39 @@ internal sealed interface DshSdkProtocolEvent {
     data object TurnCompleted : DshSdkProtocolEvent
     data object ShutdownAcknowledged : DshSdkProtocolEvent
     data object Ignored : DshSdkProtocolEvent
+}
+
+/**
+ * Watches for the harness (which has no step cap) spinning on the same failing
+ * tool result — the signature of a weak model stuck in a loop: repeated error
+ * summaries with no assistant text or reasoning in between. Once LIMIT failing
+ * results arrive back-to-back, the session is aborted by its caller.
+ */
+internal class DshStuckGuard {
+    private var streak = 0
+
+    /** Returns true when the loop limit was just reached (and resets). */
+    fun noteToolCompleted(summary: String): Boolean {
+        val failed = summary.startsWith("error", ignoreCase = true) ||
+            summary.contains("not found", ignoreCase = true) ||
+            summary.contains("invalid", ignoreCase = true)
+        if (!failed) {
+            streak = 0
+            return false
+        }
+        streak++
+        if (streak < LIMIT) return false
+        streak = 0
+        return true
+    }
+
+    fun reset() {
+        streak = 0
+    }
+
+    companion object {
+        const val LIMIT = 5
+    }
 }
 
 /** Stateful parser for the pinned dsh SDK's newline-delimited JSON-RPC stream. */
