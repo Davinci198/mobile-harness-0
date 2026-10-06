@@ -33,7 +33,7 @@ class Link2SymlinkRepairTest {
         val dataTarget = File(temporaryFolder.root, ".l2s.ls.4242").apply { writeText("real coreutils bytes") }
         val shim = File(rootfs, "usr/bin/ls")
         shim.parentFile.mkdirs()
-        java.nio.file.Files.createSymbolicLink(shim.toPath(), dataTarget.absolutePath.toPath())
+        java.nio.file.Files.createSymbolicLink(shim.toPath(), dataTarget.toPath())
 
         repairLink2symlinkArtifacts(rootfs)
 
@@ -81,7 +81,7 @@ class Link2SymlinkRepairTest {
         val target = File(rootfs, "usr/bin/busybox").apply { writeExecutable(this) }
         val link = File(rootfs, "usr/bin/ls")
         link.parentFile.mkdirs()
-        java.nio.file.Files.createSymbolicLink(link.toPath(), target.absolutePath.toPath())
+        java.nio.file.Files.createSymbolicLink(link.toPath(), target.toPath())
 
         repairLink2symlinkArtifacts(rootfs)
 
