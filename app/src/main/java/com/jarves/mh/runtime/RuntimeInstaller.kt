@@ -113,8 +113,8 @@ internal fun isCoreSystemPathOverlayGuarded(cleanName: String): Boolean {
     if (cleanName.startsWith("usr/lib/gcc/")) return true
     if (!cleanName.startsWith("usr/bin/")) return false
     val name = cleanName.substringAfterLast('/')
-    return name == "python3" || name == "easy_install" ||
-        name.startsWith("python3.") || name.startsWith("pip")
+    return name == "easy_install" ||
+        name.startsWith("python3") || name.startsWith("pip")
 }
 
 private fun overlayMustNotReplace(existing: Boolean, cleanName: String): Boolean =
