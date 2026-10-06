@@ -87,6 +87,31 @@ internal fun repairLink2symlinkArtifacts(rootfs: File) {
     File(rootfs, "var/lib/dpkg/status-new").delete()
 }
 
+/**
+ * True when an overlay archive entry may never replace an identical path that is
+ * already installed in the runtime. Stack bundles are only additive by contract:
+ * the Core bundle owns the base system. The legacy Python 3.8 overlay, however,
+ * was built against Ubuntu 20.04 and ships its own glibc 2.31 multilib plus a
+ * `usr/bin/python3` symlink. Applied over the 26.04 Core it regressed libc 2.43
+ * back to 2.31 (107 base libraries, including the loader) and re-pointed
+ * `/usr/bin/python3` at Python 3.8, so every fresh install after it broke and
+ * `pip`/build tools refused to stay installed. Guarding the base multilib and
+ * the default Python keeps the Core authoritative while overlays still add
+ * their own files freely.
+ */
+internal fun isCoreSystemPathOverlayGuarded(cleanName: String): Boolean {
+    if (cleanName == "usr/lib/aarch64-linux-gnu") return true
+    if (cleanName.startsWith("usr/lib/aarch64-linux-gnu/")) return true
+    if (cleanName.startsWith("usr/lib/gcc/")) return true
+    if (!cleanName.startsWith("usr/bin/")) return false
+    val name = cleanName.substringAfterLast('/')
+    return name == "python3" || name == "easy_install" ||
+        name.startsWith("python3.") || name.startsWith("pip")
+}
+
+private fun overlayMustNotReplace(existing: Boolean, cleanName: String): Boolean =
+    existing && isCoreSystemPathOverlayGuarded(cleanName)
+
 
 private data class RuntimeBundle(
     val label: String,
@@ -1237,7 +1262,7 @@ class RuntimeInstaller(private val context: Context) {
         // online APK fetches each one from the release URL on demand.
         val archive = obtainRuntimeBundle(bundle, preferEmbedded = forceEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES, from, to * 0.8f + from * 0.2f, onProgress, forceDownload, baseUrl)
         onProgress(RuntimeInstallProgress(message, to * 0.8f + from * 0.2f, indeterminate = true))
-        extractZstdTar(archive, rootfs)
+        extractZstdTar(archive, rootfs, preserveCoreSystemPaths = true)
         stripMacosMetadataArtifacts(rootfs)
         if (archive.parentFile == downloads) archive.delete()
         onProgress(RuntimeInstallProgress("${bundle.label} tools installed", to))
@@ -2252,7 +2277,7 @@ fi
         }
     }
 
-    private fun extractZstdTar(archive: File, destination: File) {
+    private fun extractZstdTar(archive: File, destination: File, preserveCoreSystemPaths: Boolean = false) {
         val deferredLinks = mutableListOf<Pair<File, File>>()
         TarArchiveInputStream(
             ZstdCompressorInputStream(BufferedInputStream(archive.inputStream())),
@@ -2262,14 +2287,18 @@ fi
                 val cleanName = entry.name.removePrefix("./")
                 if (cleanName.isNotBlank()) {
                     val target = safeChild(destination, cleanName)
+                    val alreadyInstalled =
+                        target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())
+                    val blocked = preserveCoreSystemPaths &&
+                        overlayMustNotReplace(alreadyInstalled, cleanName)
                     when {
-                        entry.isDirectory -> target.mkdirs()
-                        entry.isSymbolicLink -> {
+                        entry.isDirectory -> if (!blocked) target.mkdirs()
+                        entry.isSymbolicLink -> if (!blocked) {
                             target.parentFile?.mkdirs()
-                            if (target.exists() || java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
+                            if (alreadyInstalled) target.delete()
                             Os.symlink(entry.linkName, target.absolutePath)
                         }
-                        entry.isLink -> {
+                        entry.isLink -> if (!blocked) {
                             val linkTarget = safeChild(destination, entry.linkName.removePrefix("./"))
                             if (linkTarget.exists()) {
                                 createHardLink(target, linkTarget)
@@ -2277,7 +2306,7 @@ fi
                                 deferredLinks += target to linkTarget
                             }
                         }
-                        entry.isFile -> {
+                        entry.isFile -> if (!blocked) {
                             target.parentFile?.mkdirs()
                             FileOutputStream(target).use { output -> tar.copyTo(output) }
                             runCatching { Os.chmod(target.absolutePath, entry.mode and 0b111111111) }
