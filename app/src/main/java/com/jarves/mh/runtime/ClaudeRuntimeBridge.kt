@@ -596,7 +596,7 @@ class ClaudeRuntimeBridge(
             .dropLast(1) // Drop the current prompt which was just added
 
         val sb = StringBuilder()
-        sb.appendLine("<project_workspace>")
+        sb.appendLine("<project-context>")
         if (projectKind == ProjectKind.QUICK_PROJECT) {
             sb.appendLine("This is a lightweight project workspace at $guestWorkspacePath.")
             sb.appendLine("Respond conversationally, and use terminal or file tools whenever they are useful for the request.")
@@ -612,7 +612,7 @@ class ClaudeRuntimeBridge(
         sb.appendLine("PocketDev globally configures Gradle to use the SDK's ARM64 aapt2. Do not use the x86_64 Maven aapt2, investigate its architecture, or add android.aapt2FromMavenOverride to the project.")
         sb.appendLine("Use the installed `gradle` command for Android builds; do not ask the user to install Android Studio, an SDK, Gradle, ADB, or Termux.")
         sb.appendLine("For local servers, give a clear start command and never use a kill command that searches its own command text with pgrep, because it can terminate the terminal itself.")
-        sb.appendLine("</project_workspace>")
+        sb.appendLine("</project-context>")
         sb.appendLine()
         if (priorMessages.isEmpty()) {
             sb.appendLine(currentPrompt)
