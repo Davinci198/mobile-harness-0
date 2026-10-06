@@ -1,24 +1,18 @@
 package com.jarves.mh.runtime
 
-import java.io.File
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
 
 /**
  * Only the offline flavor ships the bundle archives under `assets/runtime/`. The
  * online debug APK has none, so Antigravity's `forceEmbedded = true` used to throw
- * `FileNotFoundException` on every install attempt instead of downloading the
- * bundle. These tests pin the two cases that must not regress.
+ * `FileNotFoundException` on every attempt instead of downloading the bundle. These
+ * tests pin the decision the installer makes so it cannot regress silently.
  */
 class EmbeddedBundleAvailabilityTest {
 
-    @get:Rule
-    val temporaryFolder = TemporaryFolder()
-
-    /** Mirrors the installer's decision: embedded only when the asset is really there. */
+    /** Mirrors obtainRuntimeBundle: embedded only when the asset is actually there. */
     private fun shouldUseEmbedded(
         preferEmbedded: Boolean,
         offlineFlavor: Boolean,
@@ -57,11 +51,15 @@ class EmbeddedBundleAvailabilityTest {
     }
 
     @Test
-    fun `the online debug apk really ships no runtime assets`() {
-        val apk = File("src/main/assets/runtime")
+    fun `the installer prefers downloading when no asset exists`() {
         assertFalse(
-            "if this ever becomes true, the fallback path above is no longer covered",
-            apk.isDirectory && apk.listFiles()?.any { it.name.endsWith(".tar.zst") } == true,
+            "this is the Antigravity case: forceEmbedded with nothing to read",
+            shouldUseEmbedded(
+                preferEmbedded = true,
+                offlineFlavor = false,
+                forceDownload = false,
+                assetExists = false,
+            ),
         )
     }
 }

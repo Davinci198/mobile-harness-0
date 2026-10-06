@@ -44,6 +44,8 @@ data class AgentUpdateInfo(
     val latestVersion: String,
 )
 
+private const val L2S_PREFIX = ".l2s."
+
 enum class RuntimeInstallEvent { STAGE, COMMAND, OUTPUT, DOWNLOAD, COMMAND_COMPLETED, COMPLETED }
 
 /**
@@ -64,24 +66,27 @@ internal fun repairLink2symlinkArtifacts(rootfs: File) {
             val target = try {
                 val path = link.toPath()
                 if (!java.nio.file.Files.isSymbolicLink(path)) return@forEach
-                java.nio.file.Files.readSymbolicLink(path).toString()
+                File(java.nio.file.Files.readSymbolicLink(path).toString())
             } catch (_: Exception) {
                 return@forEach
             }
-            if (!target.startsWith("/data/")) return@forEach
-            val resolved = File(target)
-            if (!resolved.isFile) return@forEach
+            // Only the .l2s.* names that --link2symlink itself creates. Matching on
+            // the host path prefix instead would copy a guest symlink that points at
+            // an absolute host path such as /usr/bin/dash into the rootfs.
+            if (!target.name.startsWith(L2S_PREFIX)) return@forEach
+            if (!target.isFile) return@forEach
             link.delete()
-            resolved.copyTo(link, overwrite = true)
+            target.copyTo(link, overwrite = true)
             runCatching { link.setExecutable(true, false) }
         }
     }
     rootfs.walkTopDown()
-        .filter { it.name.startsWith(".l2s.") }
+        .filter { it.name.startsWith(L2S_PREFIX) }
         .forEach { it.delete() }
     File(rootfs, "var/lib/dpkg/status-old").delete()
     File(rootfs, "var/lib/dpkg/status-new").delete()
 }
+
 
 private data class RuntimeBundle(
     val label: String,
