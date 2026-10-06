@@ -137,21 +137,25 @@ internal fun rewriteGuestHosts(hostsFile: File, ipv4Pin: String?) {
         line.split(Regex("\\s+")).drop(1).contains("localhost")
     }
     if (ipv4Pin == null && hasLocalhost) return
-    val body = lines
-        .filter {
-            it.isNotBlank() &&
-                !it.contains(" localhost") &&
-                !it.contains(" models.opencode.ai")
-        }
-        .joinToString("\n")
+    val desiredLoopback = listOf(
+        "127.0.0.1 localhost",
+        "127.0.1.1 guest",
+        "::1 localhost ip6-localhost ip6-loopback",
+    )
+    // Keep every existing non-blank line except the models.opencode.ai pin, which
+    // is regenerated below so the A-record tracks the pinned address. Existing
+    // loopback aliases are preserved verbatim (never dropped and re-derived),
+    // which keeps the rewrite idempotent: dropping them made `hasLocalhost` flip
+    // to false on the next boot and re-add duplicates.
+    val kept = lines
+        .filter { it.isNotBlank() && !it.contains(" models.opencode.ai") }
+        .map { it.trim() }
+        .toList()
+    val present = kept.toSet()
+    val missing = desiredLoopback.filter { it !in present }
     val updated = buildString {
-        append(body)
-        if (isNotEmpty()) append("\n")
-        if (!hasLocalhost) {
-            append("127.0.0.1 localhost\n")
-            append("127.0.1.1 guest\n")
-            append("::1 localhost ip6-localhost ip6-loopback\n")
-        }
+        for (line in kept) append(line).append("\n")
+        for (line in missing) append(line).append("\n")
         if (ipv4Pin != null) append(ipv4Pin).append(" models.opencode.ai\n")
     }
     hostsFile.parentFile?.mkdirs()

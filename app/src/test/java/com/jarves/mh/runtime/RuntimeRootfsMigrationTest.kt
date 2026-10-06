@@ -118,7 +118,11 @@ class RuntimeRootfsMigrationTest {
         val twice = hosts.readText()
 
         assertEquals(once, twice)
-        assertTrue(twice.lines().filter { it.contains("localhost") }.size == 3)
+        val lines = twice.lines()
+        assertTrue(lines.count { it.trim() == "127.0.0.1 localhost" } == 1)
+        assertTrue(lines.count { it.trim() == "127.0.1.1 guest" } == 1)
+        assertTrue(lines.count { it.trim() == "::1 localhost ip6-localhost ip6-loopback" } == 1)
+        assertTrue(lines.count { it.trim() == "1.2.3.4 models.opencode.ai" } == 1)
     }
 
     @Test
