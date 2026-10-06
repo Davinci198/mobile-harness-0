@@ -163,3 +163,18 @@ redeschide app-ul → Hermes să se aplice (marker + wrapper deja pregătite). R
 ### Next Step
 Adu guard-ul overlay (commit), rulează CI, apoi repară device-ul cu bibliotecile 26.04
 pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
+
+### 2026-10-06 16:40 — dsh „tot nu merge": CAUZA RĂDĂCINĂ găsită + fix
+- Eroare app: `DshBridge: fatal uncaught exception: Error: dsh: host preparation failed:
+  No usable native binding found for node-addon-require-builtin-linux-arm64-gnu (auto)`.
+- Cauză: loader-ul nativ al dsh (node-addon-native-custom-loader) își materializează binding-ul
+  .node într-un cache în `os.tmpdir()` (`/tmp/node-addon-native-custom-loader-$uid/native-cache`)
+  printr-un `fs.linkSync`. Sub PRoot `--link2symlink` linkul devine symlink `.l2s.*` care rămâne
+  DĂRÂMAT după `rmSync(temp)`; albat apoi pe disc. Run-urile ulterioare fără `--link2symlink`
+  (dsh folosește `emulateHardLinks=false`) citesc cache-ul otrăvit → require(dlopen) eșuează →
+  „No usable native binding". Verificat empiric: `require("node-addon-require-builtin")` OK cu
+  `--link2symlink` + cache `.l2s.` dărâmat; FAIL fără el; OK cu `NARB_DISABLE_NATIVE_CACHE=1` sau
+  după `rm -rf /tmp/node-addon-native-custom-loader-*`.
+- Fix: env `NARB_DISABLE_NATIVE_CACHE=1` în `DshRuntimeBridge.startSession` (încarcă direct din
+  sursă, fără cache/hardlink dance) + curățat cache-ul stricat de pe device →
+  retest imediat fără APK nou merge.

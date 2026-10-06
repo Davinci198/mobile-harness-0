@@ -110,6 +110,11 @@ class DshRuntimeBridge(
             val route = DshRouteMapper.forProfile(provider)
             writeDshSettings(installed.rootfs, route, provider)
             val environment = linkedMapOf(
+                // PRoot's --link2symlink turns the loader's native-binding cache
+                // hard-link into a dangling .l2s symlink; with hard links disabled
+                // (always on for dsh) the cache can still contain a poisoned copy,
+                // so load the binding straight from its installed source.
+                "NARB_DISABLE_NATIVE_CACHE" to "1",
                 "DSH_HOME" to DSH_HOME_GUEST_PATH,
                 // PocketDev already confines the whole Linux guest with PRoot. Let dsh
                 // use every tool inside that boundary without an unavailable approval UI.
