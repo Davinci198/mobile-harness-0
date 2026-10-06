@@ -372,11 +372,17 @@ class DshRuntimeBridge(
             }
         }
         File(home, "settings.yaml").writeText(body)
+        // dsh 0.2.0 reads the Cordis home patch (`$DSH_HOME/cordis.patch.yml`),
+        // applied over every profile's own layer, instead of settings.yaml (which
+        // it renames to settings.yaml.imported). Patch the llm-pi-ai row with the
+        // custom route so the SDK resolves its provider at boot; deepseek-official
+        // needs no entry because the DSH_HOME credentials service picks its key out
+        // of the DEEPSEEK_API_KEY environment we export.
+        val patch = dshHomePatch(route, provider.model.ifBlank { route.defaultModel })
+        File(home, "cordis.patch.yml").writeText(patch)
     }
 
-    private fun yamlQuote(value: String): String = "'${value.replace("'", "''")}'"
-
-    private suspend fun emitReasoningSummary(
+private suspend fun emitReasoningSummary(
         sessionId: String,
         text: String,
         blockId: Long,
@@ -591,6 +597,34 @@ class DshRuntimeBridge(
     }
 }
 
+internal fun yamlQuote(value: String): String = "'${value.replace("'", "''")}'"
+
+/**
+ * Cordis home patch for the dsh 0.2.0 settings surface
+ * (`$DSH_HOME/cordis.patch.yml`), applied over every profile's own layer.
+ * Custom routes patch the llm-pi-ai row so the SDK resolves the provider at
+ * boot; deepseek-official needs no entry because the credentials service picks
+ * its key out of the DEEPSEEK_API_KEY environment we export. An empty patch
+ * keeps dsh-base's default providers, so a later custom-route session's
+ * providers never leak into an official session.
+ */
+internal fun dshHomePatch(route: DshRoute, model: String): String =
+    if (route.custom != null) {
+        buildString {
+            appendLine("- id: llm-pi-ai")
+            appendLine("  config:")
+            appendLine("    providers:")
+            appendLine("      ${route.name}:")
+            appendLine("        apiKeyEnv: ${route.keyEnv}")
+            appendLine("        api: ${route.custom.api}")
+            appendLine("        baseURL: ${yamlQuote(route.custom.baseUrl)}")
+            appendLine("        models:")
+            appendLine("          - id: ${yamlQuote(model)}")
+        }
+    } else {
+        "[]\n"
+    }
+
 private data class DshSdkRunResult(val completed: Boolean, val failure: String)
 
 /** dsh provider route resolved from our saved provider profile. */
@@ -750,18 +784,27 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
         return when (event.optString("type")) {
             "assistant/chunk" -> parseAssistantChunk(data)
             "assistant/message" -> {
+                // dsh 0.2.0 compacts each step's model stream into this event
+                // (`data.stream`) instead of delivering live `assistant/chunk`
+                // notifications. Replay the compacted deltas so the UI still gets the
+                // text, then dedup against the completed message content below.
+                val streamEvent = parseAssistantStream(data)
                 val content = data.optJSONObject("message")?.optJSONArray("content")
                 val text = contentText(content)
-                if (text.isBlank()) {
-                    DshSdkProtocolEvent.Ignored
-                } else if (streamedTextSinceMessage.isNotEmpty()) {
-                    // `assistant/message` repeats the completed content after the SDK has
-                    // already delivered its text deltas. The UI has appended those deltas.
-                    streamedTextSinceMessage.clear()
-                    DshSdkProtocolEvent.Ignored
-                } else {
-                    DshSdkProtocolEvent.AssistantText(text)
+                if (streamEvent != null) {
+                    // Replay already delivered the text; drop the content copy.
+                    if (text.isNotBlank()) streamedTextSinceMessage.clear()
+                    return@parseSessionEvent streamEvent
                 }
+                if (text.isBlank()) {
+                    return@parseSessionEvent DshSdkProtocolEvent.Ignored
+                }
+                if (text == streamedTextSinceMessage.toString()) {
+                    // The completed message repeats deltas chunked earlier.
+                    streamedTextSinceMessage.clear()
+                    return@parseSessionEvent DshSdkProtocolEvent.Ignored
+                }
+                DshSdkProtocolEvent.AssistantText(text)
             }
             "tool/call" -> {
                 val callId = data.optString("callId")
@@ -774,11 +817,15 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
             "tool/result" -> {
                 val message = data.optJSONObject("message")
                 val resultBlock = message?.optJSONArray("content")?.optJSONObject(0)
-                val callId = resultBlock?.optString("toolCallId").orEmpty()
+                // dsh 0.2.0 carries the result id on the message itself; 0.1.2 nested
+                // it under the first content block.
+                val callId = message?.optString("toolCallId").orEmpty()
+                    .ifBlank { resultBlock?.optString("toolCallId").orEmpty() }
                 val name = toolNames.remove(callId) ?: "Tool"
                 val error = data.optJSONObject("error")
                 val text = contentText(resultBlock?.optJSONArray("content"))
-                val summary = error?.optString("message").orEmpty()
+                val summary = error?.optString("reason").orEmpty()
+                    .ifBlank { error?.optString("message").orEmpty() }
                     .ifBlank { text }
                     .replace(Regex("\\s+"), " ")
                     .trim()
@@ -794,6 +841,7 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
                             .ifBlank { "DeepSeek Harness turn failed" },
                     )
                     "blocked" -> DshSdkProtocolEvent.Failed("DeepSeek Harness was blocked from completing the task")
+                    "aborted" -> DshSdkProtocolEvent.Failed("DeepSeek Harness cancelled the turn")
                     else -> DshSdkProtocolEvent.TurnCompleted
                 }
             }
@@ -805,10 +853,67 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
         val chunk = data.optJSONObject("chunk") ?: return DshSdkProtocolEvent.Ignored
         val index = chunk.optInt("index", 0)
         val blockId = data.optInt("turn", 0) * 1_000_000L + data.optInt("step", 0) * 1_000L + index
+        return parseStreamChunk(chunk, blockId) ?: DshSdkProtocolEvent.Ignored
+    }
+
+    /**
+     * Replays the compacted records dsh 0.2.0 embeds in `assistant/message`
+     * (`data.stream`): packed text/reasoning runs plus raw `chunk` records.
+     * The run is lossless, so the replayed deltas cover the assembled message.
+     */
+    private fun parseAssistantStream(data: JSONObject): DshSdkProtocolEvent? {
+        val stream = data.optJSONArray("stream") ?: return null
+        val turn = data.optInt("turn", 0) * 1_000_000L
+        val step = data.optInt("step", 0) * 1_000L
+        val text = StringBuilder()
+        var reasoning: DshSdkProtocolEvent? = null
+        for (index in 0 until stream.length()) {
+            val record = stream.optJSONObject(index) ?: continue
+            val blockId = turn + step + record.optInt("index", 0)
+            when (record.optString("type")) {
+                "text-chunks", "reasoning-chunks" -> {
+                    val texts = record.optJSONArray("texts") ?: continue
+                    if (record.optString("type") == "text-chunks") {
+                        for (part in 0 until texts.length()) {
+                            val delta = texts.optString(part)
+                            if (delta.isEmpty()) continue
+                            text.append(delta)
+                            textByBlock.getOrPut(blockId) { StringBuilder() }.append(delta)
+                            streamedTextSinceMessage.append(delta)
+                        }
+                    } else {
+                        val buffer = reasoningByBlock.getOrPut(blockId) { StringBuilder() }
+                        val starts = buffer.isEmpty()
+                        for (part in 0 until texts.length()) {
+                            buffer.append(texts.optString(part))
+                        }
+                        reasoning = DshSdkProtocolEvent.Reasoning(
+                            blockId,
+                            buffer.toString(),
+                            startsNewBlock = starts,
+                            isFinal = true,
+                        )
+                    }
+                }
+                "chunk" -> parseStreamChunk(record.optJSONObject("chunk"), blockId)?.let {
+                    when (it) {
+                        is DshSdkProtocolEvent.AssistantText -> text.append(it.text)
+                        is DshSdkProtocolEvent.Reasoning -> reasoning = it
+                        else -> Unit
+                    }
+                }
+            }
+        }
+        val textEvent = text.toString().takeIf(String::isNotEmpty)?.let { DshSdkProtocolEvent.AssistantText(it) }
+        return textEvent ?: reasoning
+    }
+
+    private fun parseStreamChunk(chunk: JSONObject?, blockId: Long): DshSdkProtocolEvent? {
+        if (chunk == null) return null
         return when (chunk.optString("type")) {
             "text-delta" -> {
                 val delta = chunk.optString("text")
-                if (delta.isEmpty()) return DshSdkProtocolEvent.Ignored
+                if (delta.isEmpty()) return null
                 textByBlock.getOrPut(blockId) { StringBuilder() }.append(delta)
                 streamedTextSinceMessage.append(delta)
                 DshSdkProtocolEvent.AssistantText(delta)
@@ -825,18 +930,17 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
                     val streamed = textByBlock.remove(blockId)?.toString().orEmpty()
                     val complete = block.optString("text")
                     val missingSuffix = complete.takeIf { it.startsWith(streamed) }?.removePrefix(streamed).orEmpty()
-                    if (missingSuffix.isBlank()) return DshSdkProtocolEvent.Ignored
+                    if (missingSuffix.isBlank()) return null
                     streamedTextSinceMessage.append(missingSuffix)
                     return DshSdkProtocolEvent.AssistantText(missingSuffix)
                 }
-                if (block?.optString("type") != "reasoning") return DshSdkProtocolEvent.Ignored
+                if (block?.optString("type") != "reasoning") return null
                 val text = block.optString("text").ifBlank { reasoningByBlock[blockId]?.toString().orEmpty() }
                 val starts = blockId !in reasoningByBlock
                 reasoningByBlock.remove(blockId)
-                if (text.isBlank()) DshSdkProtocolEvent.Ignored
-                else DshSdkProtocolEvent.Reasoning(blockId, text, starts, isFinal = true)
+                if (text.isBlank()) null else DshSdkProtocolEvent.Reasoning(blockId, text, starts, isFinal = true)
             }
-            else -> DshSdkProtocolEvent.Ignored
+            else -> null
         }
     }
 

@@ -934,6 +934,22 @@ class RuntimeInstaller(private val context: Context) {
     ) {
         if (isAgentInstalled(com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS)) {
             ensureDshAndroidCompatibility()
+            // dsh self-updates or previous app versions can leave a different
+            // release behind. Pull the guest back to the pinned DSH_VERSION so the
+            // SDK wire contract the bridge speaks always matches. Best effort: the
+            // bridge also speaks the older 0.1.2 contract, so an offline install
+            // keeps working with whichever dsh is already staged.
+            if (dshMarker.readTextOrNull() != DSH_VERSION) {
+                runCatching {
+                    updateDsh(InstalledRuntime(proot, rootfs), DSH_VERSION, onProgress)
+                }.onFailure { error ->
+                    android.util.Log.w(
+                        "RuntimeInstaller",
+                        "Could not pin DeepSeek Harness to $DSH_VERSION; continuing with the installed release",
+                        error,
+                    )
+                }
+            }
             return
         }
         installRuntimeOverlay(
@@ -944,6 +960,19 @@ class RuntimeInstaller(private val context: Context) {
             onProgress = onProgress,
         )
         ensureDshAndroidCompatibility()
+        // The bundle shipped an earlier release; bring it up to the pinned version
+        // so every fresh install ends at the same verified SDK contract.
+        if (dshMarker.readTextOrNull() != DSH_VERSION) {
+            runCatching {
+                updateDsh(InstalledRuntime(proot, rootfs), DSH_VERSION, onProgress)
+            }.onFailure { error ->
+                android.util.Log.w(
+                    "RuntimeInstaller",
+                    "Could not upgrade DeepSeek Harness to $DSH_VERSION; keeping the bundled release",
+                    error,
+                )
+            }
+        }
         verifyGuest(proot, "/usr/local/bin/dsh --profile headless --help", "DeepSeek Harness verification failed")
         require(isAgentInstalled(com.jarves.mh.model.AgentKind.DEEPSEEK_HARNESS)) {
             "The DeepSeek Harness runtime bundle is incomplete"
@@ -2580,8 +2609,8 @@ fi
         private const val ANDROID_AAPT2_GUEST_PATH = "/root/android-sdk/build-tools/35.0.0/aapt2"
         private const val ANDROID_AAPT2_HOST_PATH = "root/android-sdk/build-tools/35.0.0/aapt2"
         private val CLAUDE_VERSION_PATTERN = Regex("[0-9]+\\.[0-9]+\\.[0-9]+")
-        /** Pinned DeepSeek Harness release installed via npm inside the guest (verified 2026-09-06). */
-        const val DSH_VERSION = "0.1.2-rc.1"
+        /** Pinned DeepSeek Harness release installed via npm inside the guest (verified 2026-10-06). */
+        const val DSH_VERSION = "0.2.0-rc.2"
         private const val DSH_ANDROID_COMPATIBILITY_VERSION = "copyfile-excl-v1"
         private val CORE_BUNDLE = RuntimeBundle(
             label = "Core",
