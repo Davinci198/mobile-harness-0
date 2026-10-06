@@ -90,4 +90,47 @@ class RuntimeRootfsMigrationTest {
 
         assertTrue(File(rootfs, "usr/bin/bash").exists())
     }
+
+    @Test
+    fun rewriteGuestHostsAddsLoopbackAliasesWhenLocalhostMissing() {
+        val hosts = temporaryFolder.newFile("hosts-empty")
+        hosts.writeText("104.20.32.17 models.opencode.ai\n192.168.1.2 mybox.internal\n")
+
+        rewriteGuestHosts(hosts, "104.20.33.18")
+
+        val text = hosts.readText()
+        assertTrue(text.contains("127.0.0.1 localhost"))
+        assertTrue(text.contains("127.0.1.1 guest"))
+        assertTrue(text.contains("::1 localhost ip6-localhost ip6-loopback"))
+        assertTrue(text.contains("104.20.33.18 models.opencode.ai"))
+        assertTrue(text.contains("192.168.1.2 mybox.internal"))
+        assertFalse(text.contains("104.20.32.17 models.opencode.ai"))
+    }
+
+    @Test
+    fun rewriteGuestHostsIsIdempotentWithSamePin() {
+        val hosts = temporaryFolder.newFile("hosts-idempotent")
+        hosts.writeText("127.0.0.1 localhost\n127.0.1.1 guest\n::1 localhost ip6-localhost ip6-loopback\n1.2.3.4 models.opencode.ai\n")
+
+        rewriteGuestHosts(hosts, "1.2.3.4")
+        val once = hosts.readText()
+        rewriteGuestHosts(hosts, "1.2.3.4")
+        val twice = hosts.readText()
+
+        assertEquals(once, twice)
+        assertTrue(twice.lines().filter { it.contains("localhost") }.size == 3)
+    }
+
+    @Test
+    fun rewriteGuestHostsWithoutPinKeepsExistingLocalhostOnly() {
+        val hosts = temporaryFolder.newFile("hosts-keep")
+        hosts.writeText("127.0.0.1 localhost\n127.0.1.1 guest\nsome.host extra\n")
+
+        rewriteGuestHosts(hosts, null)
+
+        val text = hosts.readText()
+        assertTrue(text.contains("127.0.0.1 localhost"))
+        assertTrue(text.contains("127.0.1.1 guest"))
+        assertFalse(text.contains("1.2.3.4 models.opencode.ai"))
+    }
 }

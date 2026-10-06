@@ -120,6 +120,44 @@ internal fun isCoreSystemPathOverlayGuarded(cleanName: String): Boolean {
 private fun overlayMustNotReplace(existing: Boolean, cleanName: String): Boolean =
     existing && isCoreSystemPathOverlayGuarded(cleanName)
 
+/**
+ * Normalizes /etc/hosts for the guest.
+ *
+ * The base image only pins models.opencode.ai, so nothing maps "localhost".
+ * Antigravity's OAuth login starts a loopback callback on "localhost" and
+ * otherwise fails at startup ("listen tcp: lookup localhost on <dns>: no such
+ * host"). This guarantees the standard loopback aliases, refreshes the
+ * A-record pin for models.opencode.ai, and keeps user-added lines — while
+ * staying idempotent on every startup.
+ */
+internal fun rewriteGuestHosts(hostsFile: File, ipv4Pin: String?) {
+    val previous = runCatching { hostsFile.readText() }.getOrDefault("")
+    val lines = previous.lineSequence().toList()
+    val hasLocalhost = lines.any { line ->
+        line.split(Regex("\\s+")).drop(1).contains("localhost")
+    }
+    if (ipv4Pin == null && hasLocalhost) return
+    val body = lines
+        .filter {
+            it.isNotBlank() &&
+                !it.contains(" localhost") &&
+                !it.contains(" models.opencode.ai")
+        }
+        .joinToString("\n")
+    val updated = buildString {
+        append(body)
+        if (isNotEmpty()) append("\n")
+        if (!hasLocalhost) {
+            append("127.0.0.1 localhost\n")
+            append("127.0.1.1 guest\n")
+            append("::1 localhost ip6-localhost ip6-loopback\n")
+        }
+        if (ipv4Pin != null) append(ipv4Pin).append(" models.opencode.ai\n")
+    }
+    hostsFile.parentFile?.mkdirs()
+    hostsFile.writeText(updated)
+}
+
 
 private data class RuntimeBundle(
     val label: String,
@@ -2131,8 +2169,8 @@ fi
      */
     private fun writeGuestIpv4Pins() {
         val hostsFile = File(rootfs, "etc/hosts")
-        val previous = runCatching { hostsFile.readText() }.getOrDefault("")
-        val previousPin = previous.lineSequence()
+        val previousPin = runCatching { hostsFile.readText() }.getOrDefault("")
+            .lineSequence()
             .firstOrNull { it.contains(" models.opencode.ai") }
             ?.substringBefore(" models.opencode.ai")
             ?.trim()
@@ -2140,19 +2178,7 @@ fi
             java.net.InetAddress.getAllByName("models.opencode.ai")
                 .firstOrNull { it is java.net.Inet4Address }?.hostAddress
         }.getOrNull()
-        val pin = fresh ?: previousPin
-        if (pin != null) {
-            val body = previous.lineSequence()
-                .filter { it.isNotBlank() && !it.contains(" models.opencode.ai") }
-                .joinToString("\n")
-            val updated = buildString {
-                append(body)
-                if (isNotEmpty()) append("\n")
-                append(pin).append(" models.opencode.ai\n")
-            }
-            hostsFile.parentFile?.mkdirs()
-            hostsFile.writeText(updated)
-        }
+        rewriteGuestHosts(hostsFile, fresh ?: previousPin)
         val gai = File(rootfs, "etc/gai.conf")
         val gaiText = runCatching { gai.readText() }.getOrDefault("")
         if (!gaiText.contains("precedence ::ffff:0:0/96")) {
