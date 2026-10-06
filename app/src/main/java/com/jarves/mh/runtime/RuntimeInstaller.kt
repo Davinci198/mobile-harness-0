@@ -62,7 +62,8 @@ enum class RuntimeInstallEvent { STAGE, COMMAND, OUTPUT, DOWNLOAD, COMMAND_COMPL
 internal fun repairLink2symlinkArtifacts(rootfs: File) {
     if (!rootfs.isDirectory) return
     listOf("usr/bin", "usr/sbin", "bin", "sbin").forEach { dir ->
-        File(rootfs, dir).listFiles()?.forEach { link ->
+        val dirFile = File(rootfs, dir)
+        dirFile.listFiles()?.forEach { link ->
             val target = try {
                 val path = link.toPath()
                 if (!java.nio.file.Files.isSymbolicLink(path)) return@forEach
@@ -80,9 +81,16 @@ internal fun repairLink2symlinkArtifacts(rootfs: File) {
             runCatching { link.setExecutable(true, false) }
         }
     }
-    rootfs.walkTopDown()
-        .filter { it.name.startsWith(L2S_PREFIX) }
-        .forEach { it.delete() }
+    // proot turns hard links into a symlink plus a .l2s.* sidecar that holds the
+    // bytes. apt leaves those sidecars scattered across the bin dirs and a later
+    // dpkg run trips over them, so they must go. Only clean inside the bin dirs:
+    // tools like uv also rely on link(2) and keep live .l2s.* sidecars outside
+    // them (e.g. under ~/.hermes/cache), which would break if swept blindly.
+    listOf("usr/bin", "usr/sbin", "bin", "sbin").forEach { dir ->
+        File(rootfs, dir).listFiles()?.forEach { it ->
+            if (it.name.startsWith(L2S_PREFIX)) it.delete()
+        }
+    }
     File(rootfs, "var/lib/dpkg/status-old").delete()
     File(rootfs, "var/lib/dpkg/status-new").delete()
 }
@@ -700,13 +708,15 @@ class RuntimeInstaller(private val context: Context) {
                 "if [ -d \"\$HOME/.hermes/hermes-agent\" ] && [ ! -d \"\$HOME/.hermes/hermes-agent/.git\" ]; then rm -rf \"\$HOME/.hermes/hermes-agent\"; fi; " +
                 "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | " +
                 "bash -s -- --skip-setup --non-interactive --skip-browser --skip-computer-use; " +
+                "if [ -x \"\$HOME/.local/bin/hermes\" ]; then " +
+                "  [ -L \"$HERMES_GUEST_PATH\" ] || ln -s \"\$HOME/.local/bin/hermes\" \"$HERMES_GUEST_PATH\"; fi; " +
                 "test -x $HERMES_GUEST_PATH",
             displayCommand = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
             fraction = fraction,
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
             failureMessage = "Hermes installation failed",
-            emulateHardLinks = true,
+            emulateHardLinks = false,
             onFinished = { repairLink2symlinkArtifacts(rootfs) },
         )
         ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)

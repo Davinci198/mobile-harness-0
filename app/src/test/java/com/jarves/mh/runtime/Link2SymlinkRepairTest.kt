@@ -102,4 +102,24 @@ class Link2SymlinkRepairTest {
     fun `a missing rootfs is a no-op`() {
         repairLink2symlinkArtifacts(File(temporaryFolder.root, "absent"))
     }
+
+    @Test
+    fun `l2s sidecars outside the bin dirs survive`() {
+        val uvWheel = file("root/.hermes/cache/uv/archive-v0/pkg/.l2s.WHEEL.0001", "uv hard-link sidecar")
+        val nodeLayers = file("usr/local/lib/node/nodemodules/.l2s.0001", "node hard-link sidecar")
+
+        repairLink2symlinkArtifacts(rootfs)
+
+        assertTrue("uv cache sidecars are live data and must stay", uvWheel.isFile)
+        assertTrue("nested non-bin sidecars stay too", nodeLayers.isFile)
+    }
+
+    @Test
+    fun `stray l2s sidecars in the bin dirs are swept`() {
+        file("usr/bin/.l2s.env.0001", "stale sidecar")
+
+        repairLink2symlinkArtifacts(rootfs)
+
+        assertFalse(File(rootfs, "usr/bin/.l2s.env.0001").exists())
+    }
 }
