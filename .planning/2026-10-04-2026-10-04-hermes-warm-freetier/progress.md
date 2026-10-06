@@ -1,0 +1,165 @@
+# Progress Log
+
+## Session: 2026-10-06
+
+### Actions Taken
+- GitHub verde: `gh workflow run` pe `88a9d7e` → run 37417414710 a PICAT la compile:
+  `String.absolutePath.toPath()` nu există în `Link2SymlinkRepairTest` (2 cazuri de
+  date au folosit `.absolutePath` pe String în loc de `File.toPath()`). Fix + commit `6aedfc4`.
+- Rerun 37417923280 → compile trecut, dar 4 teste `Link2SymlinkRepairTest` picate cu
+  `FileNotFoundException` (fișierele de test nu aveau părinți naturali — lipsea `mkdirs`)
+  și `AssertionError` la materializarea shim. Rezultat:
+  - criteriul vechi `target.startsWith("/data/")` era INCORECT și periculos: țintele
+    reale `.l2s.*` stau LÂNGĂ shim, în rootfs, nu sub `/data`; iar potrivirea pe prefixul
+    host ar fi copiat în guest și symlinkuri absolute legitime spre `/usr/bin/dash`.
+  - Fix `5b08940`: se potrivesc doar numele `.l2s.*` (exact ce creează proot prin
+    `--link2symlink`), nu prefixul de host. Fix `0dcf6ea`: rootfs-ul de test se creează o
+    singură dată pe test (`by lazy`).
+- CI `37419147486` pe `0dcf6ea` → VERDE. APK descărcat (artifact `mh-dany-debug`,
+  APK 66.623.639 B, hash `d3e5b1fb…`), `adb install -r` Success pe `emulator-5554`.
+- **Antigravity FIX VERIFICAT PE DEVICE**: la 08:47 apk nou + fallback-ul
+  embedded→download a instalat `agy` (200 MB, fișier real executabil în
+  `root/.local/bin/agy`, marker `.pocket-agy-version` = 1.1.27).
+- **dpkg repair VERIFICAT**: baza 244/244 `install ok installed`, zero half-installed.
+  `adb` (fostul eșec) instalează acum în `/usr/bin/adb`.
+- **CAUZĂ RĂDĂCINĂ HERMES/PHP/JAVA găsită**: bundle-ul PYTHON
+  `pocketdev-python-arm64-2026.09.2.tar.zst` e construit pe Ubuntu 20.04 și conține o
+  glibc 2.31 completă (libc.so.6→libc-2.31.so, ld-2.31.so, libc.a, python3.8, pip).
+  Extras peste rootfs-ul 26.04 a suprascris **107 fișiere de sistem** (libc 2.43→2.31,
+  loader, libm, libstdc++, libz, libcrypto1.1, libcurl 4.6 etc.) și a re-îndreptat
+  `/usr/bin/python3` spre Python 3.8 — exact de ce „instrumentele nu rămân instalate”.
+  Nu există log apt/dpkg pe 10-06: core info, bundle-ul a fost extras la 08:50 împreună
+  cu overlay-ul Android (gradle 08:50) — NU prin apt.
+- Fix `OverlayCorePathGuardTest` + `isCoreSystemPathOverlayGuarded`:
+  overlay-urile sunt doar aditive; nu mai pot înlocui multilib-ul de bază
+  (`usr/lib/aarch64-linux-gnu/*`, `usr/lib/gcc/*`) sau python-ul implicit
+  (`usr/bin/python3*`, `usr/bin/pip*`). Core-ul rămâne autoritativ.
+
+## Session: 2026-10-06 (dsh 0.2.0-rc.2 migration — vezi AGENTS/task actual)
+
+### Actions Taken
+- Cauza buclei „același răspuns”: user updatase dsh la 0.2.0-rc.2, care
+  redenumește `settings.yaml` → `settings.yaml.imported` și folosește suprafața
+  Cordis home patch. Providerul custom nu mai era înregistrat → fallback
+  `deepseek-official` → lipsă `DEEPSEEK_API_KEY` → `MISSING_CREDENTIAL`.
+- Decizie (autonom, „sunt la strand”): bridge migrat la 0.2.0-rc.2 + self-heal
+  permanent (`DSH_VERSION = "0.2.0-rc.2"` în RuntimeInstaller.kt; `ensureDshInstalled`
+  face best-effort updateDsh la marker mismatch, inclusiv după overlay bundle 0.1.2).
+- `writeDshSettings` scrie acum și `$DSH_HOME/cordis.patch.yml` (home patch) pentru
+  rute custom (`llm-pi-ai` + providers), `deepseek-official` → `"[]\n"`. Funcțiile
+  `yamlQuote`/`dshHomePatch` ⚠️ au fost accidental MEMBRII clasei (clasa se închidea
+  la 626, funcțiile 385-411) → nu se vedeau din teste; MUTATE după `}`-ul clasei.
+- Parser 0.2.0: `assistant/message` replay `data.stream` (text-chunks/reasoning-chunks/
+  chunk), dedup `assistant/message` vs delte streamate (fix: `text == streamedTextSinceMessage`
+  → Ignored); `tool/result` citește `message.toolCallId` + `error.reason`; `turn/end`
+  adaugă kind `aborted`.
+- **Build local deblocat pe Termux**: aapt2 oficial e x86-64, nu rul ează pe aarch64.
+  Soluție: sysroot glibc x86-64 (debs Ubuntu: libc6/libstdc++6/libgcc-s1/zlib1g) la
+  `~/9remote-uploads/opencode/tmp/kcp/sysroot/x86_64` + wrapper `aapt2` care rulează
+  `qemu-x86_64 -L <sysroot> <aapt2> $@`; `~/.gradle/gradle.properties` →
+  `android.aapt2FromMavenOverride=/tmp/kcp/aapt2`. AAPT2 sub qemu: 2.20-14304508 OK.
+- Teste noi (DshBridgeTest.kt + DshHomePatchTest) scriu și trec local:
+  stream compacted, reasoning-only, chunk raw, tool/result 0.2.0, aborted, max-tokens,
+  custom patch + empty patch.
+
+### Test Results
+| Test | Expected | Actual | Status |
+|------|----------|--------|--------|
+| `testOfflineDebugUnitTest` (543 teste) | green pe modificările dsh-0.2.0 | 541 pass; 2 FAIL pre-existente | PARȚIAL |
+| `rewriteGuestHostsIsIdempotentWithSamePin` | pass | FAIL și pe HEAD curat (stash) → ne-legat de modificări | PRE-EXISTENT |
+| `downloaderWritesPartThenRenamesAndDoesNotOverwrite` | pass | PASS izolat pe HEAD; FAIL în suite complete (rețea) | FLAKY/ENV |
+| `DshSdkProtocolParserTest` + `DshHomePatchTest` + others | pass | ALL PASS | PASS |
+| AAPT2 sub qemu wrapper | `version` output | Android Asset Packaging Tool 2.20-14304508 | PASS |
+
+### Errors
+| Error | Resolution |
+|-------|------------|
+| `NoClassDefFoundError: kotlin/reflect/jvm/ReflectJvmMapping` (kotlinc standalone) | nu-i nevoie — Gradle compil ează corect; standalone abandonat |
+| `Custom AAPT2 location does not point to an AAPT2 executable` | wrapper-ul trebuie să se termine cu numele `aapt2` (AGP verifică `endsWith(FN_AAPT2)`) |
+| test compile: `Unresolved reference 'dshHomePatch'/'yamlQuote'` | funcțiile erau membre ale clasei (clasa se închide la linia 626, nu înainte); mutate după închiderea clasei → `DshRuntimeBridgeKt` gen erat |
+| `--tests 'com.jarves.mh.runtime.DshBridgeTest'` → „No tests found” | fișierul nu conține clasă `DshBridgeTest`; clasele reale: `DshSdkProtocolParserTest`, `DshRouteMapperTest`, `AgentProviderPresetTest`, `DshHomePatchTest` |
+| test `streamsTextDeltasAndDoesNotRepeatCompletedMessage` a picat | dedup `assistant/message` incorect: `text == streamedTextSinceMessage` trebuia → Ignored (nu doar clear-ul) |
+
+### Next Step
+Commit + push pe `ubuntu-26.04-base-migration` → CI (x86_64, rețea OK) rulează suitele
+complet; apoi APK din artifacte CI, `adb install -r`, test real de turn dsh cu provider
+`nvidia-nim` (home patch scris de app la pornire; pre-fix deja aplicat pe device la
+`/data/user/0/com.jarves.mh/files/runtime/ubuntu/root/.dsh/cordis.patch.yml` și verificat
+cu `dsh --profile sdk --dump-config`).
+
+## Session: 2026-10-06 (afternoon — device repair + Hermes)
+
+### Actions Taken
+- **Overlay guard livrat** în `6266b1f` (extractZstdTar + predicat pure + teste). CI a
+  prins bug: `python3-config` (cratimă) scăpa din `startsWith("python3.")`; fixat în
+  `890d25d` cu `startsWith("python3")`. Run CI final: `37426951426`.
+- **Device repaired**: `tar -xf core-libs.tar` (`usr/lib/aarch64-linux-gnu` pristine
+  26.04) peste rootfs-ul device-ului → libc.so.6=1.788.240B, loader 201.872B, libm,
+  libstdc++; `ln -sf python3.14 usr/bin/python3`; eliminat `libnss_nis(-plus)-2.31`
+  + orfanii `*-2.31.so` (0 rămase).
+- **Verificat în guest (proot)**: glibc 2.43-2ubuntu2.4, `python3` 3.14.4, node v24.19,
+  npm 11.17, git 2.53, dpkg 1.23.7, agy 200MB — roata ieșită din „env: GLIBC_2.32”.
+- **Hermes install**: primul run cu `--link2symlink` reușit la apt/update dar uv a picat
+  pe cache-uri vechi de la încercarea cu libc stricat (`.l2s` dangling). După `rm -rf`
+  cache+installs, același eșec A RĂMAS pe generație proaspătă: proot `--link2symlink`
+  traduce link()-urile de dedup ale uv/pm-runtime în lanțuri `.l2s..l2s.<n>…` → EPERM.
+- **Fără `--link2symlink` Hermes se instalează complet** (apt+uv+web UI+builds, main
+  @ 3dadeb92). `HERMES_GUEST_PATH` lipsă (installer-ul pune `~/.local/bin/hermes`).
+- Aplicativ fix `3639dbc`: `emulateHardLinks=false` la install + `ln -s
+  $HOME/.local/bin/hermes -> /usr/local/bin/hermes`.
+- **Device**: creat `/usr/local/bin/hermes` + `hermes2` (wrappers), marker
+  `.pocket-hermes-version` = `2026.9.24`. `hermes --version` OK și cu `--link2symlink`
+  (rulează ca în app).
+- **Al doilea bug găsit**: `repairLink2symlinkArtifacts` ștergea TOATE `.l2s.*` din
+  rootfs (walkTopDown), inclusiv sidecar-urile live din cache-ul uv → cache plin de
+  link-uri dangling. Fix în `3639dbc`: sweep doar în bin dirs.
+
+### Test Results
+| Test | Expected | Actual | Status |
+|------|----------|--------|--------|
+| CI 6266b1f (overlay guard) | success | FAIL: python3-config | BLOCKED→fix |
+| CI 890d25d | success | în curs | PENDING |
+| Guest glibc după repair | 2.43 | Ubuntu GLIBC 2.43-2ubuntu2.4 | PASS |
+| python3 / node / git / dpkg în guest | OK | 3.14.4 / v24.19 / 2.53 / 1.23.7 | PASS |
+| Hermes install cu link2symlink | ok | EPERM la uv pm-runtime | FAIL |
+| Hermes install fără link2symlink | ok | Install complete (main @ 3dadeb92) | PASS |
+| `hermes --version` | ok | vgit.3dadeb9 (2026.9.24) | PASS |
+| Marker `.pocket-hermes-version` | set | 2026.9.24 | PASS |
+| `hermes --version` sub link2symlink | ok | rc=0 | PASS |
+
+### Next Step
+Când CI-ul e verde: descarcă APK-ul nou (av30 + 3639dbc + 890d25d), `adb install -r`,
+redeschide app-ul → Hermes să se aplice (marker + wrapper deja pregătite). Report final.
+
+### Test Results
+| Test | Expected | Actual | Status |
+|------|----------|--------|--------|
+| CI 88a9d7e (prima încercare) | success | fail: `toPath()` pe String | BLOCKED→fix |
+| CI 6aedfc4 | success | fail: FileNotFound + Assertion în test | BLOCKED→fix |
+| CI 0dcf6ea | success | SUCCESS (Unit tests) | PASS |
+| Antigravity pe device (av1) | instalat | 1.1.27, 200 MB real | PASS |
+| dpkg state pe device | OK | 244/244 install ok installed | PASS |
+| Python overlay peste rootfs 26.04 | fără regresie | regresează glibc 2.43→2.31 (107 fișiere) | FAIL → fix |
+| Hermes pe device | instalat | `/usr/local/bin/hermes` lipsește; doar `~/.hermes/hermes-agent` git | FAIL |
+| PHP/Java pe device | instalat | php: NO_PHP, java din overlay Android (JDK) | PARȚIAL |
+
+### Errors
+| Error | Resolution |
+|-------|------------|
+| CI: `Unresolved reference 'toPath'` pe `String.absolutePath` | fix `6aedfc4`: `dataTarget.toPath()` direct pe `File` |
+| CI: FileNotFound în test la `writeText` | fix `0dcf6ea`: `by lazy` + `parentFile.mkdirs()` |
+| CI: „shim must not stay a symlink” | fix `5b08940`: match pe `.l2s.*`, nu pe `/data/` prefix |
+| `CANNOT LINK ... libtalloc.so not found` la proot manual | adaugă `LD_LIBRARY_PATH=<nativeLibDir>` |
+| `execve("/usr/bin/env"): No such file or directory` la proot manual | lipsesc `PROOT_LOADER` + `PROOT_NO_SECCOMP` — aplicația le setează; manual trebuiau adăugate |
+| glibc 2.31 în rootfs 26.04 | python overlay 20.04 suprascrie 107 fișiere; guarded în overlays, device repair pending |
+
+### Notes
+- Comenzile manuale proot merg cu
+  `LD_LIBRARY_PATH=<lib> PROOT_LOADER=<lib>/libprootloader.so PROOT_NO_SECCOMP=1`.
+- ACTIVE NEXT: (1) refine/CI pentru overlay guard, (2) repair device (restaurează 26.04
+  libc/loader/python), (3) hermes: fie createw `/usr/local/bin/hermes` catre `~/.hermes`,
+  fie reinstall.sh.
+
+### Next Step
+Adu guard-ul overlay (commit), rulează CI, apoi repară device-ul cu bibliotecile 26.04
+pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.

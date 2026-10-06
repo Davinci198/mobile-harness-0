@@ -623,13 +623,13 @@ fun SettingsScreen(
             item {
                 SettingsAccordion(
                     title = stringResource(R.string.settings_linux_runtime),
-                    subtitle = "Ubuntu 20.04 PRoot · ARM64",
+                    subtitle = "Ubuntu 26.04 PRoot · ARM64",
                     icon = Icons.Default.Terminal,
                     expanded = expanded == SettingsSection.RUNTIME,
                     onClick = { toggle(SettingsSection.RUNTIME) },
                 ) {
                     RuntimeInfoRow(stringResource(R.string.settings_architecture), "ARM64 (aarch64)")
-                    RuntimeInfoRow(stringResource(R.string.settings_environment), "Ubuntu 20.04 PRoot")
+                    RuntimeInfoRow(stringResource(R.string.settings_environment), "Ubuntu 26.04 PRoot")
                     RuntimeInfoRow(
                         stringResource(R.string.settings_active_agent),
                         state.agentKind.title + if (state.installedAgentVersions.containsKey(state.agentKind)) "" else stringResource(R.string.settings_not_installed_suffix),

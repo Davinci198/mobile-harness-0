@@ -195,6 +195,93 @@ class DshSdkProtocolParserTest {
         ),
     )
 
+    @Test
+    fun replaysCompactedTextStreamFromAssistantMessage() {
+        val stream = JSONArray()
+            .put(JSONObject().put("type", "text-chunks").put("index", 0).put("time0", 1)
+                .put("dt", JSONArray().put(0).put(1)).put("texts", JSONArray().put("Hel").put("lo")))
+            .put(JSONObject().put("type", "reasoning-chunks").put("index", 1).put("time0", 1)
+                .put("dt", JSONArray().put(0)).put("texts", JSONArray().put("Checking files")))
+        val answer = parser.parseLine(sessionEvent("assistant/message", JSONObject()
+            .put("turn", 1).put("step", 1)
+            .put("stream", stream)
+            .put("message", JSONObject().put("content", JSONArray().put(
+                JSONObject().put("type", "text").put("text", "Hello"),
+            )))))
+
+        // The compacted text-chunks replay as one delta, and the completed
+        // message content dedups against them instead of repeating.
+        assertEquals(DshSdkProtocolEvent.AssistantText("Hello"), answer)
+    }
+
+    @Test
+    fun reasoningOnlyStreamSurfacesThinking() {
+        val stream = JSONArray().put(JSONObject().put("type", "reasoning-chunks").put("index", 0)
+            .put("dt", JSONArray().put(0)).put("texts", JSONArray().put("Planning the change")))
+        val event = parser.parseLine(sessionEvent("assistant/message", JSONObject()
+            .put("turn", 1).put("step", 1)
+            .put("stream", stream)
+            .put("message", JSONObject().put("content", JSONArray().put(
+                JSONObject().put("type", "reasoning").put("text", "Planning the change"),
+            )))))
+
+        assertTrue(event is DshSdkProtocolEvent.Reasoning)
+        assertEquals("Planning the change", (event as DshSdkProtocolEvent.Reasoning).text)
+        assertTrue(event.startsNewBlock)
+        assertTrue(event.isFinal)
+    }
+
+    @Test
+    fun replaysRawChunkRecordsInsideStream() {
+        val stream = JSONArray()
+            .put(JSONObject().put("type", "chunk").put("time", 1).put("chunk", JSONObject()
+                .put("type", "text-delta").put("index", 0).put("text", "Hel")))
+            .put(JSONObject().put("type", "chunk").put("time", 2).put("chunk", JSONObject()
+                .put("type", "text-delta").put("index", 0).put("text", "lo")))
+        val answer = parser.parseLine(sessionEvent("assistant/message", JSONObject()
+            .put("turn", 1).put("step", 1)
+            .put("stream", stream)
+            .put("message", JSONObject().put("content", JSONArray().put(
+                JSONObject().put("type", "text").put("text", "Hello"),
+            )))))
+
+        assertEquals(DshSdkProtocolEvent.AssistantText("Hello"), answer)
+    }
+
+    @Test
+    fun toolResultIn020ReadsMessageToolCallIdAndErrorReason() {
+        val call = parser.parseLine(sessionEvent("tool/call", JSONObject()
+            .put("callId", "call-9").put("name", "edit")
+            .put("arguments", "{\"file_path\":\"a.txt\"}")))
+        val result = parser.parseLine(sessionEvent("tool/result", JSONObject()
+            .put("message", JSONObject().put("toolCallId", "call-9")
+                .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", "wrote")))
+                .put("isError", false))
+            .put("error", JSONObject().put("name", "ToolError").put("code", "TOOL_FAILED")
+                .put("reason", "file missing"))))
+
+        assertTrue(call is DshSdkProtocolEvent.ToolStarted && call.name == "Edit")
+        assertTrue(result is DshSdkProtocolEvent.ToolCompleted)
+        assertEquals("call-9", (result as DshSdkProtocolEvent.ToolCompleted).callId)
+        assertEquals("file missing", result.summary)
+    }
+
+    @Test
+    fun abortedTurnEndReportsCancellation() {
+        val event = parser.parseLine(sessionEvent("turn/end",
+            JSONObject().put("reason", JSONObject().put("kind", "aborted"))))
+
+        assertTrue(event is DshSdkProtocolEvent.Failed)
+    }
+
+    @Test
+    fun maxTokensTurnEndCountsAsCompletedActivity() {
+        val event = parser.parseLine(sessionEvent("turn/end",
+            JSONObject().put("reason", JSONObject().put("kind", "max-tokens"))))
+
+        assertEquals(DshSdkProtocolEvent.TurnCompleted, event)
+    }
+
     private fun notification(method: String, params: JSONObject): String = JSONObject()
         .put("jsonrpc", "2.0")
         .put("method", method)
@@ -313,5 +400,34 @@ class AgentProviderPresetTest {
         assertEquals(AgentKind.ANTIGRAVITY, AgentKind.fromStored("antigravity"))
         assertEquals(AgentKind.CLAUDE_CODE, AgentKind.fromStored("CLAUDE_CODE"))
         assertEquals(AgentKind.DEEPSEEK_HARNESS, AgentKind.fromStored("DEEPSEEK_HARNESS"))
+    }
+}
+
+class DshHomePatchTest {
+    @Test
+    fun customRouteWritesProvidersPatch() {
+        val route = DshRoute(
+            name = "nvidia-nim",
+            keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
+            defaultModel = "meta/llama-3.2-11b-vision-instruct",
+            custom = DshCustomRoute("openai-completions", "https://integrate.api.nvidia.com/v1"),
+        )
+        val patch = dshHomePatch(route, "meta/llama-3.2-11b-vision-instruct")
+
+        assertTrue(patch.contains("- id: llm-pi-ai"))
+        assertTrue(patch.contains("nvidia-nim:"))
+        assertTrue(patch.contains("apiKeyEnv: MH_DSH_API_KEY"))
+        assertTrue(patch.contains("api: openai-completions"))
+        assertTrue(patch.contains("baseURL: 'https://integrate.api.nvidia.com/v1'"))
+        assertTrue(patch.contains("- id: 'meta/llama-3.2-11b-vision-instruct'"))
+    }
+
+    @Test
+    fun officialRouteWritesEmptyPatch() {
+        val route = DshRoute("deepseek-official", "DEEPSEEK_API_KEY", "deepseek-chat")
+
+        // No llm-pi-ai entry keeps dsh-base's default providers; the official key
+        // arrives through the exported DEEPSEEK_API_KEY environment.
+        assertEquals("[]\n", dshHomePatch(route, "deepseek-chat"))
     }
 }
