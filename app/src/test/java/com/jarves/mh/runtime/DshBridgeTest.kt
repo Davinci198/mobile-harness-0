@@ -333,6 +333,52 @@ class DshStuckGuardTest {
         }
         assertFalse(guard.noteToolCompleted("Error: cannot read a.txt: not found"))
     }
+
+    @Test
+    fun identicalSuccessfulCallsTriggerLoopAbort() {
+        val guard = DshStuckGuard()
+        repeat(DshStuckGuard.IDENTICAL_LIMIT - 1) {
+            assertFalse(guard.noteToolStarted("UpdateGoal", "goal-1"))
+        }
+        assertTrue(guard.noteToolStarted("UpdateGoal", "goal-1"))
+    }
+
+    @Test
+    fun differingToolCallsResetIdenticalStreak() {
+        val guard = DshStuckGuard()
+        repeat(DshStuckGuard.IDENTICAL_LIMIT - 1) {
+            assertFalse(guard.noteToolStarted("UpdateGoal", "goal-1"))
+        }
+        assertFalse(guard.noteToolStarted("Read", "other.txt"))
+        repeat(DshStuckGuard.IDENTICAL_LIMIT - 1) {
+            assertFalse(guard.noteToolStarted("UpdateGoal", "goal-1"))
+        }
+        assertTrue(guard.noteToolStarted("UpdateGoal", "goal-1"))
+    }
+
+    @Test
+    fun resetClearsIdenticalStreak() {
+        val guard = DshStuckGuard()
+        repeat(DshStuckGuard.IDENTICAL_LIMIT - 1) {
+            assertFalse(guard.noteToolStarted("UpdateGoal", "goal-1"))
+        }
+        guard.reset()
+        repeat(DshStuckGuard.IDENTICAL_LIMIT - 1) {
+            assertFalse(guard.noteToolStarted("UpdateGoal", "goal-1"))
+        }
+        assertTrue(guard.noteToolStarted("UpdateGoal", "goal-1"))
+    }
+
+    @Test
+    fun identicalCallsThatFailCountOnBothStreaks() {
+        val guard = DshStuckGuard()
+        repeat(DshStuckGuard.LIMIT - 1) {
+            guard.noteToolStarted("Bash", "ls")
+            assertFalse(guard.noteToolCompleted("Error: ls: not found"))
+        }
+        guard.noteToolStarted("Bash", "ls")
+        assertTrue(guard.noteToolCompleted("Error: ls: not found"))
+    }
 }
 
 class DshRouteMapperTest {

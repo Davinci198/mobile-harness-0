@@ -291,6 +291,12 @@ class DshRuntimeBridge(
                     eventBus.emit(
                         RuntimeEvent.ToolStarted(sessionId, protocolEvent.name, protocolEvent.detail),
                     )
+                    if (stuckGuard.noteToolStarted(protocolEvent.name, protocolEvent.detail)) {
+                        failure = "The agent repeated the same tool call ${DshStuckGuard.IDENTICAL_LIMIT} times " +
+                            "in a row without producing any response. Try a stronger model or rephrase the request."
+                        closeInput()
+                        process.destroy()
+                    }
                 }
                 is DshSdkProtocolEvent.ToolCompleted -> {
                     sawActivity = true
@@ -759,8 +765,16 @@ internal sealed interface DshSdkProtocolEvent {
  */
 internal class DshStuckGuard {
     private var streak = 0
+    private var lastSignature = ""
+    private var identicalStreak = 0
 
-    /** Returns true when the loop limit was just reached (and resets). */
+    /**
+     * Returns true when the loop limit was just reached (and resets).
+     *
+     * Failing summaries count as one class of loop signal. Identical tool calls
+     * that succeed (for example `update_goal` completing the same goal over and
+     * over) are tracked separately and never clear the failure streak.
+     */
     fun noteToolCompleted(summary: String): Boolean {
         val failed = summary.startsWith("error", ignoreCase = true) ||
             summary.contains("not found", ignoreCase = true) ||
@@ -775,12 +789,25 @@ internal class DshStuckGuard {
         return true
     }
 
+    /** Returns true when the same tool+detail was invoked [IDENTICAL_LIMIT] times consecutively. */
+    fun noteToolStarted(name: String, detail: String): Boolean {
+        val signature = name + "\u0000" + detail
+        identicalStreak = if (signature == lastSignature) identicalStreak + 1 else 1
+        lastSignature = signature
+        if (identicalStreak < IDENTICAL_LIMIT) return false
+        identicalStreak = 0
+        return true
+    }
+
     fun reset() {
         streak = 0
+        identicalStreak = 0
+        lastSignature = ""
     }
 
     companion object {
         const val LIMIT = 5
+        const val IDENTICAL_LIMIT = 6
     }
 }
 
