@@ -251,3 +251,11 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
 - Același prompt scurt „salut": rece 13.9s → cald 2.2s. OBIECTIV atins: boot 8-12s plătit o
   singură dată la turnul 1, turnurile 2+ doar latenity model (2-7s).
 - Evidence: ~/9remote-uploads/opencode/warm-verify/{newchat.json, warm-second-chat.log}.
+
+### 2026-10-08 — audit P1 fixes (parte 1)
+- Branch fix/audit-bugfix-2026-10-08-p1 (commit 4006400 + 4a2e80f). CI runs 37702832164 (fail - close override) și 37703586547 (success, 4m43s).
+- Bug 1 (P1): LocalFileSystem.copy — detect same canonical path for file copy → return FsError.FAILED (prevents overwrite/delete of source by same target).
+- Bug 3 (P1): MainViewModel.createFilesFile — check stat(path); if NOT_FOUND → writeText; if EXISTS → return FsError("File already exists") (no silent truncation).
+- Bug 4 (P1): MainViewModel.openFileRoot — clear fsClipboard on root switch.
+- Bug 5 (P1): HeadlessCliBridge — on warm turn fail reset warmProxy/warmProxySignature; non-warm path clears cached warm proxy; added Closeable override + proper cleanup.
+- All P1 (1,3,4,5) from audit applied; unit tests build/compile OK on CI (dany-debug-apk). No local build, only CI.
