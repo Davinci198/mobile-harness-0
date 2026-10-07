@@ -129,48 +129,63 @@ class DshRuntimeBridge(
             val contextPrompt = buildContextPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind)
             val command = listOf("/usr/local/bin/dsh", "--profile", "sdk")
             Log.d("DshBridge", "Route: ${route.name}, Model: ${provider.model}")
-            val process = installer.process(
-                installed.proot,
-                installed.rootfs,
-                workspace,
-                environment,
-                command,
-                guestWorkspacePath = guestWorkspacePath,
-                // dsh's editor saves through an atomic temp-file rename. PRoot's
-                // hard-link emulation turns that rename into a dangling `.l2s`
-                // symlink after the temp file is removed, losing the real file.
-                emulateHardLinks = false,
-            )
-            activeProcess = process
-            if (userStopRequested) process.destroy()
-            val sdkResult = runSdkSession(
-                process = process,
-                sessionId = sessionId,
-                route = route,
-                model = provider.model.ifBlank { route.defaultModel },
-                guestWorkspacePath = guestWorkspacePath,
-                prompt = contextPrompt,
-            )
-            val exit = process.waitFor()
-            Log.d("DshBridge", "SDK process exited with code $exit")
-            val changed = checkpoints.changedFiles(workspace, before)
-            if (changed.isNotEmpty()) {
-                Log.d("DshBridge", "Changed files: $changed")
-                checkpoints.saveChangedPaths(projectId, changed, workspace)
-                val details = checkpoints.buildChangeDetails(projectId, workspace, checkpoints.readChangedPaths(projectId))
-                eventBus.emit(RuntimeEvent.FilesChanged(sessionId, details))
-            }
-            if (exit == 0 && sdkResult.completed && !userStopRequested) {
-                emitCompletedOnce(sessionId)
-                finishForegroundRuntime(
-                    completed = true,
-                    projectName = projectSlug,
-                    detail = "DeepSeek Harness finished the task in $projectSlug.",
+            var lastFailure = ""
+            for (attempt in 1..RETRY_MAX_ATTEMPTS) {
+                val process = installer.process(
+                    installed.proot,
+                    installed.rootfs,
+                    workspace,
+                    environment,
+                    command,
+                    guestWorkspacePath = guestWorkspacePath,
+                    // dsh's editor saves through an atomic temp-file rename. PRoot's
+                    // hard-link emulation turns that rename into a dangling `.l2s`
+                    // symlink after the temp file is removed, losing the real file.
+                    emulateHardLinks = false,
                 )
-            } else {
+                activeProcess = process
+                if (userStopRequested) process.destroy()
+                val sdkResult = runSdkSession(
+                    process = process,
+                    sessionId = sessionId,
+                    route = route,
+                    model = provider.model.ifBlank { route.defaultModel },
+                    guestWorkspacePath = guestWorkspacePath,
+                    prompt = contextPrompt,
+                )
+                val exit = process.waitFor()
+                Log.d("DshBridge", "SDK process exited with code $exit")
+                if (exit == 0 && sdkResult.completed && !userStopRequested) {
+                    val changed = checkpoints.changedFiles(workspace, before)
+                    if (changed.isNotEmpty()) {
+                        Log.d("DshBridge", "Changed files: $changed")
+                        checkpoints.saveChangedPaths(projectId, changed, workspace)
+                        val details = checkpoints.buildChangeDetails(projectId, workspace, checkpoints.readChangedPaths(projectId))
+                        eventBus.emit(RuntimeEvent.FilesChanged(sessionId, details))
+                    }
+                    emitCompletedOnce(sessionId)
+                    finishForegroundRuntime(
+                        completed = true,
+                        projectName = projectSlug,
+                        detail = "DeepSeek Harness finished the task in $projectSlug.",
+                    )
+                    return@runCatching
+                }
                 if (userStopRequested) throw DshSessionException("Stopped by user")
-                error(sdkResult.failure.ifBlank { "DeepSeek Harness stopped with exit code $exit" })
+                lastFailure = sdkResult.failure.ifBlank { "DeepSeek Harness stopped with exit code $exit" }
+                if (!isTransientProviderOverload(lastFailure) || attempt >= RETRY_MAX_ATTEMPTS) {
+                    error(lastFailure)
+                }
+                pushForegroundProgress("DeepSeek Harness provider is overloaded — retrying ($attempt/${RETRY_MAX_ATTEMPTS})…")
+                eventBus.emit(
+                    RuntimeEvent.AssistantDelta(
+                        sessionId,
+                        "\n\n[Provider temporarily overloaded — retrying ($attempt/${RETRY_MAX_ATTEMPTS})…]\n",
+                    ),
+                )
+                delay(RETRY_BACKOFF_MS * attempt)
             }
+            error(lastFailure)
         }.onFailure { error ->
             Log.e("DshBridge", "Session failed", error)
             val message = friendlyError(error)
@@ -611,6 +626,22 @@ private suspend fun emitReasoningSummary(
         }
     }
 
+    /**
+     * Provider-side transient failures (for example NVIDIA NIM "Service temporarily
+     * overloaded", PI_AI_ERROR) can be retried by re-running the SDK process. Anything
+     * else (bad key, quota, blocking) must surface immediately.
+     */
+    private fun isTransientProviderOverload(message: String): Boolean {
+        val m = message.lowercase()
+        return m.contains("temporarily overloaded") ||
+            m.contains("overloaded") ||
+            m.contains("temporarily unavailable") ||
+            m.contains("service temporarily") ||
+            m.contains("pi_ai_error") ||
+            m.contains("try again later") ||
+            m.contains("backoff")
+    }
+
     private class DshSessionException(message: String) : IllegalStateException(message)
 
     companion object {
@@ -621,6 +652,8 @@ private suspend fun emitReasoningSummary(
         private const val SDK_PROMPT_ID = 2
         private const val SDK_SHUTDOWN_ID = 3
         private const val SDK_SHUTDOWN_TIMEOUT_MS = 3_000L
+        private const val RETRY_MAX_ATTEMPTS = 4
+        private const val RETRY_BACKOFF_MS = 4_000L
     }
 }
 
