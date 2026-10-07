@@ -1266,11 +1266,18 @@ internal class DshSdkProtocolParser(private val expectedSessionId: String) {
                         )
                     }
                 }
-                "chunk" -> parseStreamChunk(record.optJSONObject("chunk"), blockId)?.let {
-                    when (it) {
-                        is DshSdkProtocolEvent.AssistantText -> text.append(it.text)
-                        is DshSdkProtocolEvent.Reasoning -> reasoning = it
-                        else -> Unit
+                "chunk" -> {
+                    // Chunk records carry their index inside the chunk itself, not on
+                    // the record wrapper. `block-end` keyed by the wrapper index is
+                    // turn+step (missing the packed block's index), so it would miss
+                    // the accumulated text and re-append the completed message twice.
+                    val chunkRecord = record.optJSONObject("chunk") ?: continue
+                    parseStreamChunk(chunkRecord, turn + step + chunkRecord.optInt("index", 0))?.let {
+                        when (it) {
+                            is DshSdkProtocolEvent.AssistantText -> text.append(it.text)
+                            is DshSdkProtocolEvent.Reasoning -> reasoning = it
+                            else -> Unit
+                        }
                     }
                 }
             }

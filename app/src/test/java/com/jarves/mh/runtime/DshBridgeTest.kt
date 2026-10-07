@@ -268,6 +268,31 @@ class DshSdkProtocolParserTest {
     }
 
     @Test
+    fun blockEndKeyedByNestedIndexDoesNotRepeatTheMessage() {
+        // Mirrors the real 0.2.0 stream: text-chunks carry a top-level index while
+        // chunk records nest their own index inside the chunk. The block-end must
+        // be keyed by that nested index, or it misses the accumulated text and
+        // appends the completed message a second time.
+        val stream = JSONArray()
+            .put(JSONObject().put("type", "chunk").put("time", 1).put("chunk", JSONObject()
+                .put("type", "block-start").put("index", 1).put("blockType", "text")))
+            .put(JSONObject().put("type", "text-chunks").put("index", 1).put("time0", 1)
+                .put("dt", JSONArray()).put("texts", JSONArray().put("Hel").put("lo")))
+            .put(JSONObject().put("type", "chunk").put("time", 2).put("chunk", JSONObject()
+                .put("type", "block-end").put("index", 1).put("block", JSONObject()
+                    .put("type", "text").put("text", "Hello"))))
+        val answer = parser.parseLine(sessionEvent("assistant/message", JSONObject()
+            .put("turn", 1).put("step", 1)
+            .put("stream", stream)
+            .put("message", JSONObject().put("content", JSONArray().put(
+                JSONObject().put("type", "text").put("text", "Hello"),
+            )))))
+
+        // The completed text must surface once, not doubled.
+        assertEquals(DshSdkProtocolEvent.AssistantText("Hello"), answer)
+    }
+
+    @Test
     fun replaysRawChunkRecordsInsideStream() {
         val stream = JSONArray()
             .put(JSONObject().put("type", "chunk").put("time", 1).put("chunk", JSONObject()
