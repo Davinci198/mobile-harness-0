@@ -195,7 +195,11 @@ internal abstract class HeadlessCliBridge(
                 result = CliRunResult(failed = warmTurn.failed, sawAnyOutput = warmTurn.sawAnyOutput)
                 // A failed turn leaves the session in an unknown state: drop it
                 // so the next Agent Execution respawns (or goes cold) cleanly.
-                if (warmTurn.failed != null) closeWarmSession()
+                if (warmTurn.failed != null) {
+                    closeWarmSession()
+                    warmProxy = null
+                    warmProxySignature = null
+                }
             } else {
                 val command = commandFor(contextPrompt, provider, secret, guestWorkspacePath, gatewayUrl)
                 Log.d("HeadlessBridge", "${kind.title} command: $command")
@@ -296,6 +300,10 @@ internal abstract class HeadlessCliBridge(
             runCatching { warmProxy?.close() }
             warmProxy = proxy
             warmProxySignature = signature
+        } else {
+            // Non-warm path: cached proxy is only for warm sessions
+            warmProxy = null
+            warmProxySignature = null
         }
         return proxy
     }
@@ -304,6 +312,16 @@ internal abstract class HeadlessCliBridge(
     private fun closeWarmSession() {
         runCatching { warmSession.close() }
         runCatching { installer.killGuestOrphans() }
+    }
+
+    override fun close() {
+        runCatching { closeWarmSession() }
+        warmProxy?.close()
+        warmProxy = null
+        warmProxySignature = null
+        runCatching { activeProcess?.destroy() }
+        activeProcess = null
+        userStopRequested = false
     }
 
     /** Warm-session identity: any change to these inputs forces a respawn. */

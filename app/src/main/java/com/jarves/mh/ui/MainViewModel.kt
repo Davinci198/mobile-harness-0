@@ -1160,6 +1160,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 fsShowTiles = com.jarves.mh.storage.FsCategories.definitionsFor(root).isNotEmpty(),
                 fsStorageFree = -1L,
                 fsStorageTotal = -1L,
+                fsClipboard = com.jarves.mh.storage.FsClipboard(),
             )
         }
         readStorageUsage()
@@ -1411,7 +1412,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Creates an empty text file, ready to be opened and read or typed into. */
     fun createFilesFile(name: String) {
         val path = com.jarves.mh.storage.FsPaths.join(_state.value.fsPath, name)
-        mutateThenReload("Could not create the file") { it.writeText(path, "") }
+        mutateThenReload("Could not create the file") { fs ->
+            when (val stat = fs.stat(path)) {
+                is com.jarves.mh.storage.FsResult.Ok -> {
+                    return@mutateThenReload com.jarves.mh.storage.FsResult.Err(
+                        com.jarves.mh.storage.FsError(
+                            com.jarves.mh.storage.FsErrorKind.FAILED,
+                            "File already exists",
+                        ),
+                    )
+                }
+                is com.jarves.mh.storage.FsResult.Err -> {
+                    if (stat.error.kind != com.jarves.mh.storage.FsErrorKind.NOT_FOUND) {
+                        return@mutateThenReload stat
+                    }
+                }
+            }
+            fs.writeText(path, "")
+        }
     }
 
     fun renameFileEntry(entry: com.jarves.mh.storage.FsEntry, newName: String) {

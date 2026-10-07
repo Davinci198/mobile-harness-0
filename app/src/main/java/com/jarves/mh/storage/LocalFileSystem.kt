@@ -204,6 +204,12 @@ class LocalFileSystem(
                     copy(FsPaths.join(fromPath, name), FsPaths.join(toPath, name), recursive)
                 }
             } else {
+                // Prevent overwriting the source with itself (same canonical path)
+                try {
+                    if (from.canonicalPath == to.canonicalPath) {
+                        return@runCatching fsError<Unit>(FsErrorKind.FAILED, "Source and destination are the same")
+                    }
+                } catch (_: Exception) { /* ignore */ }
                 to.parentFile?.mkdirs()
                 from.copyTo(to, overwrite = true)
             }

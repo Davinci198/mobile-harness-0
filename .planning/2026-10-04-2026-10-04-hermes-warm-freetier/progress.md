@@ -214,3 +214,40 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
   cheie/route diferă), `staleSessionEventsFromAPreviousTurnAreIgnored` (parser filtrează tail-ul
   sesiunii vechi din același captur-file).
 - Fără build local (cerința user). Validarea = CI `dany-debug-apk` + instalare APK + măsurat.
+
+### 2026-10-07/08 — warm session VERIFICAT pe device + fix „raspuns duplicat" (root-cause parser)
+- Warm reuse CONFIRMAT pe moto g57 (emulator-5554): ambele turnuri din chat-ul de test
+  (project 759ba410, conv ae1c8a24) au rulat în ACELAȘI proces dsh — log
+  `cache/runtime-output-26403000897009.log` conține turn 1 (sessionId efcde6c2) și turn 2
+  (e3eaa3cd) cu `session.status idle` între ele și FĂRĂ `initialize(id=1)` la turnul 2.
+  Turn 1 workedMillis 14839 (a plătit boot-ul), turn 2 35831 (răspuns lung ~1400 chars,
+  dominat de generare — nu e măsură concludentă pentru câștigul warm, dar reutilizarea e
+  dovedită de procesul comun).
+- User: „raspunde greu dar e bine" — latency neconcludentă pe chat-ul ăsta (răspuns lung);
+  câștigul real = fără boot la turnurile 2+.
+- BUG „raspuns duplicat": textul apărea de 2× în chat. ROOT CAUSE = în parser, NU la
+  warm-session și NU la model: `parseAssistantStream` face blockId din `record.optInt("index")`
+  (indexul wrapper-ului), dar pentru recordurile `chunk` index-ul e ÎN INTERIOR
+  (`chunk.index`). Deci block-end primea blockId = turn+step (fără index), nu găsea textul
+  acumulat de text-chunks (keyed turn+step+index) → `missingSuffix` = tot mesajul → re-append.
+  Pre-existent (același bug și pe build retry-overload 2e4974f la 18:40Z).
+- Simulare Python pe logul real: fără fix `"Salut!...😊Salut!...😊"`, cu fix `"Salut!...😊"`.
+- Fix commit `ce47d5a`: blockId la `chunk` = `turn + step + chunkRecord.optInt("index", 0)`;
+  test regresie `blockEndKeyedByNestedIndexDoesNotRepeatTheMessage` (imitează stream-ul real:
+  text-chunks top-level index + chunk block-end cu index imbricat, expect text o singură dată).
+- CI: branch run `37692772481` VERDE (unit tests incl. noul test), main run `37693810545` VERDE.
+  APK `~/9remote-uploads/opencode/apk-dup-fix/app-online-debug.apk` → `adb install -r` Success →
+  force-stop + relaunch → user confirmă „o singură dată".
+- Merged ff `26c8fb0..ce47d5a` → `mh0/main`; branch fix șters local+remote. Local main = mh0/main.
+- Evidence sub `~/9remote-uploads/opencode/warm-verify/` (warm-output.log, t1/t2.jsonl,
+  agent-loop.js, sdk-jsonrpc.js, api-client.js).
+
+### 2026-10-08 — warm LATENCY măsurat (confirmare finală)
+- Conversație nouă d3f5cd3d/ecf70733 pe APK cu fix duplicat: 6 turnuri, UN proces dsh
+  (log runtime-output-28274239126243.log: 0× `initialize` id=1, 6 sessionIds distincte).
+- workedMillis: turn1 „salut răspunde în română" 13,900ms (boot+model, 35ch); turn4 „salut"
+  2,230ms (25ch); turn5 „bine" 3,074ms; turn6 „ce poți face" 6,557ms (573ch). Turnuri 2-3 cu
+  răspunsuri lungi (885ch/158ch) = 21.6s/21.1s (domină generarea+reasoning).
+- Același prompt scurt „salut": rece 13.9s → cald 2.2s. OBIECTIV atins: boot 8-12s plătit o
+  singură dată la turnul 1, turnurile 2+ doar latenity model (2-7s).
+- Evidence: ~/9remote-uploads/opencode/warm-verify/{newchat.json, warm-second-chat.log}.
