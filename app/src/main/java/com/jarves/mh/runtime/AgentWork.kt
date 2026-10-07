@@ -108,7 +108,7 @@ class AgentWork(
         projectSlug: String,
         provider: ProviderProfile,
     ) {
-        val runtime = driversByAgent[agent]?.runtime as? HeadlessCliBridge ?: return
+        val runtime = driversByAgent[agent]?.runtime ?: return
         runtime.prewarmSession(provider, projectId, projectSlug)
     }
 

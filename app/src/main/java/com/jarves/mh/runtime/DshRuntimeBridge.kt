@@ -12,6 +12,7 @@ import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.isLoopbackBaseUrl
+import java.io.BufferedWriter
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.UUID
@@ -50,6 +51,11 @@ class DshRuntimeBridge(
     override val events: Flow<RuntimeEvent> = eventBus
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var activeProcess: Process? = null
+    /**
+     * The SDK process kept alive between Agent Executions. Reusing it skips the
+     * 8-12s proot + node + dsh boot that dominated short turns.
+     */
+    @Volatile private var warmChannel: DshSdkChannel? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
     @Volatile private var activeProjectSlug: String? = null
@@ -109,53 +115,44 @@ class DshRuntimeBridge(
             val before = checkpoints.snapshot(workspace)
             val route = DshRouteMapper.forProfile(provider)
             writeDshSettings(installed.rootfs, route, provider)
-            val environment = linkedMapOf(
-                // PRoot's --link2symlink turns the loader's native-binding cache
-                // hard-link into a dangling .l2s symlink; with hard links disabled
-                // (always on for dsh) the cache can still contain a poisoned copy,
-                // so load the binding straight from its installed source.
-                "NARB_DISABLE_NATIVE_CACHE" to "1",
-                "DSH_HOME" to DSH_HOME_GUEST_PATH,
-                // PocketDev already confines the whole Linux guest with PRoot. Let dsh
-                // use every tool inside that boundary without an unavailable approval UI.
-                "DSH_PERMISSION_MODE" to "danger-full-access",
-                // Guest CLIs refuse to boot with an empty key variable; a loopback
-                // gateway ignores the header, so send a placeholder instead.
-                route.keyEnv to secret.ifBlank { "loopback" },
-            )
-            if (route.keyEnv != FALLBACK_KEY_ENV) environment.remove(FALLBACK_KEY_ENV)
+            val environment = buildEnvironment(route, secret)
+            val model = provider.model.ifBlank { route.defaultModel }
 
             val guestWorkspacePath = "/workspace/$projectSlug"
             val contextPrompt = buildContextPrompt(prompt, conversationHistory, guestWorkspacePath, projectKind)
             val command = listOf("/usr/local/bin/dsh", "--profile", "sdk")
             Log.d("DshBridge", "Route: ${route.name}, Model: ${provider.model}")
+            // Route, model, workspace and credentials are all baked into the guest
+            // process when it spawns, so any change to them forces a fresh boot.
+            val signature = dshWarmSignature(route, model, guestWorkspacePath, workspace, environment)
             var lastFailure = ""
             for (attempt in 1..RETRY_MAX_ATTEMPTS) {
-                val process = installer.process(
-                    installed.proot,
-                    installed.rootfs,
-                    workspace,
-                    environment,
-                    command,
-                    guestWorkspacePath = guestWorkspacePath,
-                    // dsh's editor saves through an atomic temp-file rename. PRoot's
-                    // hard-link emulation turns that rename into a dangling `.l2s`
-                    // symlink after the temp file is removed, losing the real file.
-                    emulateHardLinks = false,
-                )
-                activeProcess = process
-                if (userStopRequested) process.destroy()
+                if (userStopRequested) throw DshSessionException("Stopped by user")
+                val channel = adoptChannel(signature) {
+                    installer.process(
+                        installed.proot,
+                        installed.rootfs,
+                        workspace,
+                        environment,
+                        command,
+                        guestWorkspacePath = guestWorkspacePath,
+                        // dsh's editor saves through an atomic temp-file rename. PRoot's
+                        // hard-link emulation turns that rename into a dangling `.l2s`
+                        // symlink after the temp file is removed, losing the real file.
+                        emulateHardLinks = false,
+                    )
+                }
+                activeProcess = channel.process
+                if (userStopRequested) channel.process.destroy()
                 val sdkResult = runSdkSession(
-                    process = process,
+                    channel = channel,
                     sessionId = sessionId,
                     route = route,
-                    model = provider.model.ifBlank { route.defaultModel },
+                    model = model,
                     guestWorkspacePath = guestWorkspacePath,
                     prompt = contextPrompt,
                 )
-                val exit = process.waitFor()
-                Log.d("DshBridge", "SDK process exited with code $exit")
-                if (exit == 0 && sdkResult.completed && !userStopRequested) {
+                if (sdkResult.completed && !userStopRequested) {
                     val changed = checkpoints.changedFiles(workspace, before)
                     if (changed.isNotEmpty()) {
                         Log.d("DshBridge", "Changed files: $changed")
@@ -171,8 +168,20 @@ class DshRuntimeBridge(
                     )
                     return@runCatching
                 }
+                // A failed turn leaves the reused process in an unknown state: drop it
+                // so the retry (and every later Agent Execution) boots from scratch.
+                val deadExit = if (channel.process.isAlive) {
+                    null
+                } else {
+                    runCatching { channel.process.exitValue() }.getOrNull()
+                }
+                closeWarmChannel()
+                activeProcess = null
                 if (userStopRequested) throw DshSessionException("Stopped by user")
-                lastFailure = sdkResult.failure.ifBlank { "DeepSeek Harness stopped with exit code $exit" }
+                lastFailure = sdkResult.failure.ifBlank {
+                    if (deadExit != null) "DeepSeek Harness stopped with exit code $deadExit"
+                    else "DeepSeek Harness stopped unexpectedly"
+                }
                 if (!isTransientProviderOverload(lastFailure) || attempt >= RETRY_MAX_ATTEMPTS) {
                     error(lastFailure)
                 }
@@ -206,87 +215,75 @@ class DshRuntimeBridge(
         sessionId
     }
 
+    /**
+     * Runs one Agent Execution on [channel].
+     *
+     * The `initialize` handshake only runs for a freshly spawned process; a
+     * reused one goes straight to `session/prompt`, which is where the 8-12s
+     * proot + node + dsh boot is skipped. The process is deliberately left
+     * running afterwards: the next Agent Execution resumes reading the same
+     * capture file exactly where this turn stopped.
+     */
     private suspend fun runSdkSession(
-        process: Process,
+        channel: DshSdkChannel,
         sessionId: String,
         route: DshRoute,
         model: String,
         guestWorkspacePath: String,
         prompt: String,
     ): DshSdkRunResult {
+        val process = channel.process
         val nativeProcess = process as? NativeSpawnProcess
             ?: error("Unsupported Android runtime process")
-        val writer = process.outputStream.bufferedWriter()
         val parser = DshSdkProtocolParser(sessionId)
-        var outputOffset = 0L
-        val pendingOutput = StringBuilder()
-        var promptSent = false
         var sawRunning = false
         var completed = false
         var sawActivity = false
-        var shutdownSent = false
-        var shutdownSentAt = 0L
-        var inputClosed = false
+        var turnEndedAt = 0L
+        var lastByteAt = android.os.SystemClock.elapsedRealtime()
         var failure = ""
         // Weak models loop a failing tool call (invented file paths, malformed
         // args) with no text; the harness itself has no step cap, so guard here
         // and stop the session instead of letting it spin until the user stops.
         val stuckGuard = DshStuckGuard()
 
-        fun send(method: String, id: Int, params: JSONObject? = null) {
-            val frame = JSONObject()
-                .put("jsonrpc", "2.0")
-                .put("id", id)
-                .put("method", method)
-            if (params != null) frame.put("params", params)
-            writer.write(frame.toString())
-            writer.newLine()
-            writer.flush()
+        if (!channel.initialized) {
+            val bootFailure = awaitSdkInitialized(channel, route, model, guestWorkspacePath)
+            if (bootFailure != null) return DshSdkRunResult(completed = false, failure = bootFailure)
         }
-
-        fun closeInput() {
-            if (inputClosed) return
-            inputClosed = true
-            runCatching { writer.close() }
-        }
-
-        send(
-            method = "initialize",
-            id = SDK_INITIALIZE_ID,
+        channel.send(
+            method = "session/prompt",
+            id = SDK_PROMPT_ID,
             params = JSONObject()
-                .put("cwd", guestWorkspacePath)
-                .put("provider", route.name)
-                .put("model", model),
+                .put("sessionId", sessionId)
+                .put(
+                    "contentBlocks",
+                    JSONArray().put(JSONObject().put("type", "text").put("text", prompt)),
+                ),
         )
+
+        fun markTurnEnded() {
+            turnEndedAt = android.os.SystemClock.elapsedRealtime()
+            lastByteAt = turnEndedAt
+        }
 
         suspend fun handle(protocolEvent: DshSdkProtocolEvent) {
             when (protocolEvent) {
-                DshSdkProtocolEvent.Initialized -> if (!promptSent) {
-                    send(
-                        method = "session/prompt",
-                        id = SDK_PROMPT_ID,
-                        params = JSONObject()
-                            .put("sessionId", sessionId)
-                            .put(
-                                "contentBlocks",
-                                JSONArray().put(JSONObject().put("type", "text").put("text", prompt)),
-                            ),
-                    )
-                    promptSent = true
-                }
-                DshSdkProtocolEvent.PromptAccepted -> Unit
+                DshSdkProtocolEvent.Initialized,
+                DshSdkProtocolEvent.PromptAccepted,
+                DshSdkProtocolEvent.ShutdownAcknowledged,
+                DshSdkProtocolEvent.Ignored,
+                -> Unit
                 is DshSdkProtocolEvent.Status -> {
                     if (protocolEvent.running) {
                         sawRunning = true
                         pushForegroundProgress("DeepSeek Harness is working…")
-                    } else if (sawRunning && !shutdownSent) {
+                    } else if (sawRunning && turnEndedAt == 0L) {
                         completed = sawActivity && failure.isBlank()
                         if (!completed && failure.isBlank()) {
                             failure = "DeepSeek Harness stopped before processing the prompt"
                         }
-                        shutdownSent = true
-                        shutdownSentAt = android.os.SystemClock.elapsedRealtime()
-                        send("shutdown", SDK_SHUTDOWN_ID)
+                        markTurnEnded()
                     }
                 }
                 is DshSdkProtocolEvent.Reasoning -> {
@@ -309,7 +306,7 @@ class DshRuntimeBridge(
                     if (stuckGuard.noteToolStarted(protocolEvent.name, protocolEvent.detail)) {
                         failure = "The agent repeated the same tool call ${DshStuckGuard.IDENTICAL_LIMIT} times " +
                             "in a row without producing any response. Try a stronger model or rephrase the request."
-                        closeInput()
+                        channel.closeInput()
                         process.destroy()
                     }
                 }
@@ -321,7 +318,7 @@ class DshRuntimeBridge(
                     if (stuckGuard.noteToolCompleted(protocolEvent.summary)) {
                         failure = "The agent repeated a failing tool call ${DshStuckGuard.LIMIT} times in a row " +
                             "without producing any response. Try a stronger model or rephrase the request."
-                        closeInput()
+                        channel.closeInput()
                         process.destroy()
                     }
                 }
@@ -332,48 +329,235 @@ class DshRuntimeBridge(
                         eventBus.emit(RuntimeEvent.AssistantDelta(sessionId, protocolEvent.text))
                     }
                 }
-                is DshSdkProtocolEvent.Failed -> failure = protocolEvent.message
+                // A failure ends the turn too: the SDK server keeps running, so
+                // waiting for the process to exit would hang the Agent Execution.
+                is DshSdkProtocolEvent.Failed -> {
+                    failure = protocolEvent.message
+                    markTurnEnded()
+                }
                 DshSdkProtocolEvent.TurnCompleted -> sawActivity = true
-                DshSdkProtocolEvent.ShutdownAcknowledged -> closeInput()
-                DshSdkProtocolEvent.Ignored -> Unit
             }
         }
 
-        while (process.isAlive || nativeProcess.outputFile.length() > outputOffset) {
-            if (
-                process.isAlive &&
-                shutdownSentAt > 0L &&
-                android.os.SystemClock.elapsedRealtime() - shutdownSentAt >= SDK_SHUTDOWN_TIMEOUT_MS
-            ) {
-                closeInput()
-                process.destroy()
+        while (true) {
+            val outputFile = nativeProcess.outputFile
+            if (!process.isAlive && outputFile.length() <= channel.outputOffset) break
+            if (turnEndedAt > 0L) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastByteAt >= WARM_TURN_QUIET_MS || now - turnEndedAt >= WARM_TURN_DRAIN_TIMEOUT_MS) {
+                    break
+                }
             }
-            val available = nativeProcess.outputFile.length() - outputOffset
+            val available = outputFile.length() - channel.outputOffset
+            if (available <= 0) {
+                delay(50)
+                continue
+            }
+            val bytes = ByteArray(minOf(available, 16L * 1024).toInt())
+            val count = RandomAccessFile(outputFile, "r").use { file ->
+                file.seek(channel.outputOffset)
+                file.read(bytes)
+            }
+            if (count <= 0) continue
+            channel.outputOffset += count
+            lastByteAt = android.os.SystemClock.elapsedRealtime()
+            channel.pendingOutput.append(bytes.decodeToString(0, count))
+            var newline = channel.pendingOutput.indexOf("\n")
+            while (newline >= 0) {
+                val line = channel.pendingOutput.substring(0, newline).trimEnd('\r')
+                channel.pendingOutput.delete(0, newline + 1)
+                if (line.isNotBlank()) handle(parser.parseLine(line))
+                newline = channel.pendingOutput.indexOf("\n")
+            }
+        }
+        channel.pendingOutput.toString().trim().takeIf(String::isNotBlank)?.let {
+            handle(parser.parseLine(it))
+        }
+        channel.turns++
+        Log.d("DshBridge", "SDK turn done: completed=$completed, failure=${failure.take(120)}")
+        return DshSdkRunResult(completed = completed, failure = failure)
+    }
+
+    /**
+     * Sends `initialize` and reads until the SDK answers it, consuming everything
+     * the handshake prints so a later turn never re-reads it.
+     *
+     * Returns null once the channel is ready, otherwise the failure to report -
+     * possibly blank, so the caller can substitute the process exit code.
+     */
+    private suspend fun awaitSdkInitialized(
+        channel: DshSdkChannel,
+        route: DshRoute,
+        model: String,
+        guestWorkspacePath: String,
+    ): String? {
+        val process = channel.process
+        val nativeProcess = process as? NativeSpawnProcess
+            ?: error("Unsupported Android runtime process")
+        channel.send(
+            method = "initialize",
+            id = SDK_INITIALIZE_ID,
+            params = JSONObject()
+                .put("cwd", guestWorkspacePath)
+                .put("provider", route.name)
+                .put("model", model),
+        )
+        val parser = DshSdkProtocolParser("")
+        var failure: String? = null
+        var ready = false
+        while (!ready && (process.isAlive || nativeProcess.outputFile.length() > channel.outputOffset)) {
+            val available = nativeProcess.outputFile.length() - channel.outputOffset
             if (available <= 0) {
                 delay(50)
                 continue
             }
             val bytes = ByteArray(minOf(available, 16L * 1024).toInt())
             val count = RandomAccessFile(nativeProcess.outputFile, "r").use { file ->
-                file.seek(outputOffset)
+                file.seek(channel.outputOffset)
                 file.read(bytes)
             }
             if (count <= 0) continue
-            outputOffset += count
-            pendingOutput.append(bytes.decodeToString(0, count))
-            var newline = pendingOutput.indexOf("\n")
+            channel.outputOffset += count
+            channel.pendingOutput.append(bytes.decodeToString(0, count))
+            var newline = channel.pendingOutput.indexOf("\n")
             while (newline >= 0) {
-                val line = pendingOutput.substring(0, newline).trimEnd('\r')
-                pendingOutput.delete(0, newline + 1)
-                if (line.isNotBlank()) handle(parser.parseLine(line))
-                newline = pendingOutput.indexOf("\n")
+                val line = channel.pendingOutput.substring(0, newline).trimEnd('\r')
+                channel.pendingOutput.delete(0, newline + 1)
+                if (line.isNotBlank()) {
+                    when (val event = parser.parseLine(line)) {
+                        DshSdkProtocolEvent.Initialized -> ready = true
+                        is DshSdkProtocolEvent.Failed -> {
+                            failure = event.message
+                            ready = true
+                        }
+                        else -> Unit
+                    }
+                }
+                newline = channel.pendingOutput.indexOf("\n")
             }
         }
-        pendingOutput.toString().trim().takeIf(String::isNotBlank)?.let {
-            handle(parser.parseLine(it))
+        if (!ready) return failure.orEmpty()
+        channel.initialized = true
+        Log.d("DshBridge", "SDK handshake ready (reused=${channel.turns > 0})")
+        return null
+    }
+
+    /**
+     * The process backing the current Agent Execution: freshly spawned, or the
+     * one the previous turn left running. Anything else is a cold start.
+     */
+    private fun adoptChannel(signature: String, spawn: () -> Process): DshSdkChannel {
+        warmChannel?.takeIf { it.signature == signature && it.process.isAlive && it.turns < MAX_WARM_TURNS }
+            ?.let { return it }
+        closeWarmChannelBlocking()
+        return DshSdkChannel(signature, spawn()).also { warmChannel = it }
+    }
+
+    /**
+     * Shuts the reused SDK process down. A turn that failed leaves the server in
+     * an unknown state, so every failure path drops the channel rather than
+     * risking a half-disposed agent on the next turn.
+     */
+    private suspend fun closeWarmChannel() {
+        val channel = warmChannel ?: return
+        warmChannel = null
+        destroyChannel(channel)
+    }
+
+    /** Non-suspend variant for the spawn path, where there is nothing to await. */
+    private fun closeWarmChannelBlocking() {
+        val channel = warmChannel ?: return
+        warmChannel = null
+        runCatching { channel.send("shutdown", SDK_SHUTDOWN_ID) }
+        runCatching { channel.closeInput() }
+        Thread {
+            runCatching { channel.process.destroy() }
+            runCatching { channel.process.destroyForcibly() }
+        }.apply { isDaemon = true; start() }
+    }
+
+    private suspend fun destroyChannel(channel: DshSdkChannel) {
+        runCatching { channel.send("shutdown", SDK_SHUTDOWN_ID) }
+        // The SDK disposes its agents while answering shutdown; give it a beat
+        // before the pipe is cut, then fall back to the proot kill.
+        delay(SDK_SHUTDOWN_GRACE_MS)
+        channel.closeInput()
+        if (channel.process.isAlive) {
+            channel.process.destroy()
+            delay(300)
+            if (channel.process.isAlive) channel.process.destroyForcibly()
         }
-        closeInput()
-        return DshSdkRunResult(completed = completed, failure = failure)
+        Log.i("DshBridge", "SDK channel closed (turns=${channel.turns}, alive=${channel.process.isAlive})")
+    }
+
+    /** Guest environment for [route]; identical across every warm reuse. */
+    private fun buildEnvironment(route: DshRoute, secret: String): Map<String, String> {
+        val environment = linkedMapOf(
+            // PRoot's --link2symlink turns the loader's native-binding cache
+            // hard-link into a dangling .l2s symlink; with hard links disabled
+            // (always on for dsh) the cache can still contain a poisoned copy,
+            // so load the binding straight from its installed source.
+            "NARB_DISABLE_NATIVE_CACHE" to "1",
+            "DSH_HOME" to DSH_HOME_GUEST_PATH,
+            // PocketDev already confines the whole Linux guest with PRoot. Let dsh
+            // use every tool inside that boundary without an unavailable approval UI.
+            "DSH_PERMISSION_MODE" to "danger-full-access",
+            // Guest CLIs refuse to boot with an empty key variable; a loopback
+            // gateway ignores the header, so send a placeholder instead.
+            route.keyEnv to secret.ifBlank { "loopback" },
+        )
+        if (route.keyEnv != FALLBACK_KEY_ENV) environment.remove(FALLBACK_KEY_ENV)
+        return environment
+    }
+
+    /**
+     * Boots the SDK process for [provider] right after a provider save so the
+     * next Agent Execution pays model latency instead of the 8-12s PRoot boot.
+     * Best effort: a cold-only state, an execution already in flight, or an
+     * uninstallable runtime makes this a silent no-op.
+     */
+    override suspend fun prewarmSession(
+        provider: ProviderProfile,
+        projectId: String,
+        projectSlug: String,
+    ) {
+        withContext(Dispatchers.IO) {
+            if (activeSessionId != null) return@withContext
+            val secret = secretFor(provider).orEmpty()
+            if (secret.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return@withContext
+            if (provider.kind == ProviderKind.CLAUDE) return@withContext
+            runCatching {
+                if (!installer.isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) return@runCatching
+                val installed = installer.installedRuntime()
+                installer.ensureDshAndroidCompatibility()
+                val route = DshRouteMapper.forProfile(provider)
+                writeDshSettings(installed.rootfs, route, provider)
+                val model = provider.model.ifBlank { route.defaultModel }
+                val environment = buildEnvironment(route, secret)
+                val workspace = checkpoints.ensureWorkspace(projectId)
+                val guestWorkspacePath = "/workspace/$projectSlug"
+                val signature = dshWarmSignature(route, model, guestWorkspacePath, workspace, environment)
+                val channel = adoptChannel(signature) {
+                    installer.process(
+                        installed.proot,
+                        installed.rootfs,
+                        workspace,
+                        environment,
+                        listOf("/usr/local/bin/dsh", "--profile", "sdk"),
+                        guestWorkspacePath = guestWorkspacePath,
+                        emulateHardLinks = false,
+                    )
+                }
+                if (channel.initialized) return@runCatching
+                val failure = awaitSdkInitialized(channel, route, model, guestWorkspacePath)
+                if (failure == null) {
+                    Log.i("DshBridge", "SDK session prewarmed for $projectSlug")
+                } else {
+                    Log.w("DshBridge", "Prewarm failed (${failure.take(120)}); the turn boots cold")
+                    closeWarmChannel()
+                }
+            }.onFailure { Log.w("DshBridge", "Prewarm skipped", it) }
+        }
     }
 
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
@@ -651,9 +835,27 @@ private suspend fun emitReasoningSummary(
         private const val SDK_INITIALIZE_ID = 1
         private const val SDK_PROMPT_ID = 2
         private const val SDK_SHUTDOWN_ID = 3
-        private const val SDK_SHUTDOWN_TIMEOUT_MS = 3_000L
+        private const val SDK_SHUTDOWN_GRACE_MS = 400L
         private const val RETRY_MAX_ATTEMPTS = 4
         private const val RETRY_BACKOFF_MS = 4_000L
+
+        /**
+         * Silence the reused process must keep after a turn ends before the
+         * turn is considered over. The SDK stops emitting as soon as the session
+         * goes idle, so a few quiet hundred milliseconds only catch the trailing
+         * records that race the `session.status` notification.
+         */
+        private const val WARM_TURN_QUIET_MS = 400L
+
+        /** Hard cap on the drain, so a chatty process cannot pin the turn open. */
+        private const val WARM_TURN_DRAIN_TIMEOUT_MS = 3_000L
+
+        /**
+         * The SDK only disposes server-owned agents on `shutdown`, and each turn
+         * creates one under its own session id, so recycle the process before the
+         * map grows without bound.
+         */
+        private const val MAX_WARM_TURNS = 25
     }
 }
 
@@ -686,6 +888,61 @@ internal fun dshHomePatch(route: DshRoute, model: String): String =
     }
 
 private data class DshSdkRunResult(val completed: Boolean, val failure: String)
+
+/**
+ * One `dsh --profile sdk` process plus the read state its turns share.
+ *
+ * PRoot merges stdout and stderr into a single append-only capture file, so the
+ * next turn has to resume reading exactly where the previous one stopped: the
+ * offset and the partial line live here rather than in a single turn's stack.
+ * The writer stays open for the life of the process because stdin carries every
+ * later `session/prompt`.
+ */
+internal class DshSdkChannel(val signature: String, val process: Process) {
+    val writer: BufferedWriter = process.outputStream.bufferedWriter()
+    val pendingOutput = StringBuilder()
+    var outputOffset = 0L
+    var initialized = false
+    var turns = 0
+    private var inputClosed = false
+
+    fun send(method: String, id: Int, params: JSONObject? = null) {
+        val frame = JSONObject()
+            .put("jsonrpc", "2.0")
+            .put("id", id)
+            .put("method", method)
+        if (params != null) frame.put("params", params)
+        writer.write(frame.toString())
+        writer.newLine()
+        writer.flush()
+    }
+
+    fun closeInput() {
+        if (inputClosed) return
+        inputClosed = true
+        runCatching { writer.close() }
+    }
+}
+
+/**
+ * Warm-session identity: every input baked into the guest process at spawn.
+ * `writeDshSettings` derives its file from the route and model, so those two
+ * cover the on-disk config; the workspace and environment carry the project
+ * and the provider key.
+ */
+internal fun dshWarmSignature(
+    route: DshRoute,
+    model: String,
+    guestWorkspacePath: String,
+    workspace: File,
+    environment: Map<String, String>,
+): String = listOf(
+    route.name,
+    model,
+    guestWorkspacePath,
+    workspace.absolutePath,
+    environment.toString(),
+).joinToString("|")
 
 /** dsh provider route resolved from our saved provider profile. */
 internal data class DshRoute(

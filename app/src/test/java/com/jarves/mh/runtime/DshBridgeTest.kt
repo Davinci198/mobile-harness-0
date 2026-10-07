@@ -8,8 +8,10 @@ import com.jarves.mh.model.ProviderProtocol
 import com.jarves.mh.model.inferredDshApiForUrl
 import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.model.providersForAgent
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -184,6 +186,40 @@ class DshSdkProtocolParserTest {
         assertEquals(
             DshSdkProtocolEvent.Ignored,
             parser.parseLine("tool-fs (@deepseek-ai/dsh-tool-fs): pending (waiting for service: fs)"),
+        )
+    }
+
+    @Test
+    fun staleSessionEventsFromAPreviousTurnAreIgnored() {
+        // A reused SDK process keeps appending to one capture file, so the next
+        // turn can still read the tail of the session it replaced. Nothing from
+        // it may reach the UI of the current turn.
+        assertEquals(
+            DshSdkProtocolEvent.Ignored,
+            parser.parseLine(
+                notification(
+                    "session.status",
+                    JSONObject().put("sessionId", "session-old").put("status", "running"),
+                ),
+            ),
+        )
+        assertEquals(
+            DshSdkProtocolEvent.Ignored,
+            parser.parseLine(
+                notification(
+                    "session.event",
+                    JSONObject().put("sessionId", "session-old").put(
+                        "event",
+                        JSONObject().put("type", "assistant/chunk").put("seq", 1).put("time", 1).put(
+                            "data",
+                            JSONObject().put("turn", 1).put("step", 1).put(
+                                "chunk",
+                                JSONObject().put("type", "text-delta").put("index", 0).put("text", "leak"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
         )
     }
 
@@ -521,5 +557,50 @@ class DshHomePatchTest {
         // No llm-pi-ai entry keeps dsh-base's default providers; the official key
         // arrives through the exported DEEPSEEK_API_KEY environment.
         assertEquals("[]\n", dshHomePatch(route, "deepseek-chat"))
+    }
+}
+
+class DshWarmSignatureTest {
+    private val officialRoute = DshRoute("deepseek-official", "DEEPSEEK_API_KEY", "deepseek-chat")
+    private val workspace = File("/data/data/com.jarves.mh/files/projects/demo")
+
+    private fun signature(
+        route: DshRoute = officialRoute,
+        model: String = "deepseek-chat",
+        guestWorkspacePath: String = "/workspace/demo",
+        workspace: File = this.workspace,
+        environment: Map<String, String> = mapOf("DEEPSEEK_API_KEY" to "sk-live"),
+    ): String = dshWarmSignature(route, model, guestWorkspacePath, workspace, environment)
+
+    @Test
+    fun identicalInputsReuseTheSameProcess() {
+        assertEquals(signature(), signature())
+    }
+
+    @Test
+    fun aDifferentModelBootsFresh() {
+        assertNotEquals(signature(), signature(model = "deepseek-reasoner"))
+    }
+
+    @Test
+    fun aDifferentProjectBootsFresh() {
+        assertNotEquals(signature(), signature(guestWorkspacePath = "/workspace/other"))
+        assertNotEquals(signature(), signature(workspace = File(workspace.parentFile, "other")))
+    }
+
+    @Test
+    fun aRotatedKeyBootsFresh() {
+        assertNotEquals(signature(), signature(environment = mapOf("DEEPSEEK_API_KEY" to "sk-rotated")))
+    }
+
+    @Test
+    fun aDifferentRouteBootsFresh() {
+        val custom = DshRoute(
+            name = "mh-custom",
+            keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
+            defaultModel = "deepseek-chat",
+            custom = DshCustomRoute("anthropic-messages", "https://gateway.example/v1"),
+        )
+        assertNotEquals(signature(), signature(route = custom))
     }
 }

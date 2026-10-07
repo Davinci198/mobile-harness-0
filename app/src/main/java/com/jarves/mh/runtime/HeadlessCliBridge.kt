@@ -353,7 +353,7 @@ internal abstract class HeadlessCliBridge(
      * bridge, an agent that is not installed or an execution already in flight
      * makes this a silent no-op.
      */
-    suspend fun prewarmSession(
+    override suspend fun prewarmSession(
         provider: ProviderProfile,
         projectId: String,
         projectSlug: String,

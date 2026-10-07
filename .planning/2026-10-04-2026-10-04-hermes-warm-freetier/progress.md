@@ -178,3 +178,39 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
 - Fix: env `NARB_DISABLE_NATIVE_CACHE=1` în `DshRuntimeBridge.startSession` (încarcă direct din
   sursă, fără cache/hardlink dance) + curățat cache-ul stricat de pe device →
   retest imediat fără APK nou merge.
+
+### 2026-10-06 17:35 — dsh FLOW COMPLET pe device (nolink) + fix „project_workspace"
+- După fix-ul NARB (cache), initialize-ul dsh merge sub nolink (rc=0, serverInfo), iar un
+  session/prompt rulează agentul complet → doar 401 AUTH (cheia loopback e falsă) → viața dsh 0.2.0 e OK.
+- CONFIRMARE: working dir real al agentului = /workspace/<slug> (exact ce pasează app-ul).
+- Problema „/workspace/clever-turing/project_workspace nu există" = ARTEFACT de prompt:
+  contextul injectat de app folosea eticheta XML `<project_workspace>...`; modelul mic
+  (llama-3.2-11b) a citit-o ca pe un FOLDER la `<cwd>/project_workspace`, a inventat o eroare
+  de tool pe acel path fictiv și a căutat cu glob. Harness-ul dsh NU referențiază nicăieri
+  `project_workspace` (grep în tot /usr/local/lib/dsh + /root → zero).
+- Fix commit: rename `<project_workspace>` → `<project-context>` (deschis+închis) în cele 3
+  bridge-uri (Dsh/Claude/Headless). CI verde (37503942051), APK reinstalat (Success). Branch temp șters.
+- Caveat: conversația existentă „pong/glob narrative" e salvată de app ca istoric și se reinjectează;
+  pentru un test curat de turn dsh: proiect NOU sau ștergere conversație.
+
+### 2026-10-07 — DSH warm session (implementat, CI pending)
+- Design (Option B): reutilizează PROCESUL dsh --profile sdk între turnuri; sessionId fresh
+  per turn + contextPrompt complet (semantica identică cu azi), fără shutdown între turnuri.
+  Boot-ul proot+node+dsh de 8-12s se plătește o singură dată (și în cazul Hermes-warm).
+- `DshSdkChannel`: procesul + starea citirii persistate între turnuri (outputOffset, partial line,
+  writer, initialized, turns); stdin rămâne deschis pentru session/prompt-urile următoare.
+- `runSdkSession`: handshake `initialize` doar pentru proces proaspăt (awaitSdkInitialized, drenează
+  tot bufferul); turn re-utilizat → direct `session/prompt`. Sfârșit de turn = Status(running=false)
+  după sawRunning SAU Failed; drain 400ms liniște / 3s cap. `SDK_SHUTDOWN_TIMEOUT_MS` eliminat.
+- Retry loop: calculează `dshWarmSignature(route, model, workspace, env)` (secretul = în env);
+  `adoptChannel` re-utilizează dacă semnătura + isAlive + turns<25, altfel închide vechiul și pornește
+  proaspăt (recycle pentru mapa `sessions` din sdkserver, care crește per turn). Eșec → `closeWarmChannel`
+  (shutdown best-effort + destroy în thread) și retry curat; `userStopRequested` → throw imediat.
+- Success nu mai depinde de exit code-ul procesului (procesul rămâne viu).
+- Prewarm: `RuntimeBridge.prewarmSession` default no-op; `HeadlessCliBridge.prewarmSession` → override;
+  `AgentWork.prewarm` nu mai face cast `as? HeadlessCliBridge`; `DshRuntimeBridge.prewarmSession`
+  pornește canalul + handshake (best-effort). Se declanșează tot la provider save.
+- Teste unitare: `DshWarmSignatureTest` (reuse dacă aceleași inputuri; fresh dacă model/proiect/
+  cheie/route diferă), `staleSessionEventsFromAPreviousTurnAreIgnored` (parser filtrează tail-ul
+  sesiunii vechi din același captur-file).
+- Fără build local (cerința user). Validarea = CI `dany-debug-apk` + instalare APK + măsurat.

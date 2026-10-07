@@ -27,6 +27,13 @@ interface RuntimeBridge {
     suspend fun respondToApproval(request: ToolRequest, approved: Boolean)
     suspend fun stopSession(sessionId: String)
     suspend fun stopActiveSession()
+
+    /**
+     * Boots the long-lived session behind [provider] ahead of the next Agent
+     * Execution. Cold-only bridges keep the default no-op and pay the boot on
+     * the turn itself.
+     */
+    suspend fun prewarmSession(provider: ProviderProfile, projectId: String, projectSlug: String) = Unit
 }
 
 object RuntimeLaunchConfigBuilder {
