@@ -38,7 +38,7 @@ import org.json.JSONObject
 internal abstract class HeadlessCliBridge(
     protected val context: Context,
     protected val secretFor: (ProviderProfile) -> String?,
-) : RuntimeBridge {
+) : RuntimeBridge, java.io.Closeable {
     protected val installer = RuntimeInstaller(context)
     private val checkpoints by lazy { WorkspaceCheckpoints(context.filesDir).forAgent(kind) }
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
