@@ -36,7 +36,6 @@ import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.generateQuickChatIdentity
-import com.jarves.mh.model.isLoopbackBaseUrl
 import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
@@ -65,6 +64,7 @@ import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.HermesRuntimeBridge
 import com.jarves.mh.runtime.OpenCodeRuntimeBridge
 import com.jarves.mh.runtime.RuntimeInstaller
+import com.jarves.mh.runtime.requiresSavedSecret
 import com.jarves.mh.runtime.RuntimeSetupController
 import com.jarves.mh.runtime.RuntimeSetupService
 import com.jarves.mh.runtime.RuntimeSetupSnapshot
@@ -2690,9 +2690,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun scanModels(profile: ProviderProfile, secret: String, models: List<DiscoveredModel>) {
         if (_state.value.isModelScanning) return
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
-        // The Hermes free tier scans anonymously; every other remote provider
-        // needs a key (or a loopback gateway) before probing its models.
-        if (key.isBlank() && profile.kind != ProviderKind.FREE && !isLoopbackBaseUrl(profile.resolvedBaseUrl)) {
+        // The Hermes free tier and OpenCode Zen scan keyless, and a loopback
+        // gateway answers without credentials; only remote keyed providers
+        // must prove a key before probing their models.
+        if (key.isBlank() && requiresSavedSecret(profile)) {
             _state.update {
                 it.copy(
                     modelScanLines = it.modelScanLines + "! API key required for model scan",
