@@ -203,12 +203,14 @@ class LocalFileSystem(
                         return@runCatching fsError<Unit>(FsErrorKind.FAILED, "Could not create destination folder")
                     }
                 }
-                val children = from.listFiles() ?: emptyList()
-                for (child in children) {
-                    val name = child.name
-                    when (val r = copy(FsPaths.join(fromPath, name), FsPaths.join(toPath, name), recursive)) {
-                        is FsResult.Err -> return@runCatching r
-                        else -> {}
+                val children = from.listFiles()
+                if (children != null) {
+                    for (child in children) {
+                        val name = child.name
+                        when (val r = copy(FsPaths.join(fromPath, name), FsPaths.join(toPath, name), recursive)) {
+                            is FsResult.Err -> return@runCatching r
+                            else -> {}
+                        }
                     }
                 }
             } else {
