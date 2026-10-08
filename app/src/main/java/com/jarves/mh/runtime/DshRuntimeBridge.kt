@@ -178,7 +178,7 @@ class DshRuntimeBridge(
                 } else {
                     runCatching { channel.process.exitValue() }.getOrNull()
                 }
-                closeWarmChannel()
+                closeWarmChannel(channel)
                 activeProcess = null
                 if (userStopRequested) throw DshSessionException("Stopped by user")
                 lastFailure = sdkResult.failure.ifBlank {
@@ -385,6 +385,10 @@ class DshRuntimeBridge(
      * Sends `initialize` and reads until the SDK answers it, consuming everything
      * the handshake prints so a later turn never re-reads it.
      *
+     * Runs under [warmLock] with a single initializer/reader per channel and
+     * gives up after [SDK_INIT_TIMEOUT_MS] instead of waiting on a live process
+     * that never answers.
+     *
      * Returns null once the channel is ready, otherwise the failure to report -
      * possibly blank, so the caller can substitute the process exit code.
      */
@@ -393,7 +397,13 @@ class DshRuntimeBridge(
         route: DshRoute,
         model: String,
         guestWorkspacePath: String,
-    ): String? {
+    ): String? = warmLock.withLock {
+        // Single initializer and single reader: the handshake shares
+        // channel.outputOffset/pendingOutput with the turn reader, so a second
+        // concurrent caller would send `initialize` again and race for the same
+        // response bytes — one reader would consume both answers and the other
+        // would wait forever while the process stays alive.
+        if (channel.initialized) return@withLock null
         val process = channel.process
         val nativeProcess = process as? NativeSpawnProcess
             ?: error("Unsupported Android runtime process")
@@ -408,7 +418,12 @@ class DshRuntimeBridge(
         val parser = DshSdkProtocolParser("")
         var failure: String? = null
         var ready = false
+        val deadline = android.os.SystemClock.elapsedRealtime() + SDK_INIT_TIMEOUT_MS
         while (!ready && (process.isAlive || nativeProcess.outputFile.length() > channel.outputOffset)) {
+            if (android.os.SystemClock.elapsedRealtime() > deadline) {
+                failure = "SDK initialize timed out after ${SDK_INIT_TIMEOUT_MS / 1000}s"
+                break
+            }
             val available = nativeProcess.outputFile.length() - channel.outputOffset
             if (available <= 0) {
                 delay(50)
@@ -439,17 +454,36 @@ class DshRuntimeBridge(
                 newline = channel.pendingOutput.indexOf("\n")
             }
         }
-        if (!ready) return failure.orEmpty()
+        if (!ready) return@withLock failure.orEmpty()
         channel.initialized = true
         Log.d("DshBridge", "SDK handshake ready (reused=${channel.turns > 0})")
-        return null
+        null
     }
 
     /**
      * The process backing the current Agent Execution: freshly spawned, or the
      * one the previous turn left running. Anything else is a cold start.
+     *
+     * Acquisition runs under [warmLock]: a prewarm racing a turn would
+     * otherwise both see no channel, spawn two processes and leak the one
+     * that loses the `warmChannel` assignment.
      */
-    private fun adoptChannel(signature: String, spawn: () -> Process): DshSdkChannel {
+    private suspend fun adoptChannel(signature: String, spawn: () -> Process): DshSdkChannel =
+        warmLock.withLock { acquireChannel(signature, spawn) }
+
+    /**
+     * Prewarm-only variant: the active-execution guard is re-checked inside
+     * the lock, because a turn can set `activeSessionId` after the caller's
+     * own check but before the spawn. Null when a turn is (or just became)
+     * active — the caller silently backs off.
+     */
+    private suspend fun adoptIdleChannel(signature: String, spawn: () -> Process): DshSdkChannel? =
+        warmLock.withLock {
+            if (activeSessionId != null) return@withLock null
+            acquireChannel(signature, spawn)
+        }
+
+    private fun acquireChannel(signature: String, spawn: () -> Process): DshSdkChannel {
         warmChannel?.takeIf { it.signature == signature && it.process.isAlive && it.turns < MAX_WARM_TURNS }
             ?.let { return it }
         closeWarmChannelBlocking()
@@ -460,10 +494,17 @@ class DshRuntimeBridge(
      * Shuts the reused SDK process down. A turn that failed leaves the server in
      * an unknown state, so every failure path drops the channel rather than
      * risking a half-disposed agent on the next turn.
+     *
+     * [expected] closes only that instance: a failure handler whose turn ended
+     * long ago must not kill the channel a concurrent caller already adopted.
      */
-    private suspend fun closeWarmChannel() {
-        val channel = warmChannel ?: return
-        warmChannel = null
+    private suspend fun closeWarmChannel(expected: DshSdkChannel? = null) {
+        val channel = warmLock.withLock {
+            val current = warmChannel ?: return@withLock null
+            if (expected != null && current !== expected) return@withLock null
+            warmChannel = null
+            current
+        } ?: return
         destroyChannel(channel)
     }
 
@@ -540,7 +581,7 @@ class DshRuntimeBridge(
                 val workspace = checkpoints.ensureWorkspace(projectId)
                 val guestWorkspacePath = "/workspace/$projectSlug"
                 val signature = dshWarmSignature(route, model, guestWorkspacePath, workspace, environment)
-                val channel = adoptChannel(signature) {
+                val channel = adoptIdleChannel(signature) {
                     installer.process(
                         installed.proot,
                         installed.rootfs,
@@ -550,14 +591,14 @@ class DshRuntimeBridge(
                         guestWorkspacePath = guestWorkspacePath,
                         emulateHardLinks = false,
                     )
-                }
+                } ?: return@runCatching
                 if (channel.initialized) return@runCatching
                 val failure = awaitSdkInitialized(channel, route, model, guestWorkspacePath)
                 if (failure == null) {
                     Log.i("DshBridge", "SDK session prewarmed for $projectSlug")
                 } else {
                     Log.w("DshBridge", "Prewarm failed (${failure.take(120)}); the turn boots cold")
-                    closeWarmChannel()
+                    closeWarmChannel(channel)
                 }
             }.onFailure { Log.w("DshBridge", "Prewarm skipped", it) }
         }
@@ -839,6 +880,7 @@ private suspend fun emitReasoningSummary(
         private const val SDK_PROMPT_ID = 2
         private const val SDK_SHUTDOWN_ID = 3
         private const val SDK_SHUTDOWN_GRACE_MS = 400L
+        private const val SDK_INIT_TIMEOUT_MS = 60_000L
         private const val RETRY_MAX_ATTEMPTS = 4
         private const val RETRY_BACKOFF_MS = 4_000L
 

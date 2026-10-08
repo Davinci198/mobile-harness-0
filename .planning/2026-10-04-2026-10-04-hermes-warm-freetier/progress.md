@@ -259,3 +259,9 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
 - Bug 4 (P1): MainViewModel.openFileRoot — clear fsClipboard on root switch.
 - Bug 5 (P1): HeadlessCliBridge — on warm turn fail reset warmProxy/warmProxySignature; non-warm path clears cached warm proxy; added Closeable override + proper cleanup.
 - All P1 (1,3,4,5) from audit applied; unit tests build/compile OK on CI (dany-debug-apk). No local build, only CI.
+
+### 2026-10-08 — audit P2 final (Bug 7,9) — 9/9 reparate
+- Branch fix/audit-bugfix-2026-10-08-p3 (5740700), CI 37746295861 VERDE, merge ff b30ae89..5740700, branch șters.
+- Bug7 (ZIP pathing): archiveSelection colectează perechi (cale, entry); ZipEntry cu cale relativă la fsPath; fișier ilizibil = refuză arhiva (nu succes aparent); dedupe nume.
+- Bug9 (CLI cold): CliRunResult.sawSuccess pe envelope terminal; succes cold = exit 0 sau sawSuccess; crash nenul nu mai raportează „completed".
+- APK audit-p3 (toate 9 fixuri) instalat pe emulator-5554 + relaunch. bug.txt închis 9/9.
