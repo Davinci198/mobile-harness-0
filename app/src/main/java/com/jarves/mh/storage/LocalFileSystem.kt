@@ -198,8 +198,9 @@ class LocalFileSystem(
         }
         return runCatching {
             if (from.isDirectory) {
-                when (val created = runCatching { to.mkdirs() }.getOrElse { false }) {
-                    false -> if (!to.exists() || !to.isDirectory) {
+                val createdResult = runCatching { to.mkdirs() }.getOrElse { false }
+                if (!createdResult) {
+                    if (!to.exists() || !to.isDirectory) {
                         return@runCatching fsError<Unit>(FsErrorKind.FAILED, "Could not create destination folder")
                     }
                 }
