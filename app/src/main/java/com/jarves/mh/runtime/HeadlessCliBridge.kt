@@ -230,7 +230,11 @@ internal abstract class HeadlessCliBridge(
                 val details = checkpoints.buildChangeDetails(projectId, workspace, checkpoints.readChangedPaths(projectId))
                 eventBus.emit(RuntimeEvent.FilesChanged(sessionId, details))
             }
-            if (!userStopRequested && result.failed == null) {
+            // A cold crash before any result envelope must not read as success:
+            // accept exit 0, a terminal success envelope, or a warm turn (exit is
+            // only null there) — a non-zero cold exit without either is a failure.
+            val coldOk = exit == null || exit == 0 || result.sawSuccess
+            if (!userStopRequested && result.failed == null && coldOk) {
                 emitCompletedOnce(sessionId)
                 finishForegroundRuntime(
                     completed = true,
@@ -476,6 +480,7 @@ internal abstract class HeadlessCliBridge(
         var failed: String? = null
         var sawAnyOutput = false
         var sawAssistantText = false
+        var sawSuccess = false
         while (process.isAlive || nativeProcess.outputFile.length() > outputOffset) {
             val available = nativeProcess.outputFile.length() - outputOffset
             if (available <= 0) {
@@ -501,6 +506,7 @@ internal abstract class HeadlessCliBridge(
                         is CliParsed.Events -> {
                             failed = parsed.failed ?: failed
                             terminalSeen = parsed.terminal
+                            if (parsed.terminal && parsed.failed == null) sawSuccess = true
                             parsed.events.forEach { event ->
                                 when (event) {
                                     is RuntimeEvent.ReasoningSummary -> emitReasoningSummary(
@@ -537,7 +543,7 @@ internal abstract class HeadlessCliBridge(
                 newline = pendingOutput.indexOf("\n")
             }
         }
-        return CliRunResult(failed = failed, sawAnyOutput = sawAnyOutput)
+        return CliRunResult(failed = failed, sawAnyOutput = sawAnyOutput, sawSuccess = sawSuccess)
     }
 
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
@@ -798,7 +804,12 @@ internal fun requiresSavedSecret(provider: ProviderProfile): Boolean =
         provider.kind != ProviderKind.OPENCODE_ZEN &&
         !isLoopbackBaseUrl(provider.resolvedBaseUrl)
 
-private data class CliRunResult(val failed: String?, val sawAnyOutput: Boolean = false)
+private data class CliRunResult(
+    val failed: String?,
+    val sawAnyOutput: Boolean = false,
+    /** The CLI emitted its final success envelope before the process ended. */
+    val sawSuccess: Boolean = false,
+)
 
 /** Result of classifying a single JSONL line; [IGNORED] skips the line. */
 internal sealed interface CliParsed {

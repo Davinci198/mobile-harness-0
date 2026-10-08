@@ -1899,7 +1899,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val files = mutableListOf<com.jarves.mh.storage.FsEntry>()
+            // Keep (read path, entry) pairs: the walk descends into subfolders, and
+            // rebuilding the path from entry.name alone flattened the structure and
+            // read the wrong file when two folders held the same basename.
+            val files = mutableListOf<Pair<String, com.jarves.mh.storage.FsEntry>>()
             var refused = false
 
             suspend fun walk(relative: String, depth: Int) {
@@ -1909,19 +1912,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     return
                 }
                 listing.forEach { entry ->
+                    val childPath = com.jarves.mh.storage.FsPaths.join(relative, entry.name)
                     if (entry.isDirectory) {
-                        walk(com.jarves.mh.storage.FsPaths.join(relative, entry.name), depth + 1)
+                        walk(childPath, depth + 1)
                     } else {
-                        if (entry.sizeBytes > perFileCap) refused = true else files += entry
+                        if (entry.sizeBytes > perFileCap) refused = true else files += childPath to entry
                     }
                 }
             }
 
             picked.forEach { entry ->
+                val path = com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)
                 if (entry.isDirectory) {
-                    walk(com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name), 1)
+                    walk(path, 1)
                 } else {
-                    if (entry.sizeBytes > perFileCap) refused = true else files += entry
+                    if (entry.sizeBytes > perFileCap) refused = true else files += path to entry
                 }
             }
             if (refused || files.isEmpty()) {
@@ -1932,16 +1937,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val bytes = runCatching {
                 val sink = java.io.ByteArrayOutputStream()
                 java.util.zip.ZipOutputStream(sink).use { zipped ->
-                    files.forEach { entry ->
-                        val full = com.jarves.mh.storage.FsPaths.join(state.fsPath, entry.name)
-                        when (val data = backend.readBytes(full, perFileCap)) {
+                    val seenZipNames = mutableSetOf<String>()
+                    for ((path, entry) in files) {
+                        val zipName = path.removePrefix(state.fsPath).trimStart('/')
+                        if (zipName.isEmpty() || !seenZipNames.add(zipName)) continue
+                        when (val data = backend.readBytes(path, perFileCap)) {
                             is com.jarves.mh.storage.FsResult.Err -> {
+                                // An archive silently missing files reads as complete in
+                                // the picker; refuse it and say so instead.
                                 Log.e("Files", "archive: dropping ${entry.name} ${data.error.kind} ${data.error.message}")
-                                return@forEach
+                                throw java.io.IOException("could not read ${entry.name}: ${data.error.message}")
                             }
 
                             is com.jarves.mh.storage.FsResult.Ok -> {
-                                zipped.putNextEntry(java.util.zip.ZipEntry(entry.name))
+                                zipped.putNextEntry(java.util.zip.ZipEntry(zipName))
                                 zipped.write(data.value)
                                 zipped.closeEntry()
                             }
