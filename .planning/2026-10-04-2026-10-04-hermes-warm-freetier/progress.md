@@ -270,3 +270,9 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
 - Branch fix/audit-bugfix-2026-10-08-p4 (8c410ce), CI 37749275286 VERDE, ff 5740700..8c410ce, branch șters, APK p4 instalat + relaunch pe emulator-5554.
 - DshRuntimeBridge: warmLock aplicat pe adopt/close/handshake; prewarm guard re-check în lock; closeWarmChannel(expected) owner-guard; handshake single-initializer + timeout 60s.
 - bug.txt = 9/9 reparate (P1: 1,3,4,5,6 — P2: 2,7,8,9).
+
+### 2026-10-08 — verificare funcțională Bug 7 pe device (APK p4)
+- UI test real: Files → „Workspace-uri" → long-press `ziptest` (select) → „Arhivează" → „Arhivă 2026-10-08.zip · 3 fișiere".
+- `unzip -l` pe zip-ul tras: `ziptest/sub/a.txt`, `ziptest/sub2/a.txt`, `ziptest/b.txt` — căi complete relative, basename duplicat în foldere diferite OK. FIX-ul Bug 7 confirmat end-to-end.
+- Loguri start p4 curate (proc nou, zero excepții); nicio sesiune DSH după p4 (Bug 6 lock ne-exercitat live încă).
+- Dovadă: `~/9remote-uploads/opencode/audit-verify/archive.zip`; device curat; logcat buffer → 8MB.
