@@ -192,17 +192,20 @@ class SafFileSystem(
         val mime = column(source, DocumentsContract.Document.COLUMN_MIME_TYPE)
         if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
             if (!recursive) return fsError(FsErrorKind.FAILED, "It is a directory")
-            val children = list(fromPath).valueOrNull() ?: emptyList()
+            val listed = list(fromPath)
+            if (listed is FsResult.Err) return listed
+            val children = listed.valueOrNull() ?: emptyList()
             when (val made = createDirectory(toPath)) {
                 is FsResult.Ok -> Unit
                 is FsResult.Err -> return made
             }
-            children.forEach { child ->
-                copy(
+            for (child in children) {
+                val res = copy(
                     FsPaths.join(fromPath, child.name),
                     FsPaths.join(toPath, child.name),
                     recursive,
                 )
+                if (res is FsResult.Err) return res
             }
             return FsResult.Ok(Unit)
         }

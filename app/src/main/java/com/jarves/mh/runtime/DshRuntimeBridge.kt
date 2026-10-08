@@ -23,6 +23,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -60,6 +62,7 @@ class DshRuntimeBridge(
     @Volatile private var userStopRequested: Boolean = false
     @Volatile private var activeProjectSlug: String? = null
     @Volatile private var taskStartedAtElapsedRealtime: Long = 0L
+    private val warmLock = Mutex()
     @Volatile private var lastForegroundProgressAt: Long = 0L
     @Volatile private var foregroundResultPosted: Boolean = false
     @Volatile private var lastThinkingUpdateAt: Long = 0L
@@ -938,6 +941,8 @@ internal fun dshWarmSignature(
     environment: Map<String, String>,
 ): String = listOf(
     route.name,
+    route.custom?.api ?: "",
+    route.custom?.baseUrl ?: "",
     model,
     guestWorkspacePath,
     workspace.absolutePath,

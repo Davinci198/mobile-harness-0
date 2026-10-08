@@ -198,10 +198,18 @@ class LocalFileSystem(
         }
         return runCatching {
             if (from.isDirectory) {
-                to.mkdirs()
-                from.listFiles()?.forEach { child ->
+                when (val created = runCatching { to.mkdirs() }.getOrElse { false }) {
+                    false -> if (!to.exists() || !to.isDirectory) {
+                        return@runCatching fsError<Unit>(FsErrorKind.FAILED, "Could not create destination folder")
+                    }
+                }
+                val children = from.listFiles() ?: emptyList()
+                for (child in children) {
                     val name = child.name
-                    copy(FsPaths.join(fromPath, name), FsPaths.join(toPath, name), recursive)
+                    when (val r = copy(FsPaths.join(fromPath, name), FsPaths.join(toPath, name), recursive)) {
+                        is FsResult.Err -> return@runCatching r
+                        else -> {}
+                    }
                 }
             } else {
                 // Prevent overwriting the source with itself (same canonical path)
