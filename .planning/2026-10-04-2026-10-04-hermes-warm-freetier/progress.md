@@ -265,3 +265,8 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
 - Bug7 (ZIP pathing): archiveSelection colectează perechi (cale, entry); ZipEntry cu cale relativă la fsPath; fișier ilizibil = refuză arhiva (nu succes aparent); dedupe nume.
 - Bug9 (CLI cold): CliRunResult.sawSuccess pe envelope terminal; succes cold = exit 0 sau sawSuccess; crash nenul nu mai raportează „completed".
 - APK audit-p3 (toate 9 fixuri) instalat pe emulator-5554 + relaunch. bug.txt închis 9/9.
+
+### 2026-10-08 — Bug 6 final — audit 9/9 complet
+- Branch fix/audit-bugfix-2026-10-08-p4 (8c410ce), CI 37749275286 VERDE, ff 5740700..8c410ce, branch șters, APK p4 instalat + relaunch pe emulator-5554.
+- DshRuntimeBridge: warmLock aplicat pe adopt/close/handshake; prewarm guard re-check în lock; closeWarmChannel(expected) owner-guard; handshake single-initializer + timeout 60s.
+- bug.txt = 9/9 reparate (P1: 1,3,4,5,6 — P2: 2,7,8,9).
