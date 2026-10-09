@@ -636,6 +636,8 @@
     <string name="repo_meta">%1$s · %2$s</string>
     <string name="repo_private">Privat</string>
     <string name="repo_public">Public</string>
+    <string name="server_start">Pornește</string>
+    <string name="server_stop">Oprește</string>
     <string name="setup_title">Configurează Mobile Harness</string>
     <string name="step_of">PASUL %1$d DIN %2$d</string>
     <string name="studio_booting">Se pornește serverul Ekko Studio în interiorul guest-ului Ubuntu. Prima pornire poate dura până la un minut.</string>
@@ -654,6 +656,8 @@
     <string name="studio_retry">Reîncearcă</string>
     <string name="studio_start_failed">pornire eșuată</string>
     <string name="studio_starting">Se pornește Studio…</string>
+    <string name="studio_stopped">Studio oprit</string>
+    <string name="studio_stopped_desc">Serverul Ekko Studio a fost oprit. Pornește-l din nou când ai nevoie de studio.</string>
     <string name="studio_unknown_error">Eroare necunoscută</string>
     <string name="tab_dashboard">Panou</string>
     <string name="dash_checking">Se verifică Panoul…</string>
@@ -671,6 +675,8 @@
     <string name="dash_no_response">Serverul nu răspunde încă — reîncearcă</string>
     <string name="dash_retry">Reîncearcă</string>
     <string name="dash_start_failed">pornire eșuată</string>
+    <string name="dash_stopped">Panou oprit</string>
+    <string name="dash_stopped_desc">Serverul Hermes a fost oprit. Pornește-l din nou când ai nevoie de interfața web.</string>
     <string name="dash_unknown_error">Eroare necunoscută</string>
     <string name="sum_all_offline">Toate bundle-urile selectate sunt incluse în această aplicație offline</string>
     <string name="sum_download_prefix">Descărcare</string>
