@@ -741,6 +741,8 @@ class RuntimeInstaller(private val context: Context) {
             proot = proot,
             command = "set -euo pipefail; export HOME=/root; export UV_LINK_MODE=copy; " +
                 "export DEBIAN_FRONTEND=noninteractive; " +
+                "mkdir -p /etc/uv; " +
+                "printf 'link-mode = \"copy\"\\n' > /etc/uv/uv.toml; " +
                 "rm -f /var/lib/apt/lists/lock /var/lib/apt/lists/partial/.lock " +
                 "/var/cache/apt/archives/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null || true; " +
                 "dpkg --configure -a || true; " +
@@ -749,7 +751,9 @@ class RuntimeInstaller(private val context: Context) {
                 "if [ -d /usr/local/lib/hermes-agent ] && [ ! -d /usr/local/lib/hermes-agent/.git ]; then rm -rf /usr/local/lib/hermes-agent; fi; " +
                 "if [ -d \"\$HOME/.hermes/hermes-agent\" ] && [ ! -d \"\$HOME/.hermes/hermes-agent/.git\" ]; then rm -rf \"\$HOME/.hermes/hermes-agent\"; fi; " +
                 "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | " +
-                "bash -s -- --skip-setup --non-interactive --skip-browser --skip-computer-use; " +
+                "bash -s -- --skip-setup --non-interactive --skip-browser --skip-computer-use || true; " +
+                "sed -i 's/\"--compile-bytecode\"\\]/\"--compile-bytecode\", \"--link-mode\", \"copy\"]/' " +
+                "\"\$HOME/.hermes/hermes-agent/pm/environment.py\"; " +
                 "if [ -x \"\$HOME/.local/bin/hermes\" ]; then " +
                 "  [ -L \"$HERMES_GUEST_PATH\" ] || ln -s \"\$HOME/.local/bin/hermes\" \"$HERMES_GUEST_PATH\"; fi; " +
                 "test -x $HERMES_GUEST_PATH",
@@ -758,7 +762,7 @@ class RuntimeInstaller(private val context: Context) {
             timeoutMs = 20 * 60 * 1_000L,
             onProgress = onProgress,
             failureMessage = "Hermes installation failed",
-            emulateHardLinks = false,
+            emulateHardLinks = true,
             onFinished = { repairLink2symlinkArtifacts(rootfs) },
         )
         ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)

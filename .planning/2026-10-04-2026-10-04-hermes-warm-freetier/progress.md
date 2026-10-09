@@ -454,3 +454,138 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
   Fix `fix/dsh-question-select`: tap = DOAR selecție (radio/checkbox), Send = trimitere;
   `buildAnswers()` simplificat (fără overrides): selected = selecțiile,
   custom = textul dacă non-empty (multi-select cu text = selected + custom).
+
+## 2026-10-09 (2) — Studio bundle upgrade la hermes-web-ui 0.7.32
+
+- Context: userul a cerut „hermes-web-ui cel original ca bundle"; s-a clarificat apoi că
+  prin „dashboard" se referă la **Hermes dashboard** (plugin din hermes-agent, port 9119,
+  `dashboard.basic_auth` în `~/.hermes/profiles/<profil>/config.yaml` — vezi skill
+  termux-android-stack regula 12).
+- Verificat: bundle-ul „Ekko Studio" existent ESTE hermes-web-ui original —
+  `studio-bundle.yml` face `npm pack hermes-web-ui@X` + patch sed (readiness 30s→240s) +
+  prune node_modules + smoke test pe runner arm64 → release `runtime-studio-X`.
+- npm latest = **0.7.32** (pin-ul vechi 0.7.21). Upgrade executat:
+  - `gh workflow run studio-bundle.yml -f studio_version=0.7.32` → run `37934684202`
+    verde (patch-ul sed a potrivit și în 0.7.32), release `runtime-studio-0.7.32`,
+    bundle 46 172 395 B, sha256 `525cdb35464da0f7d0a9318f956acf22b149e8df253953301475ee7672f38430`.
+  - `RuntimeInstaller.kt`: STUDIO_VERSION 0.7.21→0.7.32, sha256 + compressedBytes
+    actualizate; `studio-bundle.yml`: default-uri + comentariu la 0.7.32.
+  - Commit `295e511`, branch `fix/studio-0732`, CI `37935043917` verde, ff pe main,
+    APK (`apk-studio0732/`, 66.7 MB) instalat, app start fără FATAL, branch șters.
+- **Descoperit pe device**: hermes-agent NU e instalat (lipsesc `/usr/local/bin/hermes`,
+  `/root/.hermes/`, `.pocket-hermes-version`; `/root/.local/bin/` = doar `agy`) — deci și
+  **dashboard-ul Hermes lipsește**; el vine ODATĂ cu hermes-agent (install.sh oficial,
+  `ensureHermesInstalled`). Dashboard-ul necesită `dashboard.basic_auth` în config-ul
+  profilului activ înainte de a porni pe 9119. Tab-ul Studio din app instalează bundle-ul
+  0.7.32 la prima deschidere (`ensureStudioInstalled`, forceDownload).
+
+## 2026-10-09 (3) — Tab „Dashboard" oficial Hermes între Chat și Files
+
+- Cerința userului: „dashboard-ul oficial Hermes, la fel ca Ekko", plasat în interfața
+  principală **între tab-ul Agent (Chat) și Files**.
+- Cercetare (pe host, hermes-agent v0.21.5): `hermes dashboard` e subcomandă oficială
+  (`--port 9119` default, `--host 127.0.0.1` default, `--no-open`, `--stop`/`--status`,
+  `--skip-build`); bind-ul loopback NU cere auth (fail-closed doar pe bind public —
+  `should_require_dashboard_auth(host)`); `web/dist` nu e prebuilt → prima rulare
+  face build (`_build_web_ui`, hint `npm install --workspace web && npm run build -w web`);
+  „chiar și un 401 dovedește serverul pornit" (sonda lor). Guest = profil default →
+  fără reexec de rutare. Config e doar pentru `--host` public (`dashboard.basic_auth`).
+- Implementare (branch `feat/hermes-dashboard`, commit `c076b4a`, CI `37970605105` verde,
+  ff pe main, APK `apk-dash/` 66.8 MB instalat, 0 FATAL, branch șters):
+  - `HermesDashboardManager.kt` (nou): clonă `StudioServerManager` — pid
+    `/root/.hermes-dashboard.pid`, log `root/hermes-dashboard-output.log`, comandă
+    `exec /usr/local/bin/hermes dashboard --host 127.0.0.1 --port 9119 --no-open`,
+    marker cmdline `dashboard` (hermes chat nu-l conține), `START_TIMEOUT_MS=300s`
+    (prima bootare build-ulește web UI în guest), health = orice răspuns HTTP > 0.
+  - `PocketDevApp.kt`: `WorkspaceTab.DASHBOARD` (icon `Icons.Default.Language`) inserat
+    între CHAT și FILES; `when` branch + `DashboardTab` (clone după `StudioTab`,
+    reia `StudioUiState`; install = `ensureAgentInstalled(AgentKind.HERMES)`;
+    readiness 120s după start; keepalive „Hermes Dashboard"; WebView doar 127.0.0.1).
+  - Strings en+ro: `tab_dashboard` + `dash_*` (17 chei).
+- **Verificare device**: app instalată, start fără crash. Pe device hermes-agent NU e
+  instalat → tab-ul arată „Hermes not installed" + buton „Install Hermes"; la tap se
+  instalează hermes (install.sh, buget 20 min în cod) apoi pornește dashboard-ul
+  (prima bootare = build web UI, minute bune). E2E complet rămâne pe utilizator.
+
+## 2026-10-09 (5) — Cauza finală a eșecului uv + fix-ul găsit + cod reparat
+- **De ce UV_LINK_MODE=copy nu ajungea la uv**: pm (hermes-agent) rebuild-ește env-ul
+  copiilor uv și șterge ORICE `UV_*` nepermis (`pm/index_config.py`:
+  `FORWARDED_UV_SETTINGS` = doar index/transport knobs; `environment.py:208` filtrează
+  după). În plus `environment.py:291-292` redirectează ALWAYS `XDG_CONFIG_HOME/DIRS`
+  către un temp dir gol → user-config uv (`~/.config/uv/uv.toml`) ignorat.
+  Iar `/root/.hermes/uv.toml` (walk-up) e umbrit: sync-ul pornește dintr-un workspace
+  generat care are propriul `pyproject.toml [tool.uv]` (repo-ul hermes are `[tool.uv]`
+  la linia 597) — uv oprește discovery-ul la cel mai apropiat fișier cu settings.
+- **Vectorul de fix (verificat end-to-end)**: `install.sh` rulează `boot_py -m pm.cli`
+  FĂRĂ `-I` → `PYTHONPATH=/root/.hermes/pm-overlay` cu `sitecustomize.py` care
+  amendază `FORWARDED_UV_SETTINGS |= {UV_LINK_MODE}` la import (import-hook pe
+  `builtins.__import__`) → `UV_LINK_MODE=copy` supraviețuiește filtrului pm → uv
+  sync COPY-ează (0 fișiere `.l2s`). Plantat și export-ul în `/root/.profile`
+  (supraviețuiește pentru `hermes update` viitor). Test direct uv:
+  `uv sync` cu ruamel.yaml în /root/.hermes/linktest = 0 l2s, SYNC_EXIT=0.
+- **Validat șirul**: `uv pip install` + `uv sync` cu `--link2symlink` + uv.toml copy
+  = succes, zero `.l2s` (probe pe device).
+- **Cod reparat în repo** (`RuntimeInstaller.kt`, neîncă build-at):
+  - `ensureHermesInstalled`: `emulateHardLinks = false` → `true` (dpkg cere
+    `--link2symlink` pentru `link()` → status-old).
+  - Comanda de instalare plantează acum în guest, înainte de install.sh:
+    `mkdir -p /root/.hermes/pm-overlay` + `sitecustomize.py` (base64 constant
+    `HERMES_PM_OVERLAY_B64`, verificat round-trip), `uv.toml` cu `link-mode = "copy"`,
+    rând `export PYTHONPATH=/root/.hermes/pm-overlay` în `/root/.profile`,
+    `export PYTHONPATH` + `UV_LINK_MODE=copy` în shell-ul curent.
+- **Instalare pe device rulând în background** (nohup, log `/root/hermes-install.log`):
+  a trecut de clone + uv 0.12.3 + bootstrap Python; log curent: „Installing
+  dependencies (hash-verified via uv.lock)" + „waiting for .../.install.lock".
+
+## 2026-10-09 (6) — Hermes INSTALAT + vector final `/etc/uv/uv.toml` + fix Kotlin simplificat
+- **pm re-lansează worker-ul cu `python -I -B pm/launch.py`** (`-I` ignoră PYTHONPATH)
+  → vectorul sitecustomize NU funcționează pentru worker-ul care rulează uv sync.
+  launch.py face `sys.path.insert(0, repo root)` și importă pm.cli.
+- **Vectorul final (funcțional)**: `/etc/uv/uv.toml` cu `link-mode = "copy"` — uv citește
+  system-config-ul chiar și cu `XDG_CONFIG_HOME` redirectat de pm într-un temp dir
+  și chiar cu `python -I`. Testat: proiect cu `[tool.uv]` în pyproject + XDG gol +
+  UV_LINK_MODE unset → `uv sync` COPY-ează (L2S=0).
+- **Instalare reușită pe device**: `hermes update`/install-ul rulat în background a
+  trecut de tot pm: „✓ venv ✓ dependencies installed ✓ config prepared ✓ Install
+  complete! [main @ b56a10246e]". `/root/.local/bin/hermes` publicat (wrapper →
+  `.hermes/bin/hermes`), `hermes --version` = **Hermes Agent v0.21.6+339.gb56a102**.
+- **Stale-lock**: run-ul abortat de user supraviețuise în guest (proot detached) și
+  ținea `/root/.hermes/tools/.install.lock` (flock); kill -9 pe arborele vechi (24900…)
+  → run-ul nou a putut lua lock-ul.
+- **Eșec rezidual „app products"**: un al doilea sync (stage-ul build/node) a reutilizat
+  generația VECHE coruptă `8a7c4f87…` (resturi `.l2s.` nested de dinaintea fix-ului) →
+  am șters-o (am păstrat `68a2ad8f…` cea reușită cu copy) + `/root/.hermes/cache/uv`,
+  apoi `hermes update` rulat în background (`/root/hermes-update.log`).
+- **Kotlin (`ensureHermesInstalled`) — versiune finală minimală**:
+  - `emulateHardLinks = true` (dpkg are nevoie de `--link2symlink`);
+  - `mkdir -p /etc/uv; printf 'link-mode = "copy"\n' > /etc/uv/uv.toml;` înainte de
+    install.sh (acoperă uv sync din pm sub `-I`);
+  - `|| true` pe pipeline-ul install.sh (a eșuat cu exit 1 la „app products" chiar cu
+    hermes publicat; criteriul real de succes e `test -x $HERMES_GUEST_PATH`);
+  - vectorii sitecustomize/uv.toml-user/PYTHONPATH au fost ELIMINAȚI (inutili).
+- Restaurat L2S_PREFIX-only (fără constantul HERMES_PM_OVERLAY_B64).
+
+## 2026-10-09 (7) — Hermes complet funcțional pe device + fix finalizat în cod
+- **`hermes update` eșua la „isolated runtime"**: pm build-ul „isolated" rulează
+  `uv sync --no-config` → `/etc/uv/uv.toml` ignorat → hardlink EPERM. chiar și
+  `hermes skills list` declanșa retry-ul și eșua.
+- **Reparat cu un sed în checkout-ul local**:
+  `pm/environment.py` sync(): `"--compile-bytecode"]` → `"--compile-bytecode", "--link-mode", "copy"]`
+  (un singur match; idempotent — a doua oară no-op). După patch: „✓ Installing Python
+  dependencies" (sync izolat reușit) → `hermes skills list` = **59 skills (53 builtin,
+  6 local), tabelă afișată corect**.
+- Notă: checkout-ul e marcat `.dirty` (patch de workaround); versiunea curentă
+  `v0.21.6+349.g3637c51.dirty` (update-ul a făcut ff la 3637c51 înainte de patch).
+- **Instalare finalizată cap-co-cap pe device**:
+  - `/usr/local/bin/hermes` → `/root/.local/bin/hermes` (symlink);
+  - `/.pocket-hermes-version` (la rădăcina rootfs, unde îl citește RuntimeInstaller)
+    = „Hermes Agent v0.21.6+349.g3637c51.dirty (2026.9.24) · upstream 3637c512";
+  - `/etc/uv/uv.toml` = `link-mode = "copy"` persistat.
+- **Cod Kotlin final** (`ensureHermesInstalled`):
+  - `emulateHardLinks = true`;
+  - plantare `/etc/uv/uv.toml` (acoperă pm sync-urile cu config);
+  - `|| true` pe pipeline-ul install.sh (criteriul real: `test -x $HERMES_GUEST_PATH`);
+  - sed-ul `--link-mode copy` în `pm/environment.py` DUPĂ install.sh (acoperă
+    isolated-runtime retries de la launch/hermes update);
+  - `:app:compileOfflineDebugKotlin` BUILD SUCCESSFUL (după fixarea escape-ului `\]`
+    → `\\]` în string-ul Kotlin).
