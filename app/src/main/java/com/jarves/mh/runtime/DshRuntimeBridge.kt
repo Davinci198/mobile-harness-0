@@ -566,16 +566,21 @@ class DshRuntimeBridge(
         projectSlug: String,
     ) {
         withContext(Dispatchers.IO) {
+            Log.d("Prewarm", "enter: activeSessionId=$activeSessionId kind=${provider.kind} secretLen=${secretFor(provider)?.length ?: 0}")
             if (activeSessionId != null) return@withContext
             val secret = secretFor(provider).orEmpty()
             if (secret.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return@withContext
             if (provider.kind == ProviderKind.CLAUDE) return@withContext
             runCatching {
-                if (!installer.isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) return@runCatching
+                if (!installer.isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) {
+                    Log.d("Prewarm", "skip: runtime not installed")
+                    return@runCatching
+                }
                 val installed = installer.installedRuntime()
                 installer.ensureDshAndroidCompatibility()
                 val route = DshRouteMapper.forProfile(provider)
                 writeDshSettings(installed.rootfs, route, provider)
+                Log.d("Prewarm", "settings.yaml written for ${provider.kind}")
                 val model = provider.model.ifBlank { route.defaultModel }
                 val environment = buildEnvironment(route, secret)
                 val workspace = checkpoints.ensureWorkspace(projectId)

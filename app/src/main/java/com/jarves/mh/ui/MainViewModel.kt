@@ -2661,9 +2661,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * project (no workspace to key the session on).
      */
     private fun prewarmWarmSession(profile: ProviderProfile) {
+        Log.d("Prewarm", "onSave: isRunning=${_state.value.isRunning} activeProject=${_state.value.activeProject?.id} agent=${_state.value.agentKind}")
         if (_state.value.isRunning) return
         val project = _state.value.activeProject ?: return
         val agent = _state.value.agentKind
+        Log.d("Prewarm", "launching prewarm agent=$agent project=${project.slug}")
         viewModelScope.launch { agentWork.prewarm(agent, project.id, project.slug, profile) }
     }
 
