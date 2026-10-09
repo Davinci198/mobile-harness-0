@@ -305,3 +305,16 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
   mesaj final cu culoare eroare, Log.e). CI `37877180450` verde → ff `2a28da9..58581c1`,
   branch șters, APK reinstalat pe device.
 - `bug.txt` închis (decizie user). Toate resturile sesiunii = închise.
+
+### 2026-10-09 — fix 404 onboarding (runtime bundle base URL)
+- Instalare de la 0 testată: backup 22 KB (secrete/chaturi/prefs) → uninstall → release
+  debug-main APK (66.7 MB) install → first-run OK, dar setup-ul a picat cu
+  „Download failed with HTTP 404".
+- Cauză: `app/build.gradle.kts:31` default `RUNTIME_RELEASE_BASE_URL` = techjarves/
+  Mobile-Harness tag `runtime-2026.09.4` (max core 2026.09.5); codul cere
+  `pocketdev-core-arm64-2026.10.1.tar.zst` → 404. Bundle-urile 2026.10.1 sunt pe
+  `Davinci198/Proxmox-VE-Laptop-Hybrid-Setup` release `runtime-2026.10.1`
+  (sha256 = constanta CORE_BUNDLE, verificat).
+- Fix: 1 linie → acel release; CI `37879834295` verde → APK instalat pe device
+  (`apk-rturl/`) → ff `52d2326..1ed6b9b`, branch șters. Toate bundle-urile (core/claude/
+  python/dsh/agy/android) sunt pe același tag.
