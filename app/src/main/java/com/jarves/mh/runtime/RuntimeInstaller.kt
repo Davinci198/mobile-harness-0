@@ -732,6 +732,17 @@ class RuntimeInstaller(private val context: Context) {
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
     ) {
         val hermes = File(rootfs, HERMES_GUEST_PATH.removePrefix("/"))
+        val hermesTarget = File(rootfs, "root/.local/bin/hermes")
+        if (!hermes.canExecute() && hermesTarget.canExecute()) {
+            // An absolute guest symlink dangles on the host (/root/... does not
+            // exist outside the rootfs), so File.canExecute() — and with it
+            // isAgentInstalled — stays false forever. Swap in a host-executable
+            // shim; inside the guest it execs the real launcher unchanged.
+            hermes.parentFile?.mkdirs()
+            hermes.delete()
+            hermes.writeText("#!/bin/sh\nexec /root/.local/bin/hermes \"\$@\"\n")
+            Os.chmod(hermes.absolutePath, 0b111101101)
+        }
         if (hermes.canExecute()) {
             ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
             hermesMarker.writeText(readGuestVersion(proot, "$HERMES_GUEST_PATH --version"))
@@ -755,7 +766,9 @@ class RuntimeInstaller(private val context: Context) {
                 "sed -i 's/\"--compile-bytecode\"\\]/\"--compile-bytecode\", \"--link-mode\", \"copy\"]/' " +
                 "\"\$HOME/.hermes/hermes-agent/pm/environment.py\"; " +
                 "if [ -x \"\$HOME/.local/bin/hermes\" ]; then " +
-                "  [ -L \"$HERMES_GUEST_PATH\" ] || ln -s \"\$HOME/.local/bin/hermes\" \"$HERMES_GUEST_PATH\"; fi; " +
+                "  rm -f \"$HERMES_GUEST_PATH\"; " +
+                "  printf '%s\\n' '#!/bin/sh' 'exec /root/.local/bin/hermes \"\$@\"' > \"$HERMES_GUEST_PATH\"; " +
+                "  chmod 755 \"$HERMES_GUEST_PATH\"; fi; " +
                 "test -x $HERMES_GUEST_PATH",
             displayCommand = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
             fraction = fraction,

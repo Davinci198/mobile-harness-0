@@ -589,3 +589,52 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
     isolated-runtime retries de la launch/hermes update);
   - `:app:compileOfflineDebugKotlin` BUILD SUCCESSFUL (după fixarea escape-ului `\]`
     → `\\]` în string-ul Kotlin).
+
+## 2026-10-09 (8) — Diagnostic Panou: eșec vechi + dashboard pornit acum
+- Eșecul din Panou ("Hermes install failed", `dash_install_failed`) a venit din
+  **APK-ul vechi de pe device** (fără fix-ul `50d5a93`): `ensureAgentInstalled` a
+  rulat comanda veche cu `emulateHardLinks=false` → dpkg `status-old` EPERM → FAILED.
+  Marker-ul a fost scris de abia la 23:11 (`0.21.6`) = al doilea apel a
+  short-circuitat (symlink-ul exista deja de la instalarea manuală).
+- `HermesDashboardManager`: niciodată pornit înainte (fără `hermes-dashboard-output.log`,
+  fără PID, port 9119 închis). Pornit manual identic cu app-ul
+  (`hermes dashboard --host 127.0.0.1 --port 9119 --no-open`) → **
+  `HERMES_DASHBOARD_READY port=9119`, HTTP 200**, proces 16239 supraviețuiește sesiunii
+  adb, port 0x2397 ascultat pe host. Panou va vedea `portOpen()` → READY.
+- Node build (esbuild/rolldown/tailwind) rulat în guest 23:10–23:11 = webui-ul hermes
+  build-uit la prima invocare; python/jiter la 23:11:47 = o sesiune hermes a pornit.
+- CI a builduit deja **APK nou cu fix-ul**: run `37983382122` (dany-debug-apk, success,
+  4m21s, push `50d5a93`) — de instalat pe device ca următoarele instalări din Panou
+  să meargă cu codul reparat.
+
+## 2026-10-09 (9) — APK cu fix instalat pe device
+- Push-ul pe main nu builduiește APK (workflow-ul face doar teste la push pe main);
+  am declanșat `workflow_dispatch` → run `37987807937` (success) → artifact
+  `mh-dany-debug` (`app-online-debug.apk`, 66.8 MB) descărcat în `9remote-uploads/mh-apk/`.
+- `adb install -r` → Success, `lastUpdateTime=2026-10-09 23:41:18`, upgrade păstrând datele
+  (keystore debug stabil în CI). Verificat în dex: șirul `/etc/uv/uv.toml` prezent
+  ⇒ noul cod (`50d5a93`) e pe device; instalările viitoare din Panou au toate cele
+  4 reparații.
+
+## 2026-10-10 (1) — „hermes nu s-a instalat ciudat": canExecute pe symlink absolut
+- logcat: `HeadlessCliBridge:160` → `IllegalStateException: "Hermes is not installed"`
+  la fiecare sesiune, deși markerul (`0.21.6`, scris 23:58 de install reușit) și
+  symlink-ul existau. Instalarea REUȘEA, dar check-ul eșua.
+- Rădăcină: `HERMES_GUEST_PATH=/usr/local/bin/hermes` era symlink **absolut**
+  creat de cod (`ln -s /root/.local/bin/hermes`) → pe **host** ținta `/root/...`
+  nu există → `File.canExecute()` (access(2) rezolvat pe host) = false →
+  `isAgentInstalled(HERMES)` = false **pentru totdeauna** → Panou NOT_INSTALLED +
+  HeadlessBridge throw → user reapeasă Install (ciclu). De ce agy/opencode nu
+  pățesc: `AGY_GUEST_PATH=/root/.local/bin/agy` / opencode = fișiere reale
+  host-resolvabile. `test -x` host = 1; ținta reală = 0; probe.
+- Hot-fix pe device (fără APK nou): `rm` symlink + fișier shim
+  `#!/bin/sh\nexec /root/.local/bin/hermes "$@"` + chmod 755 → host X_OK=0 ✓.
+- Patch în `RuntimeInstaller.ensureHermesInstalled`: (a) fast-path: dacă `hermes`
+  nu exec pe host dar ținta `/root/.local/bin/hermes` da → înlocuiește symlink-ul
+  vechi cu shim (fără reinstalare grea); (b) în comanda de install, `ln -s`
+  înlocuit cu `printf '%s\n' '#!/bin/sh' 'exec ... "$@"' > $HERMES_GUEST_PATH`.
+- Erori tranzitorii side Observate pe parcurs: `no dependency environment is
+  committed` (intermittent ~00:13–00:23, checkout auto-updating `3637c51`→`b624a38`
+  `+353`, probe `committed_venv` OK, apoi verde pe toate căile: `.hermes/bin/hermes`,
+  wrapper, `-c` identic); proces closure-repair blocat pid 14601 (1h14m, leșat din
+  23:17) → kill via run-as (adb shell kill = EPERM, alt uid).
