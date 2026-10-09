@@ -429,3 +429,28 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
     DshQuestionParseTest 3, DshHomePatchTest + rândul mh-question.
 - Verificare locală: `./gradlew :app:testOnlineDebugUnitTest --tests "com.jarves.mh.runtime.Dsh*"`
   → toate verzi (7+3+3 Dsh + restul), compilare main inclusă (`Icons.Default.QuestionMark` rezolvat).
+- **Descoperire critică la pre-E2E**: sesiunea reală NIM (12:33) NU conține tool-ul
+  `ask_user_question` în lista de tooluri → cardul n-ar fi putut fi trigger-eat vreodată.
+  Cauza: profilul sdk = doar bundle-urile `dsh-base` + `dsh-sdk-app` (profiles/sdk/package.json);
+  `dsh-base` înregistrează doar SEAM-ul `user-questions` (+ promptul de plan care invocă
+  `ask_user_question`), iar rândul `tool-ask-user` există DOAR în presetările web/tui
+  (dsh-web-app/presets/{cordis,ptc,standard}.patch.yml). Fix: rând insert în home patch
+  (`- id: tool-ask-user / name: '@deepseek-ai/dsh-tool-ask-user'`) — pachetul e dependency
+  direct al pachetului `dsh` (dsh/package.json:74) → rezolvat din install anchor, exact ca
+  toate rândurile de profil (profiles/sdk NU are node_modules propriu).
+  Commit `2e3bf9c`, CI `37912747318` verde, APK instalat 12:51.
+- Deploy-ul pluginurilor + rescrierea home patch-ului are loc la STARTUL fiecărei sesiuni
+  (`writeDshSettings` din startSession/prewarm) — `mh-question-answerer` deployat 12:30 ✓,
+  rândul `tool-ask-user` apare la prima sesiune după noul APK.
+- **E2E pending (user)**: deschide sesiune DSH → prompt care forțează `ask_user_question`
+  → QuestionCard → tap A/B (single-select simplu = submit instant), câmp text = custom,
+  Send/Skip = batch. Verificare mecanică: session.v4.jsonl.zstd să conțină
+  `ask_user_question` în request/header tools.
+- **E2E MECHANIC VERIFICAT** (sesiunea a8a476d3, 12:54): `ask_user_question` prezent în
+  `request/header.tools` → `tool/call` (callId call-6a3adfc6, questions: variant_choice A/B/C)
+  → `tool/result` `{"answers":[{"id":"variant_choice","selected":["A: recitire"]}]}` →
+  step 2 reasoning „The user selected A" → turn completed. User: „a functionat".
+- **Feedback UX**: tap-ul pe opțiune trimite instant (single-select simplu) — prea grăbit.
+  Fix `fix/dsh-question-select`: tap = DOAR selecție (radio/checkbox), Send = trimitere;
+  `buildAnswers()` simplificat (fără overrides): selected = selecțiile,
+  custom = textul dacă non-empty (multi-select cu text = selected + custom).

@@ -5652,15 +5652,13 @@ private fun QuestionCard(request: QuestionRequest, onAnswer: (List<QuestionAnswe
     val selected = remember(request.callId) { mutableStateMapOf<String, List<String>>() }
     val typed = remember(request.callId) { mutableStateMapOf<String, String>() }
 
-    fun buildAnswers(overrides: Map<String, List<String>> = emptyMap()): List<QuestionAnswer> =
+    fun buildAnswers(): List<QuestionAnswer> =
         request.questions.map { question ->
-            val text = typed[question.id].orEmpty().trim()
-            val override = overrides[question.id]
-            when {
-                override != null -> QuestionAnswer(question.id, override, null)
-                text.isNotEmpty() -> QuestionAnswer(question.id, emptyList(), text)
-                else -> QuestionAnswer(question.id, selected[question.id].orEmpty(), null)
-            }
+            QuestionAnswer(
+                id = question.id,
+                selected = selected[question.id].orEmpty(),
+                custom = typed[question.id].orEmpty().trim().ifEmpty { null },
+            )
         }
 
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -5691,16 +5689,13 @@ private fun QuestionCard(request: QuestionRequest, onAnswer: (List<QuestionAnswe
                                 RoundedCornerShape(10.dp),
                             )
                             .clickable {
-                                when {
-                                    request.questions.size == 1 && !question.multiSelect ->
-                                        onAnswer(buildAnswers(mapOf(question.id to listOf(option.label))))
-                                    question.multiSelect -> {
-                                        val current = selected[question.id].orEmpty()
-                                        selected[question.id] =
-                                            if (current.contains(option.label)) current - option.label
-                                            else current + option.label
-                                    }
-                                    else -> selected[question.id] = listOf(option.label)
+                                if (question.multiSelect) {
+                                    val current = selected[question.id].orEmpty()
+                                    selected[question.id] =
+                                        if (current.contains(option.label)) current - option.label
+                                        else current + option.label
+                                } else {
+                                    selected[question.id] = listOf(option.label)
                                 }
                             }
                             .padding(horizontal = 10.dp, vertical = 8.dp),
