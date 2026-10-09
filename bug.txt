@@ -1,0 +1,208 @@
+MOBILE-HARNESS — RAPORT DE BUGURI
+Data: 2026-10-08
+Repo: ~/dev/Mobile-Harness
+Revizie analizată: ce47d5a465e5700ab9ee0da3f0522981bde667b5
+Stare: 9 probleme identificate, nereparate în cadrul acestui audit.
+
+VALIDARE ȘI LIMITE
+- Constatările sunt susținute de analiza statică a codului și a apelanților.
+- Nu sunt încă reproduse în interfața aplicației sau pe dispozitiv.
+- Nu s-a rulat Gradle. Încercarea de compilare Kotlin separată a fost
+  întreruptă; nu există rezultate de teste executate.
+- Implementarea Kotlin copyTo a fost inspectată read-only cu javap.
+- Nu s-au modificat codul aplicației, workflow-uri CI sau setări ale telefonului.
+- Regulă reiterată de utilizator: FĂRĂ BUILD LOCAL. Validarea Android se face
+  în CI, nu pe telefon.
+- Numerele de linie corespund reviziei de mai sus; pot varia după modificări.
+
+SEVERITATE
+P1: risc de pierdere/modificare greșită a datelor sau blocarea agentului.
+P2: funcționalitate ori rezultat incorect.
+Căile de mai jos sunt relative la app/src/main/java/com/jarves/mh/.
+
+1. [P1] COPY → PASTE ÎN ACELAȘI FOLDER POATE ȘTERGE FIȘIERUL
+Locații:
+- storage/LocalFileSystem.kt:189–208
+- storage/FsClipboard.kt:38–47
+Declanșare:
+În managerul general de fișiere, pe backend LocalFileSystem (sandbox sau
+memorie partajată prin all-files access), copiază un fișier și lipește-l în
+folderul lui original.
+Cauză:
+Regulile clipboard-ului permit această operație. Sursa și destinația devin
+același fișier, iar backend-ul apelează from.copyTo(to, overwrite = true).
+Implementarea Kotlin șterge destinația înainte de deschiderea sursei.
+Consecință:
+Fișierul original dispare, apoi copierea eșuează deoarece sursa nu mai există.
+Corecție propusă:
+Verifică egalitatea căilor canonice înainte de copiere. Pentru COPY folosește
+un nume liber; pentru o mutare pe aceeași cale refuză operația sau fă no-op.
+
+2. [P1] CUT → PASTE POATE ȘTERGE UN FOLDER COPIAT DOAR PARȚIAL
+Locații:
+- storage/LocalFileSystem.kt:201–210
+- storage/SafFileSystem.kt:199–209
+- ui/MainViewModel.kt:1755–1759
+Declanșare:
+Decupează un folder și lipește-l într-o destinație unde cel puțin un copil
+nu poate fi copiat: eroare de scriere, conflict de tip fișier/director,
+permisiuni sau link refuzat de backend.
+Cauză:
+Copierea recursivă ignoră rezultatele Err ale copiilor și întoarce Ok pentru
+folder. SAF poate transforma și o eroare de listare în listă goală.
+Consecință:
+pasteInto consideră transferul reușit și șterge recursiv folderul sursă,
+deși destinația nu conține toate elementele sale.
+Corecție propusă:
+Propagă prima eroare de listare/copiere, verifică crearea destinației și
+șterge sursa numai după copierea completă. Păstrează elementele nereușite
+în clipboard pentru reîncercare.
+
+3. [P1] „FIȘIER NOU” GOLEȘTE UN FIȘIER EXISTENT OMONIM
+Locații:
+- ui/MainViewModel.kt:1412–1414
+- ui/FileManagerPlusScreen.kt:503–507,1333–1347
+Declanșare:
+În managerul general de fișiere, creează un fișier cu un nume deja folosit,
+de exemplu acceptă numele implicit note.txt într-un folder care îl conține.
+Cauză:
+createFilesFile apelează direct writeText(path, ""), fără verificarea
+existenței. Dialogul verifică doar că numele nu este gol.
+Consecință:
+Conținutul fișierului existent este înlocuit cu text gol, fără avertisment.
+Notă:
+Fluxul separat createWorkspaceTextFile din tab-ul workspace are protecție
+la coliziuni; constatarea vizează managerul general de fișiere.
+Corecție propusă:
+Folosește creare exclusivă/create-only și refuză numele deja existent.
+
+4. [P1] SCHIMBAREA LOCAȚIEI DE STOCARE POATE MUTA ALT FIȘIER
+Locații:
+- storage/FsClipboard.kt:12–15
+- ui/MainViewModel.kt:1153–1163,1703–1713,1740–1759
+Declanșare:
+Decupează note.txt din locația A, schimbă locația în B și lipește într-un
+subfolder din B. În B există un alt fișier la aceeași cale relativă note.txt.
+Cauză:
+Clipboard-ul păstrează căile relative și operația, nu și root-ul sursă.
+openFileRoot nu golește clipboard-ul. pasteInto deschide backend-ul root-ului
+curent și îl folosește atât pentru sursă, cât și pentru destinație.
+Consecință:
+Se copiază/mută fișierul din B, nu cel selectat din A. La CUT, fișierul din B
+este șters de la locația lui inițială; sursa intenționată din A rămâne neatinsă.
+Corecție propusă:
+Stochează root-ul sursă și folosește backend-uri distincte pentru transfer;
+alternativ, golește clipboard-ul la schimbarea root-ului.
+
+5. [P1] HERMES REUTILIZEAZĂ UN PROXY DEJA ÎNCHIS DUPĂ UN EȘEC
+Locații:
+- runtime/HeadlessCliBridge.kt:193–198,264,281–298
+- runtime/LocalOpenAiProxy.kt:226–228
+Declanșare:
+Folosește Hermes cu NVIDIA NIM sau un CUSTOM rutat prin proxy OpenAI.
+După un turn warm eșuat, trimite un alt mesaj cu aceleași setări.
+Cauză:
+Eșecul închide sesiunea warm. Cleanup închide proxy-ul, dar nu resetează
+warmProxy și warmProxySignature. openAiProxyFor întoarce obiectul păstrat
+în cache dacă semnătura este aceeași. close închide socket-ul de ascultare.
+Consecință:
+Următoarea execuție este trimisă spre un gateway local închis; retry-urile
+cu aceleași setări pot continua să eșueze.
+Corecție propusă:
+Resetează referința și semnătura ori de câte ori proxy-ul este închis,
+sau păstrează deliberat proxy-ul activ până la închiderea bridge-ului.
+
+6. [P1] DSH PREWARM ȘI STARTSESSION POT BLOCA INIȚIALIZAREA
+Locații:
+- runtime/DshRuntimeBridge.kt:388–453,525–552
+- runtime/AgentWork.kt:70–95,105–112
+- ui/MainViewModel.kt:2636–2640,4980–4991
+Declanșare:
+Cu un proiect deschis, salvează providerul DSH și trimite imediat un mesaj,
+înainte ca preîncălzirea să termine inițializarea.
+Cauză:
+Prewarm publică un canal încă neinițializat. Execuția poate adopta același
+canal și apela și ea awaitSdkInitialized. Ambii cititori trimit initialize
+cu același ID și împart outputOffset/pendingOutput, dar au variabile locale
+ready separate. Nu există mutex comun sau timeout pentru handshake.
+Consecință:
+Un cititor poate consuma ambele răspunsuri, iar celălalt poate aștepta
+indefinit cât timp procesul rămâne viu. Frecvența reală pe device nu a fost
+măsurată.
+Corecție propusă:
+Protejează achiziția/configurarea/inițializarea canalului cu un mutex comun
+și garantează un singur initializer/cititor. Reverifică garda de execuție
+activă în lock și adaugă timeout pentru handshake.
+
+7. [P2] ARHIVAREA FOLDERELOR PIERDE CĂILE FIȘIERELOR
+Locație:
+- ui/MainViewModel.kt:1887–1926
+Declanșare:
+Selectează folderul docs care conține docs/note.txt și folosește Arhivare.
+Cauză:
+Walker-ul colectează FsEntry din subfoldere, dar faza de scriere citește
+FsPaths.join(state.fsPath, entry.name) și folosește ZipEntry(entry.name).
+Calea traversată este pierdută.
+Consecință:
+Se caută note.txt în folderul curent, nu docs/note.txt. Dacă lipsește,
+fișierul este omis; dacă există un omonim, se arhivează conținutul greșit.
+ZIP-ul poate fi gol. Structura folderelor se pierde, iar numele duplicate
+pot produce eroare la construirea arhivei.
+Corecție propusă:
+Păstrează separat calea completă de citire și calea relativă în ZIP.
+Raportează omisiunile sau refuză arhiva în loc de succes aparent.
+
+8. [P2] DSH WARM IGNORĂ SCHIMBAREA ENDPOINT-ULUI/PROTOCOLULUI
+Locații:
+- runtime/DshRuntimeBridge.kt:933–945,995–1000
+- runtime/DshRuntimeBridge.kt:250–253,599–605
+Declanșare:
+După un turn DSH cu provider CUSTOM, schimbă base URL sau dshApi, păstrând
+același model, aceeași cheie și același proiect, apoi trimite alt mesaj.
+Cauză:
+dshWarmSignature include route.name, model, workspace și environment,
+dar omite route.custom.baseUrl și route.custom.api. Numele rutei CUSTOM
+rămâne mh-custom. Procesul warm deja inițializat este reutilizat, deși
+configurația custom este rezolvată la boot.
+Consecință:
+Execuția poate continua să folosească vechiul endpoint sau vechiul protocol,
+în ciuda setărilor salvate în interfață.
+Corecție propusă:
+Include baseUrl și api în semnătura warm și testează schimbări în interiorul
+aceleiași rute, nu doar schimbări ale numelui rutei.
+
+9. [P2] CRASH CLI COLD POATE FI RAPORTAT „TASK COMPLETED”
+Locații:
+- runtime/HeadlessCliBridge.kt:218–230,452–522
+- ui/MainViewModel.kt:5357–5366
+Declanșare:
+OpenCode sau Hermes pe fallback cold iese cu cod nenul înainte să emită
+un eveniment JSON de eroare/rezultat recunoscut, cu output gol sau doar
+diagnostice obișnuite de startup.
+Cauză:
+runCliSession poate întoarce failed = null. startSession citește exit code-ul,
+dar condiția de succes verifică doar !userStopRequested și failed == null.
+Consecință:
+Aplicația emite SessionCompleted și afișează task finalizat, ascunzând
+faptul că agentul a eșuat la pornire.
+Corecție propusă:
+Urmărește explicit un rezultat terminal reușit. Acceptă succesul pe calea
+cold la exit 0 sau la un rezultat terminal de succes; păstrează excepția
+pentru procesele distruse intenționat după primirea răspunsului final.
+
+PRIORITATE PROPUSĂ
+1. Problemele 1–4: protecția datelor utilizatorului.
+2. Problemele 5–6: recuperarea Hermes și stabilitatea inițializării DSH.
+3. Problemele 7–9: arhivare, aplicarea setărilor și raportarea corectă.
+
+TESTE DE REGRESIE NECESARE (NEEXECUTATE ÎN ACEST AUDIT)
+- Copy/paste pe aceeași cale; coliziuni și transfer fără pierdere de sursă.
+- Eroare la un copil al copierii recursive și la listarea unui folder SAF.
+- Fișier nou cu nume existent, fără trunchierea conținutului.
+- Clipboard păstrat între root-uri diferite.
+- Hermes: eșec warm urmat de mesaj cu aceleași setări.
+- DSH: concurență prewarm/startSession și timeout de inițializare.
+- ZIP pentru foldere imbricate și fișiere cu același basename.
+- DSH: schimbare baseUrl/api cu același model și aceeași cheie.
+- CLI: exit nenul fără eveniment JSON, plus succes explicit urmat de
+  terminarea intenționată a procesului.
