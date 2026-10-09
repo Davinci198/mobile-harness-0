@@ -5938,7 +5938,42 @@ private fun DiffLineRow(line: DiffLine) {
     )
 }
 
-private enum class StudioUiState { CHECKING, NOT_INSTALLED, INSTALLING, STARTING, READY, FAILED }
+private enum class StudioUiState { CHECKING, NOT_INSTALLED, INSTALLING, STARTING, READY, STOPPED, FAILED }
+
+// A user-initiated stop sticks for the lifetime of the process: switching
+// tabs recreates the composable, and the plain port/isInstalled probe below
+// would otherwise resurrect a server the user just stopped. A fresh app
+// launch clears the flag and auto-start behaves as before.
+@Volatile private var studioUserStopped = false
+@Volatile private var dashboardUserStopped = false
+
+// Slim control strip shown while a server tab is READY: identifies which
+// server is live and offers the only affordance the Scaffold top bar can't
+// host (it is scoped to the project, not to the tab).
+@Composable
+private fun ServerControlBar(label: String, onStop: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onStop) {
+            Icon(
+                Icons.Default.Stop,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.server_stop), fontSize = 12.sp)
+        }
+    }
+}
 
 /**
  * Workspace tab that runs the Ekko Studio web server inside the guest and
@@ -5959,6 +5994,7 @@ private fun StudioTab(installer: RuntimeInstaller) {
     var progressLine by remember { mutableStateOf("") }
 
     fun launch() {
+        studioUserStopped = false
         uiState = StudioUiState.STARTING
         errorMessage = null
         thread(name = "studio-start") {
@@ -5985,6 +6021,15 @@ private fun StudioTab(installer: RuntimeInstaller) {
                     errorMessage = result.message
                 }
             }
+        }
+    }
+
+    fun stop() {
+        // Flag first so a tab re-entry racing the teardown cannot auto-relaunch.
+        studioUserStopped = true
+        uiState = StudioUiState.STOPPED
+        thread(name = "studio-stop") {
+            runCatching { manager.stop() }
         }
     }
 
@@ -6021,6 +6066,8 @@ private fun StudioTab(installer: RuntimeInstaller) {
 
     LaunchedEffect(attempt) {
         when {
+            // User-initiated stop wins over every auto-start probe.
+            studioUserStopped -> uiState = StudioUiState.STOPPED
             StudioServerManager.portOpen() -> uiState = StudioUiState.READY
             installer.isStudioInstalled() -> launch()
             else -> uiState = StudioUiState.NOT_INSTALLED
@@ -6105,7 +6152,9 @@ private fun StudioTab(installer: RuntimeInstaller) {
                         )
                     }
                 }
-                AndroidView(
+                Column(Modifier.fillMaxSize()) {
+                    ServerControlBar(stringResource(R.string.tab_studio)) { stop() }
+                    AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(
@@ -6129,8 +6178,23 @@ private fun StudioTab(installer: RuntimeInstaller) {
                     }
                 },
                 update = { view -> if (view.url == null) view.loadUrl(url) },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.weight(1f),
                 )
+                }
+            }
+            StudioUiState.STOPPED -> Column {
+                EmptyState(
+                    Icons.Default.Dashboard,
+                    stringResource(R.string.studio_stopped),
+                    stringResource(R.string.studio_stopped_desc),
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    onClick = { launch() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 24.dp),
+                ) {
+                    Text(stringResource(R.string.server_start))
+                }
             }
         }
     }
@@ -6155,6 +6219,7 @@ private fun DashboardTab(installer: RuntimeInstaller) {
     var progressLine by remember { mutableStateOf("") }
 
     fun launch() {
+        dashboardUserStopped = false
         uiState = StudioUiState.STARTING
         errorMessage = null
         thread(name = "dashboard-start") {
@@ -6186,6 +6251,15 @@ private fun DashboardTab(installer: RuntimeInstaller) {
         }
     }
 
+    fun stop() {
+        // Flag first so a tab re-entry racing the teardown cannot auto-relaunch.
+        dashboardUserStopped = true
+        uiState = StudioUiState.STOPPED
+        thread(name = "dashboard-stop") {
+            runCatching { manager.stop() }
+        }
+    }
+
     fun install() {
         uiState = StudioUiState.INSTALLING
         errorMessage = null
@@ -6209,6 +6283,8 @@ private fun DashboardTab(installer: RuntimeInstaller) {
 
     LaunchedEffect(attempt) {
         when {
+            // User-initiated stop wins over every auto-start probe.
+            dashboardUserStopped -> uiState = StudioUiState.STOPPED
             HermesDashboardManager.portOpen() -> uiState = StudioUiState.READY
             installer.isAgentInstalled(AgentKind.HERMES) -> launch()
             else -> uiState = StudioUiState.NOT_INSTALLED
@@ -6287,7 +6363,9 @@ private fun DashboardTab(installer: RuntimeInstaller) {
                         )
                     }
                 }
-                AndroidView(
+                Column(Modifier.fillMaxSize()) {
+                    ServerControlBar(stringResource(R.string.tab_dashboard)) { stop() }
+                    AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(
@@ -6312,8 +6390,23 @@ private fun DashboardTab(installer: RuntimeInstaller) {
                     }
                 },
                 update = { view -> if (view.url == null) view.loadUrl(url) },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.weight(1f),
                 )
+                }
+            }
+            StudioUiState.STOPPED -> Column {
+                EmptyState(
+                    Icons.Default.Language,
+                    stringResource(R.string.dash_stopped),
+                    stringResource(R.string.dash_stopped_desc),
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    onClick = { launch() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 24.dp),
+                ) {
+                    Text(stringResource(R.string.server_start))
+                }
             }
         }
     }
