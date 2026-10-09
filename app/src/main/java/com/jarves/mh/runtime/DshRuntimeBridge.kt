@@ -1150,6 +1150,14 @@ internal fun dshHomePatch(route: DshRoute, model: String): String = buildString 
     appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-approval-answerer/index.js")
     appendLine("    - id: mh-question")
     appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-question-answerer/index.js")
+    // The sdk profile stacks only dsh-base + dsh-sdk-app, and neither ships the
+    // model-facing question tool (only the web/tui presets do) even though
+    // dsh-base registers the user-questions seam and its plan prompt tells the
+    // model to call ask_user_question. Register it here so the QuestionCard
+    // can ever be reached; dsh ships the package as its own dependency, so the
+    // loader resolves it from the install anchor like every profile does.
+    appendLine("    - id: tool-ask-user")
+    appendLine("      name: '@deepseek-ai/dsh-tool-ask-user'")
 }
 
 /**

@@ -588,6 +588,9 @@ class DshHomePatchTest {
         assertTrue(patch.contains("name: /root/.dsh/plugins/mh-approval-answerer/index.js"))
         assertTrue(patch.contains("- id: mh-question"))
         assertTrue(patch.contains("name: /root/.dsh/plugins/mh-question-answerer/index.js"))
+        // The sdk profile ships no model-facing question tool on its own.
+        assertTrue(patch.contains("- id: tool-ask-user"))
+        assertTrue(patch.contains("name: '@deepseek-ai/dsh-tool-ask-user'"))
     }
 
     @Test
