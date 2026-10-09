@@ -1028,6 +1028,9 @@ internal fun yamlQuote(value: String): String = "'${value.replace("'", "''")}'"
  *   session's providers never leak into an official session.
  * - The insert entry loads the guest answerer that forwards `approval/request`
  *   asks to [DshApprovalServer] over loopback.
+ * - The approval row overrides dsh-base's `dsh-user-approval` policy, which
+ *   pins `never` for the `danger-full-access` mode this bridge always exports;
+ *   the port gate keeps one-shot runs (no listener) on the original policy.
  * - The permission presets ask only while `MH_APPROVAL_PORT` is exported (the
  *   SDK bridge always exports it): with no listener the danger preset keeps
  *   dsh's original `never`, so one-shot runs without an approval channel stay
@@ -1048,6 +1051,18 @@ internal fun dshHomePatch(route: DshRoute, model: String): String = buildString 
     appendLine("- insert:")
     appendLine("    - id: mh-approval")
     appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-approval-answerer/index.js")
+    // dsh-base pins the approval service itself (not just the preset) to `never`
+    // whenever DSH_PERMISSION_MODE=danger-full-access — the mode the SDK bridge
+    // always exports — so the permission-preset override below alone never asks.
+    // Mirror the same port gate on this row: with no listener (one-shot runs)
+    // the original mode-derived policy is preserved exactly.
+    appendLine("- id: approval")
+    appendLine("  config:")
+    appendLine(
+        "    policy: !!js \"process.env.MH_APPROVAL_PORT ? 'ask' : " +
+            "((process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === " +
+            "'danger-full-access' ? 'never' : 'ask')\"",
+    )
     appendLine("- id: permission")
     appendLine("  config:")
     appendLine("    defaultPreset: !!js \"process.env.MH_APPROVAL_PORT ? 'danger-full-access' : undefined\"")
