@@ -10,7 +10,7 @@ on:
       studio_version:
         description: 'hermes-web-ui npm version to bundle'
         required: false
-        default: '0.7.21'
+        default: '0.7.32'
       upload_release:
         description: 'Upload artifacts to the runtime-studio release'
         required: false
@@ -26,7 +26,7 @@ jobs:
     # An x86_64 runner would silently produce binaries that cannot load there.
     runs-on: ubuntu-24.04-arm
     env:
-      STUDIO_VERSION: ${{ github.event.inputs.studio_version || '0.7.21' }}
+      STUDIO_VERSION: ${{ github.event.inputs.studio_version || '0.7.32' }}
     steps:
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -74,7 +74,7 @@ jobs:
           # everything else: the full production tree is ~280MB of packages the
           # bundle never requires (vue-flow, katex, sherpa-onnx, ...). ajv and
           # ajv-formats are not production dependencies of the published package
-          # and the server boots without them (verified against 0.7.21).
+          # and the server boots without them (verified against 0.7.32).
           node <<'EOF'
           const fs = require('fs')
           const path = require('path')

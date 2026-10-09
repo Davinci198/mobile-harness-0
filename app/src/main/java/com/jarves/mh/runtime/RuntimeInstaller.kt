@@ -2578,7 +2578,7 @@ fi
         const val OPENCODE2_GUEST_PATH = "/root/.opencode/bin/opencode2"
         const val HERMES_GUEST_PATH = "/usr/local/bin/hermes"
         const val HERMES2_GUEST_PATH = "/usr/local/bin/hermes2"
-        const val STUDIO_VERSION = "0.7.21"
+        const val STUDIO_VERSION = "0.7.32"
         const val STUDIO_GUEST_HOME = "/root/.hermes-web-ui"
         const val STUDIO_GUEST_ENTRY = "/usr/local/bin/studio"
         const val STUDIO_DEFAULT_PORT = 8648
@@ -2665,9 +2665,9 @@ fi
             label = "Ekko Studio",
             fileName = "pocketdev-studio-arm64-$STUDIO_VERSION.tar.zst",
             // sha256 of the artifact published by the studio-bundle workflow on
-            // the runtime-studio-0.7.21 release (studio-bundle.sha256).
-            sha256 = "e8ec002f99a0ab5dc346737c4caac6be125677fe7a0130fc7f58004c7f6ca7ec",
-            compressedBytes = 52_162_158L,
+            // the runtime-studio-0.7.32 release (studio-bundle.sha256).
+            sha256 = "525cdb35464da0f7d0a9318f956acf22b149e8df253953301475ee7672f38430",
+            compressedBytes = 46_172_395L,
         )
         private const val MAX_TERMINAL_LINE = 500
         private const val MAX_COLLECTED_OUTPUT = 24_000
