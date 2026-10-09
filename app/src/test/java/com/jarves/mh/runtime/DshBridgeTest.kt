@@ -586,11 +586,6 @@ class DshHomePatchTest {
         assertFalse(patch.contains("- id: llm-pi-ai"))
         assertTrue(patch.contains("- insert:"))
         assertTrue(patch.contains("name: /root/.dsh/plugins/mh-approval-answerer/index.js"))
-        assertTrue(patch.contains("- id: approval"))
-        assertTrue(patch.contains("policy: !!js \"process.env.MH_APPROVAL_PORT ? 'ask' : ((process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask')\""))
-        assertTrue(patch.contains("defaultPreset: !!js \"process.env.MH_APPROVAL_PORT ? 'danger-full-access' : undefined\""))
-        assertTrue(patch.contains("approval: !!js \"process.env.MH_APPROVAL_PORT ? 'ask' : 'never'\""))
-        assertTrue(patch.contains("- id: permission"))
     }
 
     @Test
@@ -606,8 +601,7 @@ class DshHomePatchTest {
 
         assertTrue(patch.contains("- id: llm-pi-ai"))
         assertTrue(patch.contains("- insert:"))
-        assertTrue(patch.contains("- id: approval"))
-        assertTrue(patch.contains("- id: permission"))
+        assertTrue(patch.contains("name: /root/.dsh/plugins/mh-approval-answerer/index.js"))
     }
 }
 

@@ -552,9 +552,11 @@ class DshRuntimeBridge(
             // The guest answerer posts approval asks to this port; the value is
             // stable for the process, so warm reuse keeps the same signature.
             "MH_APPROVAL_PORT" to ensureApprovalServer().port.toString(),
-            // PocketDev already confines the whole Linux guest with PRoot. Let dsh
-            // use every tool inside that boundary without an unavailable approval UI.
-            "DSH_PERMISSION_MODE" to "danger-full-access",
+            // dsh asks for approval only when the sandbox denies an action and
+            // the model escalates. danger-full-access never denies, so it can
+            // never raise the ApprovalCard; workspace-write is dsh's interactive
+            // default — in-workspace work runs silently, anything wider asks.
+            "DSH_PERMISSION_MODE" to "workspace-write",
             // Guest CLIs refuse to boot with an empty key variable; a loopback
             // gateway ignores the header, so send a placeholder instead.
             route.keyEnv to secret.ifBlank { "loopback" },
@@ -1020,21 +1022,17 @@ internal fun yamlQuote(value: String): String = "'${value.replace("'", "''")}'"
  * Cordis home patch for the dsh 0.2.0 settings surface
  * (`$DSH_HOME/cordis.patch.yml`), applied over every profile's own layer.
  *
- * Three concerns share the file:
+ * Two concerns share the file:
  * - Custom routes patch the llm-pi-ai row so the SDK resolves the provider at
  *   boot; deepseek-official needs no entry because the credentials service
  *   picks its key out of the DEEPSEEK_API_KEY environment we export. Omitting
  *   the row keeps dsh-base's default providers, so a later custom-route
  *   session's providers never leak into an official session.
  * - The insert entry loads the guest answerer that forwards `approval/request`
- *   asks to [DshApprovalServer] over loopback.
- * - The approval row overrides dsh-base's `dsh-user-approval` policy, which
- *   pins `never` for the `danger-full-access` mode this bridge always exports;
- *   the port gate keeps one-shot runs (no listener) on the original policy.
- * - The permission presets ask only while `MH_APPROVAL_PORT` is exported (the
- *   SDK bridge always exports it): with no listener the danger preset keeps
- *   dsh's original `never`, so one-shot runs without an approval channel stay
- *   unchanged, while a connected session raises the ApprovalCard.
+ *   asks to [DshApprovalServer] over loopback. Approval itself needs no patch:
+ *   the SDK exports `DSH_PERMISSION_MODE=workspace-write` (see
+ *   [buildEnvironment]), which dsh-base already pairs with `approval: ask`, so
+ *   a sandbox escalation reaches the answerer on its own.
  */
 internal fun dshHomePatch(route: DshRoute, model: String): String = buildString {
     if (route.custom != null) {
@@ -1051,31 +1049,6 @@ internal fun dshHomePatch(route: DshRoute, model: String): String = buildString 
     appendLine("- insert:")
     appendLine("    - id: mh-approval")
     appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-approval-answerer/index.js")
-    // dsh-base pins the approval service itself (not just the preset) to `never`
-    // whenever DSH_PERMISSION_MODE=danger-full-access — the mode the SDK bridge
-    // always exports — so the permission-preset override below alone never asks.
-    // Mirror the same port gate on this row: with no listener (one-shot runs)
-    // the original mode-derived policy is preserved exactly.
-    appendLine("- id: approval")
-    appendLine("  config:")
-    appendLine(
-        "    policy: !!js \"process.env.MH_APPROVAL_PORT ? 'ask' : " +
-            "((process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === " +
-            "'danger-full-access' ? 'never' : 'ask')\"",
-    )
-    appendLine("- id: permission")
-    appendLine("  config:")
-    appendLine("    defaultPreset: !!js \"process.env.MH_APPROVAL_PORT ? 'danger-full-access' : undefined\"")
-    appendLine("    presets:")
-    appendLine("      read-only:")
-    appendLine("        sandbox: read-only")
-    appendLine("        approval: ask")
-    appendLine("      workspace-write:")
-    appendLine("        sandbox: workspace-write")
-    appendLine("        approval: ask")
-    appendLine("      danger-full-access:")
-    appendLine("        sandbox: danger-full-access")
-    appendLine("        approval: !!js \"process.env.MH_APPROVAL_PORT ? 'ask' : 'never'\"")
 }
 
 private data class DshSdkRunResult(val completed: Boolean, val failure: String)
