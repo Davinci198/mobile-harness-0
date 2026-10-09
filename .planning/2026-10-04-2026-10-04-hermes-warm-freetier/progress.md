@@ -282,3 +282,18 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
 - **Bug 9 live CONFIRMAT** (Hermes, Nimble Hopper 1f1d2502/chat b31c4e28): „Ruleaza" → tool-uri reale (search_files + 2× terminal completate) → `run-as com.jarves.mh kill -9 764 771` (libproot + python3 hermes) → logcat `Hermes warm turn done: failed=true, died=true, timeout=false` / `E HeadlessBridge: Session failed` / `IllegalStateException: The Hermes session exited unexpectedly; the phone may have suspended it. Retry with the app in the foreground.` (HeadlessCliBridge.kt:246) → UI „Sarcină oprită · The Hermes session exited unexpectedly…", chat JSON assistant `text:""`, workedMillis=39740 — **fără „finished the task", fără SessionCompleted**. Fix-ul `coldOk`/`sawSuccess` nu lasă un crash să citească drept succes.
 - **Diagnoză „răspunde greu" (DSH, amânat la cererea user-ului)**: dsh 0.2.0-rc.2 (= npm latest/next) nu expediază live-chunk-uri pe stdio (`assistant/message` compactează tot streamul în `data.stream` la final; `agent/assistant-stream` e process-local). Turn cald = 19.2s: 1.3s first-token + 15.7s reasoning + 2.1s text. Placeholder „deciding the next useful step" e string de app (MainViewModel.kt:5172). Opțiuni: reasoning effort mai mic (cordis.patch.yml), model non-thinking, UX.
 - Rămâne: test prewarm DSH (save provider → `SDK session prewarmed` → tură adopt). Evidence: logcat print în sesiune; `~/9remote-uploads/opencode/audit-verify/` (ui5x-65.xml, screen46-65.png). Device: keyguard securizat + Motorola App Locker blochează testele UI (screencap negru sub FLAG_SECURE).
+
+## Session 2026-10-09 — prewarm live verification (final)
+
+- 5 tentative live contaminate de interferență pe telefon (tap-uri user, force-stop din
+  Settings 05:16:41 în timpul prewarm-ului, turn al userului 05:26:19) + 1 eșec „curat"
+  la 04:31 nereconstruibil → decizie: jurnal diagnostic prin CI.
+- `d307cce` „chore: log prewarm guard decisions for on-device diagnosis" (tag `Prewarm`):
+  prewarmWarmSession = gard values; prewarmSession = entry (activeSessionId/kind/secretLen),
+  not-installed, settings written. CI `37875364211` verde, APK instalat, ff `2b1fe78..d307cce`.
+- **VERIFICAT 05:45:21**: onSave (isRunning=false, activeProject set, DEEPSEEK_HARNESS) →
+  launching prewarm (wise-turing) → enter (activeSessionId=null, NVIDIA_NIM, secretLen=70)
+  → settings.yaml written → chip „Verificat" → file recreat → canal cald adoptat.
+- **Adopție 05:46:19**: turn 2.7s, PID dsh identici (31019/31023), fără handshake nou.
+- Rețeta live (mid-turn up-tap early-retain) + capcane UI (keyboard/rotație/FLAG_SECURE)
+  documentate în ~/.memory/MEMORY.md.
