@@ -318,3 +318,32 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
 - Fix: 1 linie → acel release; CI `37879834295` verde → APK instalat pe device
   (`apk-rturl/`) → ff `52d2326..1ed6b9b`, branch șters. Toate bundle-urile (core/claude/
   python/dsh/agy/android) sunt pe același tag.
+
+### 2026-10-09 — DSH approval spike + fix/dsh-interactive-approvals (varianta A)
+- Spike pe device (guestrun.sh = proot + base64 transport; dump-config = validator de patch):
+  - Patch-ul acceptă **inserție de plugin nou**: `- insert: [- id: X, name: <modul>]`;
+    `name` = path absolut `.../index.js` (dir-ul eșuează „failed to import"; numele npm
+    funcționează doar din `profiles/*/node_modules` — evitat).
+  - `writeDshSettings` scrie `$DSH_HOME/cordis.patch.yml` (canal app-controlled, peste
+    profile layer) → acolo intră inserția + override `permission` presets.
+  - `!!js` în YAML cere **scalar între ghilimele** (altfel `: ` produce mapping) și
+    `defaultPreset` ternar (`undefined` → inferă ca vanilla): presets
+    danger-full-access = `process.env.MH_APPROVAL_PORT ? 'ask' : 'never'`.
+  - Pluginul se montează (`{"kind":"mounted"}`), vede `MH_APPROVAL_PORT`, transportul
+    guest→host loopback verificat cap-coadă (mock python: body `{callId,toolName,reason}`
+    → 200 `{"outcome":"allowed-once"}`). Fără port → `never` = comportament vechi
+    (HeadlessCliBridge one-shot neatins).
+  - `NARB_DISABLE_NATIVE_CACHE=1` obligatoriu la boot (PRoot poisoning) — deja în env.
+- Implementare (pe branch): `DshApprovalServer` (ServerSocket loopback, HermesHookServer
+  pattern, decide suspend → runBlocking), `DshRuntimeBridge`: pendingApprovals +
+  requestApprovalDecision (ToolRequested → ApprovalCard → withTimeoutOrNull 10 min →
+  outcome, timeout → ToolRejected), respondToApproval real (allowed-once/rejected),
+  cancel la session end, deploy `plugins/mh-approval-answerer/index.js`, buildEnvironment
+  + `MH_APPROVAL_PORT`, dshHomePatch extins; `classifyRisk` mutat în Models.kt (shared).
+  Teste: DshApprovalServerTest (4), DshHomePatchTest actualizat.
+- CI `37887852833` (c368395): eșec de compilare — edit-ul care a scos importul
+  `RiskLevel` din ClaudeRuntimeBridge a înghițit și `RuntimeEvent` (match fuzzy) →
+  `c455e3b` restore + paranteză în plus curățată în DshApprovalServerTest.
+  Re-run `37888290234` verde (primul eșec: flake NDK/dl.google.com 502, 33min).
+- ff `46d57b3..c455e3b` pe main, branch șters, APK branch instalat (`apk-dshappr/`,
+  66.7 MB). E2E card rămâne: sesiune DSH reală → ask → ApprovalCard → allow/reject.
