@@ -297,3 +297,11 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
 - **Adopție 05:46:19**: turn 2.7s, PID dsh identici (31019/31023), fără handshake nou.
 - Rețeta live (mid-turn up-tap early-retain) + capcane UI (keyboard/rotație/FLAG_SECURE)
   documentate în ~/.memory/MEMORY.md.
+
+### 2026-10-09 — fix/devstack-install închis
+- `30f47c9` (3 oct) rebased pe main → `58581c1`; conflict rezolvat: workflow = varianta
+  main (online-only, fetch bundle-uri offline mort, dropped), RuntimeInstaller = comentariu
+  main + `hasEmbeddedBundle`/Log.w; MainViewModel/Settings auto-merge (devStackFailed,
+  mesaj final cu culoare eroare, Log.e). CI `37877180450` verde → ff `2a28da9..58581c1`,
+  branch șters, APK reinstalat pe device.
+- `bug.txt` închis (decizie user). Toate resturile sesiunii = închise.
