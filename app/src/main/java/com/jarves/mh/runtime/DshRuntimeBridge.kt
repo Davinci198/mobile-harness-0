@@ -11,18 +11,21 @@ import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
+import com.jarves.mh.model.classifyRisk
 import com.jarves.mh.model.isLoopbackBaseUrl
 import java.io.BufferedWriter
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
@@ -52,6 +55,9 @@ class DshRuntimeBridge(
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
     override val events: Flow<RuntimeEvent> = eventBus
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
+    /** Guest asks waiting for the ApprovalCard, keyed by dsh's approval id. */
+    private val pendingApprovals = ConcurrentHashMap<String, CompletableDeferred<String>>()
+    @Volatile private var approvalServer: DshApprovalServer? = null
     @Volatile private var activeProcess: Process? = null
     /**
      * The SDK process kept alive between Agent Executions. Reusing it skips the
@@ -543,6 +549,9 @@ class DshRuntimeBridge(
             // so load the binding straight from its installed source.
             "NARB_DISABLE_NATIVE_CACHE" to "1",
             "DSH_HOME" to DSH_HOME_GUEST_PATH,
+            // The guest answerer posts approval asks to this port; the value is
+            // stable for the process, so warm reuse keeps the same signature.
+            "MH_APPROVAL_PORT" to ensureApprovalServer().port.toString(),
             // PocketDev already confines the whole Linux guest with PRoot. Let dsh
             // use every tool inside that boundary without an unavailable approval UI.
             "DSH_PERMISSION_MODE" to "danger-full-access",
@@ -610,7 +619,54 @@ class DshRuntimeBridge(
     }
 
     override suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
-        // Headless one-shot runs expose no approval channel; nothing is ever requested.
+        val decision = pendingApprovals.remove(request.approvalId) ?: return
+        decision.complete(if (approved) "allowed-once" else "rejected")
+        eventBus.emit(
+            if (approved) RuntimeEvent.ToolApproved(request.sessionId, request.approvalId)
+            else RuntimeEvent.ToolRejected(request.sessionId, request.approvalId),
+        )
+    }
+
+    /**
+     * One guest ask: show the ApprovalCard and wait for [APPROVAL_TIMEOUT_MS]
+     * for the user's decision. A sessionless or timed-out ask fails closed as
+     * `unavailable`, and a timeout also clears the card it raised.
+     */
+    private suspend fun requestApprovalDecision(callId: String, toolName: String, reason: String?): String {
+        val sessionId = activeSessionId ?: return "unavailable"
+        val request = ToolRequest(
+            approvalId = callId,
+            sessionId = sessionId,
+            toolName = toolName,
+            explanation = reason?.takeIf(String::isNotBlank) ?: "$toolName needs approval",
+            risk = classifyRisk(toolName, null),
+        )
+        val decision = CompletableDeferred<String>()
+        pendingApprovals[callId] = decision
+        eventBus.emit(RuntimeEvent.ToolRequested(sessionId, request))
+        val outcome = withTimeoutOrNull(APPROVAL_TIMEOUT_MS) { decision.await() }
+        pendingApprovals.remove(callId, decision)
+        if (outcome == null) {
+            eventBus.emit(RuntimeEvent.ToolRejected(sessionId, callId))
+            return "unavailable"
+        }
+        return outcome
+    }
+
+    private fun ensureApprovalServer(): DshApprovalServer =
+        approvalServer ?: synchronized(this) {
+            approvalServer ?: DshApprovalServer { callId, toolName, reason ->
+                requestApprovalDecision(callId, toolName, reason)
+            }.start().also { approvalServer = it }
+        }
+
+    /** Complete every unanswered ask so a dead card cannot outlive its session. */
+    private suspend fun cancelPendingApprovals(sessionId: String) {
+        pendingApprovals.keys.forEach { callId ->
+            if (pendingApprovals.remove(callId)?.complete("cancelled") == true) {
+                eventBus.emit(RuntimeEvent.ToolRejected(sessionId, callId))
+            }
+        }
     }
 
     override suspend fun stopSession(sessionId: String) = withContext(Dispatchers.IO) {
@@ -653,6 +709,15 @@ class DshRuntimeBridge(
         // of the DEEPSEEK_API_KEY environment we export.
         val patch = dshHomePatch(route, provider.model.ifBlank { route.defaultModel })
         File(home, "cordis.patch.yml").writeText(patch)
+        deployApprovalAnswerer(home)
+    }
+
+    /** Drop the guest-side `approval/request` answerer at its patch-referenced path. */
+    private fun deployApprovalAnswerer(home: File) {
+        runCatching {
+            val directory = File(home, "plugins/mh-approval-answerer").apply { mkdirs() }
+            File(directory, "index.js").writeText(APPROVAL_ANSWERER_JS)
+        }.onFailure { Log.w("DshBridge", "Approval answerer deploy failed", it) }
     }
 
 private suspend fun emitReasoningSummary(
@@ -683,6 +748,7 @@ private suspend fun emitReasoningSummary(
 
     private suspend fun emitCompletedOnce(sessionId: String) {
         if (finishedSessions.add(sessionId)) {
+            cancelPendingApprovals(sessionId)
             eventBus.emit(RuntimeEvent.SessionCompleted(sessionId))
             finishForegroundRuntime(
                 completed = true,
@@ -694,6 +760,7 @@ private suspend fun emitReasoningSummary(
 
     private suspend fun emitFailureOnce(sessionId: String, reason: String) {
         if (finishedSessions.add(sessionId)) {
+            cancelPendingApprovals(sessionId)
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, reason))
             if (userStopRequested) {
                 cancelForegroundRuntime()
@@ -889,6 +956,44 @@ private suspend fun emitReasoningSummary(
         private const val RETRY_MAX_ATTEMPTS = 4
         private const val RETRY_BACKOFF_MS = 4_000L
 
+        /** How long the ApprovalCard may keep one guest ask open. */
+        private const val APPROVAL_TIMEOUT_MS = 10 * 60 * 1000L
+
+        /**
+         * Guest-side answerer for dsh's `approval/request` waterfall: forwards
+         * the ask to [DshApprovalServer] and closes it with the user's
+         * decision. Every failure (no port, unreachable host, bad payload)
+         * fails closed as `unavailable`, which is also dsh's own default for a
+         * missing answerer.
+         */
+        private const val APPROVAL_ANSWERER_JS = """
+export default function mhApprovalAnswerer(ctx) {
+  ctx.on("approval/request", async (request) => {
+    const port = process.env.MH_APPROVAL_PORT;
+    if (!port) return "unavailable";
+    try {
+      const response = await fetch("http://127.0.0.1:" + port + "/approval", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          callId: request.callId ?? null,
+          toolName: request.toolName ?? "tool",
+          reason: request.reason ?? null,
+        }),
+        signal: AbortSignal.timeout(630000),
+      });
+      if (!response.ok) return "unavailable";
+      const outcome = (await response.json()).outcome;
+      return ["allowed-once", "rejected", "cancelled", "unavailable"].includes(outcome)
+        ? outcome
+        : "unavailable";
+    } catch {
+      return "unavailable";
+    }
+  });
+}
+"""
+
         /**
          * Silence the reused process must keep after a turn ends before the
          * turn is considered over. The SDK stops emitting as soon as the session
@@ -914,28 +1019,49 @@ internal fun yamlQuote(value: String): String = "'${value.replace("'", "''")}'"
 /**
  * Cordis home patch for the dsh 0.2.0 settings surface
  * (`$DSH_HOME/cordis.patch.yml`), applied over every profile's own layer.
- * Custom routes patch the llm-pi-ai row so the SDK resolves the provider at
- * boot; deepseek-official needs no entry because the credentials service picks
- * its key out of the DEEPSEEK_API_KEY environment we export. An empty patch
- * keeps dsh-base's default providers, so a later custom-route session's
- * providers never leak into an official session.
+ *
+ * Three concerns share the file:
+ * - Custom routes patch the llm-pi-ai row so the SDK resolves the provider at
+ *   boot; deepseek-official needs no entry because the credentials service
+ *   picks its key out of the DEEPSEEK_API_KEY environment we export. Omitting
+ *   the row keeps dsh-base's default providers, so a later custom-route
+ *   session's providers never leak into an official session.
+ * - The insert entry loads the guest answerer that forwards `approval/request`
+ *   asks to [DshApprovalServer] over loopback.
+ * - The permission presets ask only while `MH_APPROVAL_PORT` is exported (the
+ *   SDK bridge always exports it): with no listener the danger preset keeps
+ *   dsh's original `never`, so one-shot runs without an approval channel stay
+ *   unchanged, while a connected session raises the ApprovalCard.
  */
-internal fun dshHomePatch(route: DshRoute, model: String): String =
+internal fun dshHomePatch(route: DshRoute, model: String): String = buildString {
     if (route.custom != null) {
-        buildString {
-            appendLine("- id: llm-pi-ai")
-            appendLine("  config:")
-            appendLine("    providers:")
-            appendLine("      ${route.name}:")
-            appendLine("        apiKeyEnv: ${route.keyEnv}")
-            appendLine("        api: ${route.custom.api}")
-            appendLine("        baseURL: ${yamlQuote(route.custom.baseUrl)}")
-            appendLine("        models:")
-            appendLine("          - id: ${yamlQuote(model)}")
-        }
-    } else {
-        "[]\n"
+        appendLine("- id: llm-pi-ai")
+        appendLine("  config:")
+        appendLine("    providers:")
+        appendLine("      ${route.name}:")
+        appendLine("        apiKeyEnv: ${route.keyEnv}")
+        appendLine("        api: ${route.custom.api}")
+        appendLine("        baseURL: ${yamlQuote(route.custom.baseUrl)}")
+        appendLine("        models:")
+        appendLine("          - id: ${yamlQuote(model)}")
     }
+    appendLine("- insert:")
+    appendLine("    - id: mh-approval")
+    appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-approval-answerer/index.js")
+    appendLine("- id: permission")
+    appendLine("  config:")
+    appendLine("    defaultPreset: !!js \"process.env.MH_APPROVAL_PORT ? 'danger-full-access' : undefined\"")
+    appendLine("    presets:")
+    appendLine("      read-only:")
+    appendLine("        sandbox: read-only")
+    appendLine("        approval: ask")
+    appendLine("      workspace-write:")
+    appendLine("        sandbox: workspace-write")
+    appendLine("        approval: ask")
+    appendLine("      danger-full-access:")
+    appendLine("        sandbox: danger-full-access")
+    appendLine("        approval: !!js \"process.env.MH_APPROVAL_PORT ? 'ask' : 'never'\"")
+}
 
 private data class DshSdkRunResult(val completed: Boolean, val failure: String)
 

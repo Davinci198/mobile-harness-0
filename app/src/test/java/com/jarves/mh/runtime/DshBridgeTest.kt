@@ -576,12 +576,35 @@ class DshHomePatchTest {
     }
 
     @Test
-    fun officialRouteWritesEmptyPatch() {
+    fun officialRouteStillWiresTheApprovalAnswerer() {
         val route = DshRoute("deepseek-official", "DEEPSEEK_API_KEY", "deepseek-chat")
 
         // No llm-pi-ai entry keeps dsh-base's default providers; the official key
         // arrives through the exported DEEPSEEK_API_KEY environment.
-        assertEquals("[]\n", dshHomePatch(route, "deepseek-chat"))
+        val patch = dshHomePatch(route, "deepseek-chat")
+
+        assertFalse(patch.contains("- id: llm-pi-ai"))
+        assertTrue(patch.contains("- insert:"))
+        assertTrue(patch.contains("name: /root/.dsh/plugins/mh-approval-answerer/index.js"))
+        assertTrue(patch.contains("defaultPreset: !!js \"process.env.MH_APPROVAL_PORT ? 'danger-full-access' : undefined\""))
+        assertTrue(patch.contains("approval: !!js \"process.env.MH_APPROVAL_PORT ? 'ask' : 'never'\""))
+        assertTrue(patch.contains("- id: permission"))
+    }
+
+    @Test
+    fun customRouteKeepsApprovalWiringToo() {
+        val route = DshRoute(
+            name = "nvidia-nim",
+            keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
+            defaultModel = "meta/llama-3.2-11b-vision-instruct",
+            custom = DshCustomRoute("openai-completions", "https://integrate.api.nvidia.com/v1"),
+        )
+
+        val patch = dshHomePatch(route, "meta/llama-3.2-11b-vision-instruct")
+
+        assertTrue(patch.contains("- id: llm-pi-ai"))
+        assertTrue(patch.contains("- insert:"))
+        assertTrue(patch.contains("- id: permission"))
     }
 }
 

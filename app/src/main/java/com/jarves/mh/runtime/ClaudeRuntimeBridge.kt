@@ -8,9 +8,8 @@ import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProviderProfile
-import com.jarves.mh.model.RiskLevel
-import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
+import com.jarves.mh.model.classifyRisk
 import com.jarves.mh.model.isLoopbackBaseUrl
 import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.tools.ToolPermissionGate
@@ -637,15 +636,6 @@ class ClaudeRuntimeBridge(
         sb.appendLine("Now, respond to this new message from the user:")
         sb.appendLine(currentPrompt)
         return sb.toString()
-    }
-
-    private fun classifyRisk(tool: String, command: String?): RiskLevel {
-        val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
-        return when {
-            listOf("rm -rf", "git push", "git reset", "sudo", "curl ").any(preview::contains) -> RiskLevel.HIGH
-            tool in listOf("Write", "Edit", "NotebookEdit", "Bash") -> RiskLevel.REVIEW
-            else -> RiskLevel.SAFE
-        }
     }
 
     private fun friendlyError(error: Throwable): String {

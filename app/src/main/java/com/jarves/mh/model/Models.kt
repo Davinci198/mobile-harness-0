@@ -324,6 +324,16 @@ data class WorkspaceEntry(
 
 enum class RiskLevel { SAFE, REVIEW, HIGH }
 
+/** Risk chip for a pending-approval card: [command] sharpens the rating when known. */
+fun classifyRisk(tool: String, command: String?): RiskLevel {
+    val preview = "${tool.lowercase()} ${command.orEmpty().lowercase()}"
+    return when {
+        listOf("rm -rf", "git push", "git reset", "sudo", "curl ").any(preview::contains) -> RiskLevel.HIGH
+        tool in listOf("Write", "Edit", "NotebookEdit", "Bash") || tool.equals("bash", ignoreCase = true) -> RiskLevel.REVIEW
+        else -> RiskLevel.SAFE
+    }
+}
+
 /**
  * Optional development toolchains the user can pick during onboarding.
  * Node.js, npm, Git, and Claude Code itself are always installed because the
