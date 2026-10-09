@@ -231,6 +231,7 @@ import com.jarves.mh.runtime.RuntimeSetupService
 import com.jarves.mh.storage.FsFileTypes
 import com.jarves.mh.storage.FsRemedy
 import com.jarves.mh.runtime.StudioServerManager
+import com.jarves.mh.runtime.HermesDashboardManager
 import com.jarves.mh.runtime.supportsArm64Runtime
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import androidx.compose.foundation.rememberScrollState
@@ -272,6 +273,7 @@ internal enum class RootScreen(@StringRes val labelRes: Int, val icon: ImageVect
 }
 private enum class WorkspaceTab(@StringRes val labelRes: Int, val icon: ImageVector) {
     CHAT(R.string.tab_chat, Icons.Default.AutoAwesome),
+    DASHBOARD(R.string.tab_dashboard, Icons.Default.Language),
     FILES(R.string.tab_files, Icons.Default.Folder),
     TERMINAL(R.string.tab_terminal, Icons.Default.Terminal),
     CHANGES(R.string.tab_changes, Icons.Default.Code),
@@ -4310,6 +4312,14 @@ private fun WorkspaceScreen(
                     screenShareActive = state.screenShareActive,
                     onToggleScreenShare = onToggleScreenShare,
                 )
+                WorkspaceTab.DASHBOARD -> {
+                    val dashContext = LocalContext.current
+                    DashboardTab(
+                        installer = remember(dashContext) {
+                            RuntimeInstaller(dashContext.applicationContext)
+                        },
+                    )
+                }
                 WorkspaceTab.FILES -> FilesTab(
                     files = state.workspaceFiles,
                     loading = state.filesLoading,
@@ -6111,6 +6121,189 @@ private fun StudioTab(installer: RuntimeInstaller) {
                             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                                 // Keep the Studio tab pinned to the local server;
                                 // null host (about:blank etc.) stays in-frame.
+                                val host = request.url.host ?: return false
+                                return host !in listOf("127.0.0.1", "localhost")
+                            }
+                        }
+                        loadUrl(url)
+                    }
+                },
+                update = { view -> if (view.url == null) view.loadUrl(url) },
+                modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Workspace tab that runs the official Hermes dashboard (`hermes dashboard`)
+ * inside the guest and shows it in a localhost-restricted WebView. Same
+ * shape as [StudioTab]; the first server boot builds the web UI (npm +
+ * vite), so the start wait is measured in minutes, not seconds.
+ */
+@Composable
+private fun DashboardTab(installer: RuntimeInstaller) {
+    val context = LocalContext.current
+    var uiState by remember { mutableStateOf(StudioUiState.CHECKING) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var url by remember { mutableStateOf("http://127.0.0.1:${HermesDashboardManager.PORT}") }
+    var attempt by remember { mutableIntStateOf(0) }
+
+    val manager = remember(installer) { HermesDashboardManager(installer) }
+
+    var progressLine by remember { mutableStateOf("") }
+
+    fun launch() {
+        uiState = StudioUiState.STARTING
+        errorMessage = null
+        thread(name = "dashboard-start") {
+            val result = runCatching { manager.start() }
+                .getOrElse { HermesDashboardManager.StartResult.Failure(it.message ?: context.getString(R.string.dash_start_failed)) }
+            when (result) {
+                is HermesDashboardManager.StartResult.Started -> {
+                    // Wait (bounded) for HTTP readiness before switching the
+                    // WebView; the manager already waited out the first-build
+                    // window, this covers the tail.
+                    var ready = false
+                    val deadline = System.currentTimeMillis() + 120_000
+                    while (System.currentTimeMillis() < deadline) {
+                        if (manager.healthCheck()) {
+                            ready = true
+                            break
+                        }
+                        Thread.sleep(500)
+                        if (!manager.isRunning()) break
+                    }
+                    uiState = if (ready || manager.healthCheck()) StudioUiState.READY else StudioUiState.FAILED
+                    if (!ready) errorMessage = context.getString(R.string.dash_no_response)
+                }
+                is HermesDashboardManager.StartResult.Failure -> {
+                    uiState = StudioUiState.FAILED
+                    errorMessage = result.message
+                }
+            }
+        }
+    }
+
+    fun install() {
+        uiState = StudioUiState.INSTALLING
+        errorMessage = null
+        thread(name = "dashboard-install") {
+            val result = runBlocking {
+                runCatching {
+                    installer.ensureAgentInstalled(AgentKind.HERMES) { progress ->
+                        progressLine = progress.message
+                    }
+                }
+            }
+            result.fold(
+                onSuccess = { launch() },
+                onFailure = {
+                    uiState = StudioUiState.FAILED
+                    errorMessage = it.message ?: context.getString(R.string.dash_install_failed)
+                },
+            )
+        }
+    }
+
+    LaunchedEffect(attempt) {
+        when {
+            HermesDashboardManager.portOpen() -> uiState = StudioUiState.READY
+            installer.isAgentInstalled(AgentKind.HERMES) -> launch()
+            else -> uiState = StudioUiState.NOT_INSTALLED
+        }
+    }
+
+    Column(Modifier.fillMaxSize().imePadding()) {
+        when (uiState) {
+            StudioUiState.CHECKING -> EmptyState(
+                Icons.Default.Language,
+                stringResource(R.string.dash_checking),
+                stringResource(R.string.dash_looking),
+            )
+            StudioUiState.NOT_INSTALLED -> Column {
+                EmptyState(
+                    Icons.Default.Language,
+                    stringResource(R.string.dash_not_installed),
+                    stringResource(R.string.dash_not_installed_desc),
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    onClick = { install() },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    Text(stringResource(R.string.dash_install))
+                }
+                Text(
+                    stringResource(R.string.dash_install_hint),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
+                )
+            }
+            StudioUiState.INSTALLING -> EmptyState(
+                Icons.Default.Language,
+                stringResource(R.string.dash_installing),
+                progressLine.ifBlank { stringResource(R.string.dash_installing_hint) },
+            )
+            StudioUiState.STARTING -> EmptyState(
+                Icons.Default.Language,
+                stringResource(R.string.dash_starting),
+                stringResource(R.string.dash_booting),
+            )
+            StudioUiState.FAILED -> Column {
+                EmptyState(
+                    Icons.Default.Language,
+                    stringResource(R.string.dash_failed),
+                    errorMessage ?: stringResource(R.string.dash_unknown_error),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    manager.tailLog().lineSequence().lastOrNull().orEmpty(),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(
+                    onClick = { attempt++ },
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 24.dp),
+                ) {
+                    Text(stringResource(R.string.dash_retry))
+                }
+            }
+            StudioUiState.READY -> {
+                // While the dashboard is up, hold a foreground keepalive so
+                // Android does not freeze the process (and the guest python
+                // child with it) when the app is backgrounded.
+                LaunchedEffect(uiState) {
+                    runCatching {
+                        androidx.core.content.ContextCompat.startForegroundService(
+                            context,
+                            android.content.Intent(context, RuntimeExecutionService::class.java)
+                                .setAction(ACTION_KEEPALIVE)
+                                .putExtra(EXTRA_PROJECT_NAME, "Hermes Dashboard"),
+                        )
+                    }
+                }
+                AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.allowFileAccess = false
+                        settings.allowContentAccess = false
+                        settings.mediaPlaybackRequiresUserGesture = true
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                                // Keep the Dashboard tab pinned to the local
+                                // server; null host (about:blank etc.) stays
+                                // in-frame.
                                 val host = request.url.host ?: return false
                                 return host !in listOf("127.0.0.1", "localhost")
                             }
