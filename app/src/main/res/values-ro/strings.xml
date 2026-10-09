@@ -803,6 +803,12 @@
     <string name="act_continue">Claude continuă sarcina</string>
     <string name="act_rejected">Acțiune respinsă</string>
     <string name="act_continue_no">Claude va continua fără această acțiune</string>
+    <string name="act_waiting_question">Se așteaptă răspunsul tău</string>
+    <string name="act_question_answered">Răspuns trimis</string>
+    <string name="qcard_title">Răspunde la o întrebare</string>
+    <string name="qcard_send">Trimite</string>
+    <string name="qcard_skip">Omite</string>
+    <string name="qcard_type">Scrie răspunsul tău…</string>
     <string name="act_files_changed">Fișiere modificate</string>
     <string name="act_more">încă %1$d</string>
     <string name="act_preview_ready">Previzualizare gata</string>

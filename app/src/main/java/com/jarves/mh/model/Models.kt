@@ -381,6 +381,34 @@ data class ToolRequest(
     val risk: RiskLevel,
 )
 
+data class QuestionOption(
+    val label: String,
+    val description: String? = null,
+)
+
+data class QuestionItem(
+    val id: String,
+    val question: String,
+    val detail: String? = null,
+    val header: String? = null,
+    val options: List<QuestionOption> = emptyList(),
+    val multiSelect: Boolean = false,
+)
+
+/** One `ask_user_question` call waiting for the user's answer batch. */
+data class QuestionRequest(
+    val callId: String = UUID.randomUUID().toString(),
+    val sessionId: String,
+    val questions: List<QuestionItem>,
+)
+
+/** One item of the answer batch; empty selected and no custom means skipped. */
+data class QuestionAnswer(
+    val id: String,
+    val selected: List<String> = emptyList(),
+    val custom: String? = null,
+)
+
 sealed interface RuntimeEvent {
     val sessionId: String
 
@@ -407,6 +435,8 @@ sealed interface RuntimeEvent {
     data class ToolRequested(override val sessionId: String, val request: ToolRequest) : RuntimeEvent
     data class ToolApproved(override val sessionId: String, val approvalId: String) : RuntimeEvent
     data class ToolRejected(override val sessionId: String, val approvalId: String) : RuntimeEvent
+    data class QuestionsRequested(override val sessionId: String, val request: QuestionRequest) : RuntimeEvent
+    data class QuestionsAnswered(override val sessionId: String, val callId: String) : RuntimeEvent
     data class ToolCompleted(override val sessionId: String, val toolName: String, val summary: String) : RuntimeEvent
     data class FilesChanged(override val sessionId: String, val changes: List<ChangeItem>) : RuntimeEvent {
         val paths: List<String> get() = changes.map { it.path }

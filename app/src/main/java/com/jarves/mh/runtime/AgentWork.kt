@@ -4,6 +4,8 @@ import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProviderProfile
+import com.jarves.mh.model.QuestionAnswer
+import com.jarves.mh.model.QuestionRequest
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
 import java.util.concurrent.ConcurrentHashMap
@@ -26,6 +28,10 @@ class AgentExecutionHandle internal constructor(
 ) {
     suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
         runtime.respondToApproval(request, approved)
+    }
+
+    suspend fun respondToQuestion(request: QuestionRequest, answers: List<QuestionAnswer>) {
+        runtime.respondToQuestion(request, answers)
     }
 
     suspend fun stop() {

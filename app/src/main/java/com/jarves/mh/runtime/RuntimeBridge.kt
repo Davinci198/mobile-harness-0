@@ -3,6 +3,8 @@ package com.jarves.mh.runtime
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.ProjectKind
+import com.jarves.mh.model.QuestionAnswer
+import com.jarves.mh.model.QuestionRequest
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
 import kotlinx.coroutines.flow.Flow
@@ -25,6 +27,9 @@ interface RuntimeBridge {
     ): String
 
     suspend fun respondToApproval(request: ToolRequest, approved: Boolean)
+
+    /** Close a pending `ask_user_question` with the user's answer batch. Bridges without an interactive question surface keep the default no-op. */
+    suspend fun respondToQuestion(request: QuestionRequest, answers: List<QuestionAnswer>) = Unit
     suspend fun stopSession(sessionId: String)
     suspend fun stopActiveSession()
 

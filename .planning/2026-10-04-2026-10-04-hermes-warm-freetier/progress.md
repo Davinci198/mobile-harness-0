@@ -391,3 +391,41 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
 - Commit `b5f8edc` pe `fix/dsh-approval-policy` (branch rename: dany-debug-apk
   cere prefix fix/**), CI `37899257795` în curs. Teste DshHomePatch extinse
   (assert pe `- id: approval` + policy).
+
+## 2026-10-09 — Faza 2: ask_user_question (multi-option) — cercetare + start implementare
+- Seam identificat din sursele guest: `dsh-user-questions` expune `ctx.userQuestions.ask()` →
+  `ctx.waterfall("user-questions/request", request, noAnswerer)`; răspunsul = `{answers:[{id,selected,custom?}]}`;
+  fără answerer → `NO_PROVIDER` (tool-ul eșuează). `dsh-tool-ask-user` = adaptorul model-facing
+  (blocking legacy = default; `mode: timed` opțional). Cardul web (`dsh-client-ui-user-questions`)
+  confirmă shape-ul: `waterfall.resolve({answers:[...]})`, skip = selected gol + fără custom,
+  custom replaces single-select / supplements multi-select. Requests conțin doar
+  `questions` (+agent/signal neserIALIZABILE — pluginul nu stringify-ează requestul întreg).
+- Similaritate exactă cu approvals: answerer plugin guest → POST loopback → UI card → răspuns.
+- Start implementare pe branch `fix/dsh-question-card`:
+  - Models.kt: `QuestionOption`/`QuestionItem`/`QuestionRequest`/`QuestionAnswer` +
+    `RuntimeEvent.QuestionsRequested`/`QuestionsAnswered`.
+  - Rămâne: RuntimeBridge default `respondToQuestion`, AgentWork wrapper, DshApprovalServer
+    rutare `/question`, DshRuntimeBridge (pendingQuestions/requestQuestionDecision/respondToQuestion,
+    `QUESTION_ANSWERER_JS` + deploy + insert row în dshHomePatch), MainViewModel (state+events+fun),
+    PocketDevApp (ChatTab params + QuestionCard), strings en/ro, teste, CI, E2E.
+- Implementare completă pe `fix/dsh-question-card` (12 fișiere):
+  - `Models.kt`: `QuestionOption/QuestionItem/QuestionRequest/QuestionAnswer` + events.
+  - `RuntimeBridge.respondToQuestion` (default no-op) + `AgentExecutionHandle.respondToQuestion`.
+  - `DshApprovalServer`: routare `POST /question` (al doilea callback `answer`); fail-closed
+    `{"error":"unavailable"}`; corpul e answer batch-ul direct.
+  - `DshRuntimeBridge`: `pendingQuestions`, `requestQuestionDecision` (emit QuestionsRequested →
+    await 10 min → QuestionsAnswered pe timeout), `respondToQuestion` (answer batch JSON),
+    `cancelPendingInteractions` (rename; anulează si intrebari), `QUESTION_ANSWERER_JS`
+    (listener `user-questions/request`, doar {callId, questions} serIALIZABILE, throw →
+    waterfall reject → eroare curată la model), `deployAnswerers` scrie ambele pluginuri,
+    `dshHomePatch` insert row `mh-question`, `parseQuestionItems` (top-level, testabil).
+  - `MainViewModel`: `pendingQuestion` în AppUiState, cases QuestionsRequested/QuestionsAnswered,
+    `answerQuestion(answers)`, clear pe session/chat reset (4 site-uri).
+  - `PocketDevApp`: parametri `question`/`onQuestion` (WorkspaceScreen + ChatTab, defaults pt.
+    readOnly), chatItemCount + scroll keys, `QuestionCard` (opțiuni radio/checkbox cu badge A/B/C,
+    tap-to-submit la single-select simplu, câmp „type your answer" cu IME Send, Send/Skip batch).
+  - strings en+ro: qcard_title/send/skip/type, act_waiting_question, act_question_answered.
+  - Teste: DshApprovalServerTest 7 (3 noi: /question batching, missing questions, throwing answer),
+    DshQuestionParseTest 3, DshHomePatchTest + rândul mh-question.
+- Verificare locală: `./gradlew :app:testOnlineDebugUnitTest --tests "com.jarves.mh.runtime.Dsh*"`
+  → toate verzi (7+3+3 Dsh + restul), compilare main inclusă (`Icons.Default.QuestionMark` rezolvat).

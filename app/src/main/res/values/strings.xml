@@ -803,6 +803,12 @@
     <string name="act_continue">Claude is continuing the task</string>
     <string name="act_rejected">Action rejected</string>
     <string name="act_continue_no">Claude will continue without this action</string>
+    <string name="act_waiting_question">Waiting for your answer</string>
+    <string name="act_question_answered">Answer sent</string>
+    <string name="qcard_title">Answer a question</string>
+    <string name="qcard_send">Send</string>
+    <string name="qcard_skip">Skip</string>
+    <string name="qcard_type">Type your answer…</string>
     <string name="act_files_changed">Files changed</string>
     <string name="act_more">+%1$d more</string>
     <string name="act_preview_ready">Preview ready</string>

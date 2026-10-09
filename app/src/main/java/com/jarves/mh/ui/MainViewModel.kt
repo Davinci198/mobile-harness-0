@@ -271,6 +271,7 @@ data class AppUiState(
     ),
     val pendingAttachments: List<ChatAttachment> = emptyList(),
     val pendingApproval: ToolRequest? = null,
+    val pendingQuestion: com.jarves.mh.model.QuestionRequest? = null,
     val changes: List<ChangeItem> = emptyList(),
     val pendingChangesByAgent: Map<AgentKind, Int> = emptyMap(),
     val activity: List<ActivityItem> = emptyList(),
@@ -3651,6 +3652,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isRunning = false,
                 activeSessionId = null,
                 pendingApproval = null,
+                pendingQuestion = null,
                 projectTerminalLines = emptyList(),
                 projectTerminalLiveOutput = "",
                 projectTerminalRunning = false,
@@ -4465,6 +4467,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 taskStartedAtMillis = null,
                 taskFinishedAtMillis = null,
                 pendingApproval = null,
+                pendingQuestion = null,
                 pendingAttachments = emptyList(),
             )
         }
@@ -4486,6 +4489,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 taskStartedAtMillis = null,
                 taskFinishedAtMillis = null,
                 pendingApproval = null,
+                pendingQuestion = null,
                 pendingAttachments = emptyList(),
             )
         }
@@ -5037,6 +5041,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { agentWork.handleFor(request.sessionId)?.respondToApproval(request, approved) }
     }
 
+    fun answerQuestion(answers: List<com.jarves.mh.model.QuestionAnswer>) {
+        val request = state.value.pendingQuestion ?: return
+        _state.update { it.copy(pendingQuestion = null) }
+        viewModelScope.launch { agentWork.handleFor(request.sessionId)?.respondToQuestion(request, answers) }
+    }
+
     fun stopTask() {
         val sessionId = _state.value.activeSessionId ?: return
         if (!_state.value.isRunning) return
@@ -5348,6 +5358,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 is RuntimeEvent.ToolRejected -> appendWorkItem(current.copy(
                     pendingApproval = null,
                 ), ActivityItem(s(R.string.act_rejected), s(R.string.act_continue_no)))
+                is RuntimeEvent.QuestionsRequested -> appendWorkItem(current.copy(
+                    pendingQuestion = event.request,
+                    activity = listOf(ActivityItem(s(R.string.act_waiting_question), event.request.questions.firstOrNull()?.question.orEmpty(), false)) + current.activity,
+                ), ActivityItem(s(R.string.act_waiting_question), event.request.questions.firstOrNull()?.question.orEmpty(), false))
+                is RuntimeEvent.QuestionsAnswered -> appendWorkItem(current.copy(
+                    pendingQuestion = null,
+                ), ActivityItem(s(R.string.act_question_answered), s(R.string.act_continue)))
                 is RuntimeEvent.ToolCompleted -> {
                     val runningIndex = current.liveProcess.indexOfLast {
                         !it.isComplete && it.title == "Running ${event.toolName}"
@@ -5419,6 +5436,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         isSending = false,
                         activeSessionId = null,
                         pendingApproval = null,
+                        pendingQuestion = null,
                         toastMessage = event.reason.takeIf { reason ->
                             reason.contains("user not found", true) ||
                                 reason.contains("API key", true) ||

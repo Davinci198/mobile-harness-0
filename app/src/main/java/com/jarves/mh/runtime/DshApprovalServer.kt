@@ -7,20 +7,29 @@ import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Loopback listener carrying dsh's Cordis `approval/request` seam to the UI.
+ * Loopback listener carrying dsh's interactive seams to the UI.
  *
- * The guest answerer plugin (`$DSH_HOME/plugins/mh-approval-answerer/index.js`,
- * inserted by [dshHomePatch]) POSTs `{callId, toolName, reason}` and keeps the
- * socket open until [decide] resolves: [DshRuntimeBridge.requestApprovalDecision]
- * shows the ApprovalCard and suspends until the user answers (or the decision
- * window expires). The HTTP response closes the waterfall with one of dsh's
- * outcome strings; anything unexpected fails closed as `unavailable`.
+ * Two routes share the socket:
+ * - `POST /approval` — the guest approval answerer
+ *   (`$DSH_HOME/plugins/mh-approval-answerer/index.js`, inserted by
+ *   [dshHomePatch]) posts `{callId, toolName, reason}` and keeps the socket
+ *   open until [decide] resolves: [DshRuntimeBridge.requestApprovalDecision]
+ *   shows the ApprovalCard and suspends until the user answers (or the decision
+ *   window expires). The HTTP response closes the waterfall with one of dsh's
+ *   outcome strings; anything unexpected fails closed as `unavailable`.
+ * - `POST /question` — the guest question answerer posts
+ *   `{callId, questions}` and receives the user's answer batch
+ *   (`{"answers":[…]}`) once [answer] resolves; failures return
+ *   `{"error":…}` so the plugin rejects the waterfall and the tool reports a
+ *   clean error to the model.
  */
 internal class DshApprovalServer(
     private val decide: suspend (callId: String, toolName: String, reason: String?) -> String,
+    private val answer: suspend (callId: String?, questions: JSONArray) -> String,
 ) : AutoCloseable {
     private val running = AtomicBoolean(true)
     private val server = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
@@ -66,8 +75,18 @@ internal class DshApprovalServer(
             offset += count
         }
         if (!requestLine.startsWith("POST") || offset == 0) return respond(socket, unavailable())
+        val payload = runCatching { JSONObject(String(body, 0, offset, Charsets.UTF_8)) }
+            .getOrElse { return respond(socket, unavailable()) }
+        val path = requestLine.split(' ').getOrNull(1).orEmpty()
+        if (path == "/question") {
+            val questions = payload.optJSONArray("questions")
+            if (questions == null || questions.length() == 0) return respond(socket, questionError())
+            val body2 = runCatching {
+                runBlocking { answer(payload.stringOrNull("callId"), questions) }
+            }.getOrElse { questionError() }
+            return respond(socket, body2)
+        }
         val outcome = runCatching {
-            val payload = JSONObject(String(body, 0, offset, Charsets.UTF_8))
             val callId = payload.stringOrNull("callId") ?: UUID.randomUUID().toString()
             val toolName = payload.stringOrNull("toolName") ?: "tool"
             runBlocking { decide(callId, toolName, payload.stringOrNull("reason")) }
@@ -93,6 +112,8 @@ internal class DshApprovalServer(
     }
 
     private fun unavailable(): String = JSONObject().put("outcome", "unavailable").toString()
+
+    private fun questionError(): String = JSONObject().put("error", "unavailable").toString()
 
     private fun readLine(input: BufferedInputStream): String? {
         val bytes = ArrayList<Byte>()

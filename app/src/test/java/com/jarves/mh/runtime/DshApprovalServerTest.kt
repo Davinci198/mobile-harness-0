@@ -3,6 +3,7 @@ package com.jarves.mh.runtime
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.atomic.AtomicReference
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -27,10 +28,13 @@ class DshApprovalServerTest {
     @Test
     fun forwardsTheGuestAskAndReturnsTheDecision() {
         val seen = mutableListOf<Triple<String, String, String?>>()
-        DshApprovalServer { callId, toolName, reason ->
-            seen += Triple(callId, toolName, reason)
-            "allowed-once"
-        }.use { server ->
+        DshApprovalServer(
+            decide = { callId, toolName, reason ->
+                seen += Triple(callId, toolName, reason)
+                "allowed-once"
+            },
+            answer = { _, _ -> """{"answers":[]}""" },
+        ).use { server ->
             server.start()
             assertTrue(server.port > 0)
 
@@ -48,10 +52,13 @@ class DshApprovalServerTest {
     @Test
     fun aDeniedDecisionReachesTheGuest() {
         val capturedReason = AtomicReference<String?>("sentinel")
-        DshApprovalServer { _, _, reason ->
-            capturedReason.set(reason)
-            "rejected"
-        }.use { server ->
+        DshApprovalServer(
+            decide = { _, _, reason ->
+                capturedReason.set(reason)
+                "rejected"
+            },
+            answer = { _, _ -> """{"answers":[]}""" },
+        ).use { server ->
             server.start()
 
             val (_, payload) = post(
@@ -66,7 +73,10 @@ class DshApprovalServerTest {
 
     @Test
     fun aThrowingDecisionFailsClosedAsUnavailable() {
-        DshApprovalServer { _, _, _ -> error("ui gone") }.use { server ->
+        DshApprovalServer(
+            decide = { _, _, _ -> error("ui gone") },
+            answer = { _, _ -> """{"answers":[]}""" },
+        ).use { server ->
             server.start()
 
             val (_, payload) = post(server, body = JSONObject().put("callId", "call-3").toString())
@@ -77,13 +87,83 @@ class DshApprovalServerTest {
 
     @Test
     fun aNonPostProbeStillGetsAValidOutcome() {
-        DshApprovalServer { _, _, _ -> "allowed-once" }.use { server ->
+        DshApprovalServer(
+            decide = { _, _, _ -> "allowed-once" },
+            answer = { _, _ -> """{"answers":[]}""" },
+        ).use { server ->
             server.start()
 
             val (status, payload) = post(server)
 
             assertEquals(200, status)
             assertEquals("unavailable", payload.getString("outcome"))
+        }
+    }
+
+    @Test
+    fun forwardsTheQuestionAndReturnsTheAnswerBatch() {
+        val seen = AtomicReference<String?>(null)
+        DshApprovalServer(
+            decide = { _, _, _ -> "unavailable" },
+            answer = { callId, questions ->
+                seen.set(callId)
+                """{"answers":[{"id":"${questions.getJSONObject(0).getString("id")}","selected":["B"]}]}"""
+            },
+        ).use { server ->
+            server.start()
+
+            val (status, payload) = post(
+                server,
+                path = "/question",
+                body = JSONObject()
+                    .put("callId", "qcall-1")
+                    .put("questions", JSONArray().put(JSONObject().put("id", "choice").put("question", "Which one?")))
+                    .toString(),
+            )
+
+            assertEquals(200, status)
+            val answer = payload.getJSONArray("answers").getJSONObject(0)
+            assertEquals("choice", answer.getString("id"))
+            assertEquals("B", answer.getJSONArray("selected").getString(0))
+            assertEquals("qcall-1", seen.get())
+        }
+    }
+
+    @Test
+    fun aQuestionWithoutQuestionsFailsClosed() {
+        DshApprovalServer(
+            decide = { _, _, _ -> "allowed-once" },
+            answer = { _, _ -> """{"answers":[]}""" },
+        ).use { server ->
+            server.start()
+
+            val (_, payload) = post(
+                server,
+                path = "/question",
+                body = JSONObject().put("callId", "qcall-2").toString(),
+            )
+
+            assertEquals("unavailable", payload.getString("error"))
+        }
+    }
+
+    @Test
+    fun aThrowingAnswerFailsClosedAsUnavailable() {
+        DshApprovalServer(
+            decide = { _, _, _ -> "allowed-once" },
+            answer = { _, _ -> error("ui gone") },
+        ).use { server ->
+            server.start()
+
+            val (_, payload) = post(
+                server,
+                path = "/question",
+                body = JSONObject()
+                    .put("questions", JSONArray().put(JSONObject().put("id", "q").put("question", "?")))
+                    .toString(),
+            )
+
+            assertEquals("unavailable", payload.getString("error"))
         }
     }
 }

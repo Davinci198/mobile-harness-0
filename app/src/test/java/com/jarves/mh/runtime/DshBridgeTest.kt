@@ -586,6 +586,8 @@ class DshHomePatchTest {
         assertFalse(patch.contains("- id: llm-pi-ai"))
         assertTrue(patch.contains("- insert:"))
         assertTrue(patch.contains("name: /root/.dsh/plugins/mh-approval-answerer/index.js"))
+        assertTrue(patch.contains("- id: mh-question"))
+        assertTrue(patch.contains("name: /root/.dsh/plugins/mh-question-answerer/index.js"))
     }
 
     @Test
@@ -602,6 +604,49 @@ class DshHomePatchTest {
         assertTrue(patch.contains("- id: llm-pi-ai"))
         assertTrue(patch.contains("- insert:"))
         assertTrue(patch.contains("name: /root/.dsh/plugins/mh-approval-answerer/index.js"))
+        assertTrue(patch.contains("name: /root/.dsh/plugins/mh-question-answerer/index.js"))
+    }
+}
+
+class DshQuestionParseTest {
+    @Test
+    fun parsesTheGuestQuestionPayload() {
+        val array = JSONArray(
+            """[{"id":"choice","question":"Which path?","detail":"Pick one","header":"Path",""" +
+                """"options":[{"label":"src","description":"Source tree"},{"label":"test"}],"multiSelect":false}]""",
+        )
+
+        val items = parseQuestionItems(array)
+
+        assertEquals(1, items!!.size)
+        val question = items[0]
+        assertEquals("choice", question.id)
+        assertEquals("Which path?", question.question)
+        assertEquals("Pick one", question.detail)
+        assertEquals("Path", question.header)
+        assertFalse(question.multiSelect)
+        assertEquals(listOf("src", "test"), question.options.map { it.label })
+        assertEquals("Source tree", question.options[0].description)
+        assertNull(question.options[1].description)
+    }
+
+    @Test
+    fun parsesMultiSelectQuestionsWithoutOptions() {
+        val array = JSONArray("""[{"id":"q1","question":"Anything to add?","multiSelect":true}]""")
+
+        val items = parseQuestionItems(array)
+
+        assertEquals(1, items!!.size)
+        assertTrue(items[0].multiSelect)
+        assertTrue(items[0].options.isEmpty())
+        assertNull(items[0].detail)
+    }
+
+    @Test
+    fun emptyOrMalformedPayloadsFailClosed() {
+        assertNull(parseQuestionItems(JSONArray()))
+        assertNull(parseQuestionItems(JSONArray("""[{"question":"missing id"}]""")))
+        assertNull(parseQuestionItems(JSONArray("""[{"id":"x"}]""")))
     }
 }
 

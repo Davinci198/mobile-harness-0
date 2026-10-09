@@ -9,6 +9,10 @@ import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
+import com.jarves.mh.model.QuestionAnswer
+import com.jarves.mh.model.QuestionItem
+import com.jarves.mh.model.QuestionOption
+import com.jarves.mh.model.QuestionRequest
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.classifyRisk
@@ -57,6 +61,8 @@ class DshRuntimeBridge(
     private val finishedSessions = ConcurrentHashMap.newKeySet<String>()
     /** Guest asks waiting for the ApprovalCard, keyed by dsh's approval id. */
     private val pendingApprovals = ConcurrentHashMap<String, CompletableDeferred<String>>()
+    /** Guest questions waiting for the QuestionCard, keyed by our call id. */
+    private val pendingQuestions = ConcurrentHashMap<String, CompletableDeferred<String>>()
     @Volatile private var approvalServer: DshApprovalServer? = null
     @Volatile private var activeProcess: Process? = null
     /**
@@ -629,6 +635,25 @@ class DshRuntimeBridge(
         )
     }
 
+    override suspend fun respondToQuestion(request: QuestionRequest, answers: List<QuestionAnswer>) {
+        val body = JSONObject()
+            .put(
+                "answers",
+                JSONArray().apply {
+                    answers.forEach { answer ->
+                        val item = JSONObject()
+                            .put("id", answer.id)
+                            .put("selected", JSONArray(answer.selected))
+                        if (answer.custom != null) item.put("custom", answer.custom)
+                        put(item)
+                    }
+                },
+            )
+            .toString()
+        pendingQuestions.remove(request.callId)?.complete(body)
+        eventBus.emit(RuntimeEvent.QuestionsAnswered(request.sessionId, request.callId))
+    }
+
     /**
      * One guest ask: show the ApprovalCard and wait for [APPROVAL_TIMEOUT_MS]
      * for the user's decision. A sessionless or timed-out ask fails closed as
@@ -657,16 +682,50 @@ class DshRuntimeBridge(
 
     private fun ensureApprovalServer(): DshApprovalServer =
         approvalServer ?: synchronized(this) {
-            approvalServer ?: DshApprovalServer { callId, toolName, reason ->
-                requestApprovalDecision(callId, toolName, reason)
-            }.start().also { approvalServer = it }
+            approvalServer ?: DshApprovalServer(
+                decide = { callId, toolName, reason ->
+                    requestApprovalDecision(callId, toolName, reason)
+                },
+                answer = { callId, questions ->
+                    requestQuestionDecision(callId, questions)
+                },
+            ).start().also { approvalServer = it }
         }
 
+    /**
+     * One guest question: raise the QuestionCard and wait for
+     * [APPROVAL_TIMEOUT_MS] for the answer batch. A sessionless or malformed
+     * ask fails with [QUESTION_UNAVAILABLE]; a timeout clears the card it
+     * raised and fails with [QUESTION_TIMEOUT], so the plugin rejects the
+     * waterfall and the tool reports a clean error to the model.
+     */
+    private suspend fun requestQuestionDecision(callId: String?, questions: JSONArray): String {
+        val sessionId = activeSessionId ?: return QUESTION_UNAVAILABLE
+        val items = parseQuestionItems(questions) ?: return QUESTION_UNAVAILABLE
+        val id = callId ?: UUID.randomUUID().toString()
+        val request = QuestionRequest(callId = id, sessionId = sessionId, questions = items)
+        val deferred = CompletableDeferred<String>()
+        pendingQuestions[id] = deferred
+        eventBus.emit(RuntimeEvent.QuestionsRequested(sessionId, request))
+        val body = withTimeoutOrNull(APPROVAL_TIMEOUT_MS) { deferred.await() }
+        pendingQuestions.remove(id, deferred)
+        if (body == null) {
+            eventBus.emit(RuntimeEvent.QuestionsAnswered(sessionId, id))
+            return QUESTION_TIMEOUT
+        }
+        return body
+    }
+
     /** Complete every unanswered ask so a dead card cannot outlive its session. */
-    private suspend fun cancelPendingApprovals(sessionId: String) {
+    private suspend fun cancelPendingInteractions(sessionId: String) {
         pendingApprovals.keys.forEach { callId ->
             if (pendingApprovals.remove(callId)?.complete("cancelled") == true) {
                 eventBus.emit(RuntimeEvent.ToolRejected(sessionId, callId))
+            }
+        }
+        pendingQuestions.keys.forEach { callId ->
+            if (pendingQuestions.remove(callId)?.complete(QUESTION_UNAVAILABLE) == true) {
+                eventBus.emit(RuntimeEvent.QuestionsAnswered(sessionId, callId))
             }
         }
     }
@@ -711,15 +770,17 @@ class DshRuntimeBridge(
         // of the DEEPSEEK_API_KEY environment we export.
         val patch = dshHomePatch(route, provider.model.ifBlank { route.defaultModel })
         File(home, "cordis.patch.yml").writeText(patch)
-        deployApprovalAnswerer(home)
+        deployAnswerers(home)
     }
 
-    /** Drop the guest-side `approval/request` answerer at its patch-referenced path. */
-    private fun deployApprovalAnswerer(home: File) {
+    /** Drop the guest-side answerers at their patch-referenced paths. */
+    private fun deployAnswerers(home: File) {
         runCatching {
-            val directory = File(home, "plugins/mh-approval-answerer").apply { mkdirs() }
-            File(directory, "index.js").writeText(APPROVAL_ANSWERER_JS)
-        }.onFailure { Log.w("DshBridge", "Approval answerer deploy failed", it) }
+            val approval = File(home, "plugins/mh-approval-answerer").apply { mkdirs() }
+            File(approval, "index.js").writeText(APPROVAL_ANSWERER_JS)
+            val question = File(home, "plugins/mh-question-answerer").apply { mkdirs() }
+            File(question, "index.js").writeText(QUESTION_ANSWERER_JS)
+        }.onFailure { Log.w("DshBridge", "Answerer deploy failed", it) }
     }
 
 private suspend fun emitReasoningSummary(
@@ -750,7 +811,7 @@ private suspend fun emitReasoningSummary(
 
     private suspend fun emitCompletedOnce(sessionId: String) {
         if (finishedSessions.add(sessionId)) {
-            cancelPendingApprovals(sessionId)
+            cancelPendingInteractions(sessionId)
             eventBus.emit(RuntimeEvent.SessionCompleted(sessionId))
             finishForegroundRuntime(
                 completed = true,
@@ -762,7 +823,7 @@ private suspend fun emitReasoningSummary(
 
     private suspend fun emitFailureOnce(sessionId: String, reason: String) {
         if (finishedSessions.add(sessionId)) {
-            cancelPendingApprovals(sessionId)
+            cancelPendingInteractions(sessionId)
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, reason))
             if (userStopRequested) {
                 cancelForegroundRuntime()
@@ -961,6 +1022,10 @@ private suspend fun emitReasoningSummary(
         /** How long the ApprovalCard may keep one guest ask open. */
         private const val APPROVAL_TIMEOUT_MS = 10 * 60 * 1000L
 
+        /** Question answers the plugin treats as "close the waterfall with an error". */
+        private const val QUESTION_UNAVAILABLE = """{"error":"unavailable"}"""
+        private const val QUESTION_TIMEOUT = """{"error":"timeout"}"""
+
         /**
          * Guest-side answerer for dsh's `approval/request` waterfall: forwards
          * the ask to [DshApprovalServer] and closes it with the user's
@@ -997,6 +1062,37 @@ export default function mhApprovalAnswerer(ctx) {
 """
 
         /**
+         * Guest-side answerer for dsh's `user-questions/request` waterfall
+         * behind the model-facing `ask_user_question` tool: forwards only the
+         * serializable `{callId, questions}` fields (the request also carries a
+         * live agent and an abort signal) to [DshApprovalServer] and closes the
+         * waterfall with the user's answer batch. Every failure rejects the
+         * listener so dsh reports `NO_PROVIDER`-style error to the model
+         * instead of inventing an answer.
+         */
+        private const val QUESTION_ANSWERER_JS = """
+export default function mhQuestionAnswerer(ctx) {
+  ctx.on("user-questions/request", async (request) => {
+    const port = process.env.MH_APPROVAL_PORT;
+    if (!port) throw new Error("no question answerer transport");
+    const response = await fetch("http://127.0.0.1:" + port + "/question", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        callId: request.callId ?? null,
+        questions: request.questions ?? [],
+      }),
+      signal: AbortSignal.timeout(630000),
+    });
+    if (!response.ok) throw new Error("question answerer unavailable");
+    const data = await response.json();
+    if (!Array.isArray(data.answers)) throw new Error(data.error ?? "question answerer unavailable");
+    return { answers: data.answers };
+  });
+}
+"""
+
+        /**
          * Silence the reused process must keep after a turn ends before the
          * turn is considered over. The SDK stops emitting as soon as the session
          * goes idle, so a few quiet hundred milliseconds only catch the trailing
@@ -1028,11 +1124,14 @@ internal fun yamlQuote(value: String): String = "'${value.replace("'", "''")}'"
  *   picks its key out of the DEEPSEEK_API_KEY environment we export. Omitting
  *   the row keeps dsh-base's default providers, so a later custom-route
  *   session's providers never leak into an official session.
- * - The insert entry loads the guest answerer that forwards `approval/request`
- *   asks to [DshApprovalServer] over loopback. Approval itself needs no patch:
+ * - The insert entry loads the guest answerers that forward `approval/request`
+ *   and `user-questions/request` asks to [DshApprovalServer] over loopback
+ *   (ApprovalCard and QuestionCard). Approval itself needs no patch:
  *   the SDK exports `DSH_PERMISSION_MODE=workspace-write` (see
  *   [buildEnvironment]), which dsh-base already pairs with `approval: ask`, so
- *   a sandbox escalation reaches the answerer on its own.
+ *   a sandbox escalation reaches the answerer on its own. The question tool
+ *   (`ask_user_question`) always needs its answerer because the seam fails
+ *   with `NO_PROVIDER` without one.
  */
 internal fun dshHomePatch(route: DshRoute, model: String): String = buildString {
     if (route.custom != null) {
@@ -1049,7 +1148,35 @@ internal fun dshHomePatch(route: DshRoute, model: String): String = buildString 
     appendLine("- insert:")
     appendLine("    - id: mh-approval")
     appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-approval-answerer/index.js")
+    appendLine("    - id: mh-question")
+    appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-question-answerer/index.js")
 }
+
+/**
+ * Parse the guest ask's `questions` array into QuestionCard rows; a malformed
+ * or empty payload returns null so the caller fails closed as unavailable.
+ */
+internal fun parseQuestionItems(array: JSONArray): List<QuestionItem>? = runCatching {
+    (0 until array.length()).map { index ->
+        val question = array.getJSONObject(index)
+        QuestionItem(
+            id = question.getString("id"),
+            question = question.getString("question"),
+            detail = question.optString("detail").ifBlank { null },
+            header = question.optString("header").ifBlank { null },
+            options = question.optJSONArray("options")?.let { options ->
+                (0 until options.length()).map { optionIndex ->
+                    val option = options.getJSONObject(optionIndex)
+                    QuestionOption(
+                        label = option.getString("label"),
+                        description = option.optString("description").ifBlank { null },
+                    )
+                }
+            } ?: emptyList(),
+            multiSelect = question.optBoolean("multiSelect", false),
+        )
+    }
+}.getOrNull()?.takeIf { it.isNotEmpty() }
 
 private data class DshSdkRunResult(val completed: Boolean, val failure: String)
 

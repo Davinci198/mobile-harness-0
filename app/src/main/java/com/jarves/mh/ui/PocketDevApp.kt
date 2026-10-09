@@ -121,6 +121,7 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.QuestionMark
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -161,6 +162,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -171,6 +173,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -207,6 +210,9 @@ import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProjectChat
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
+import com.jarves.mh.model.QuestionAnswer
+import com.jarves.mh.model.QuestionItem
+import com.jarves.mh.model.QuestionRequest
 import com.jarves.mh.model.inferredDshApiForUrl
 import com.jarves.mh.model.isHttpScheme
 import com.jarves.mh.model.isLoopbackBaseUrl
@@ -369,6 +375,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onSend = viewModel::sendPrompt,
             onStop = viewModel::stopTask,
             onApproval = viewModel::answerApproval,
+            onQuestion = viewModel::answerQuestion,
             onRefreshFiles = viewModel::refreshProjectFiles,
             onOpenFile = viewModel::openFile,
             onCloseFile = viewModel::closeFile,
@@ -4019,6 +4026,7 @@ private fun WorkspaceScreen(
     onSend: (String) -> Boolean,
     onStop: () -> Unit,
     onApproval: (Boolean) -> Unit,
+    onQuestion: (List<QuestionAnswer>) -> Unit,
     onRefreshFiles: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
     onCloseFile: () -> Unit,
@@ -4085,7 +4093,8 @@ private fun WorkspaceScreen(
 
     val chatItemCount = state.messages.size +
         (if (state.liveProcess.isNotEmpty() || state.liveThinking) 1 else 0) +
-        (if (state.pendingApproval != null) 1 else 0)
+        (if (state.pendingApproval != null) 1 else 0) +
+        (if (state.pendingQuestion != null) 1 else 0)
 
     LaunchedEffect(state.activeChatId) {
         userScrolledUp = false
@@ -4113,6 +4122,7 @@ private fun WorkspaceScreen(
         state.liveProcess.size,
         state.liveProcess.lastOrNull()?.detail,
         state.pendingApproval,
+        state.pendingQuestion,
     ) {
         if (!state.isRunning || chatItemCount <= 0 || userScrolledUp || chatListState.isScrollInProgress) return@LaunchedEffect
         if (!chatListState.canScrollForward) {
@@ -4278,6 +4288,8 @@ private fun WorkspaceScreen(
                     onStop,
                     onApproval,
                     listState = chatListState,
+                    question = state.pendingQuestion,
+                    onQuestion = onQuestion,
                     taskStartedAtMillis = state.workSegmentStartedAtMillis ?: state.taskStartedAtMillis,
                     taskFinishedAtMillis = state.taskFinishedAtMillis,
                     thinkingActive = state.liveThinking,
@@ -4902,6 +4914,8 @@ private fun ChatTab(
     onAskPrefillConsumed: () -> Unit = {},
     screenShareActive: Boolean = false,
     onToggleScreenShare: () -> Unit = {},
+    question: QuestionRequest? = null,
+    onQuestion: (List<QuestionAnswer>) -> Unit = {},
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -4971,6 +4985,7 @@ private fun ChatTab(
                     }
                 }
                 approval?.let { request -> item { ApprovalCard(request, onApproval) } }
+                question?.let { request -> item { QuestionCard(request, onQuestion) } }
             }
             if (!readerAtBottom) {
                 Surface(
@@ -5626,6 +5641,113 @@ private fun AttachmentChip(
             if (onRemove != null) {
                 IconButton(onClick = onRemove, modifier = Modifier.size(30.dp)) {
                     Icon(Icons.Default.Close, stringResource(R.string.chat_remove_att), Modifier.size(15.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuestionCard(request: QuestionRequest, onAnswer: (List<QuestionAnswer>) -> Unit) {
+    val selected = remember(request.callId) { mutableStateMapOf<String, List<String>>() }
+    val typed = remember(request.callId) { mutableStateMapOf<String, String>() }
+
+    fun buildAnswers(overrides: Map<String, List<String>> = emptyMap()): List<QuestionAnswer> =
+        request.questions.map { question ->
+            val text = typed[question.id].orEmpty().trim()
+            val override = overrides[question.id]
+            when {
+                override != null -> QuestionAnswer(question.id, override, null)
+                text.isNotEmpty() -> QuestionAnswer(question.id, emptyList(), text)
+                else -> QuestionAnswer(question.id, selected[question.id].orEmpty(), null)
+            }
+        }
+
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.QuestionMark, null, tint = PocketAccent)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.qcard_title), fontWeight = FontWeight.Bold)
+            }
+            request.questions.forEach { question ->
+                question.header?.let { header ->
+                    if (request.questions.size > 1) {
+                        Text(header, fontSize = 12.sp, color = PocketAccent, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Text(question.question, fontWeight = FontWeight.Medium)
+                question.detail?.let { Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                question.options.forEachIndexed { index, option ->
+                    val isSelected = selected[question.id].orEmpty().contains(option.label)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                                else Color.Transparent,
+                                RoundedCornerShape(10.dp),
+                            )
+                            .clickable {
+                                when {
+                                    request.questions.size == 1 && !question.multiSelect ->
+                                        onAnswer(buildAnswers(mapOf(question.id to listOf(option.label))))
+                                    question.multiSelect -> {
+                                        val current = selected[question.id].orEmpty()
+                                        selected[question.id] =
+                                            if (current.contains(option.label)) current - option.label
+                                            else current + option.label
+                                    }
+                                    else -> selected[question.id] = listOf(option.label)
+                                }
+                            }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                    ) {
+                        Box(
+                            Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .border(
+                                    1.5.dp,
+                                    if (isSelected) PocketAccent else MaterialTheme.colorScheme.outlineVariant,
+                                    CircleShape,
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isSelected && question.multiSelect) {
+                                Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = PocketAccent)
+                            } else if (isSelected) {
+                                Box(Modifier.size(10.dp).clip(CircleShape).background(PocketAccent))
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text("${'A' + index}. ${option.label}", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                            option.description?.let {
+                                Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = typed[question.id].orEmpty(),
+                    onValueChange = { typed[question.id] = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.qcard_type)) },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { onAnswer(buildAnswers()) }),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { onAnswer(request.questions.map { QuestionAnswer(it.id) }) },
+                    Modifier.weight(1f),
+                ) { Text(stringResource(R.string.qcard_skip)) }
+                Button(onClick = { onAnswer(buildAnswers()) }, Modifier.weight(1f)) {
+                    Text(stringResource(R.string.qcard_send))
                 }
             }
         }
