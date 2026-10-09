@@ -347,3 +347,47 @@ pristine din bundle-ul core local și reverifică Hermes/PHP/Java/AGY.
   Re-run `37888290234` verde (primul eșec: flake NDK/dl.google.com 502, 33min).
 - ff `46d57b3..c455e3b` pe main, branch șters, APK branch instalat (`apk-dshappr/`,
   66.7 MB). E2E card rămâne: sesiune DSH reală → ask → ApprovalCard → allow/reject.
+
+## 2026-10-09 — diagnostic „DSH nu răspunde: 400/422 (no body)"
+- Logcat: handshake SDK OK, esec la turn: `400 status code (no body)` apoi `422`
+  (09:23 model codestral-embed-2505 = model de embedding, catalogul îl dă FAIL 400;
+  09:24–09:26 model codestral-latest = catalog OK 200 azi). NU e regresia de la
+  aprobări: patch-ul se încarcă (handshake reușit = arbore cordis montat).
+- Ruta: CUSTOM → https://api.mistral.ai/v1, api=openai-completions, dsh 0.2.0-rc.2.
+- Cauză probabilă: pi-ai openai-completions trimite câmpuri OpenAI-only pe care
+  Mistral le respinge (`stream_options.include_usage`, `store:false`,
+  `max_completion_tokens` — getCompat nu cunoaște api.mistral.ai; nu există
+  detecție mistral în openai-completions; protocolul nativ `mistral-conversations`
+  există în pi-ai dar NU e permis în PROTOCOLS table-ul dsh-llm-pi-ai).
+- Compat switches SUNT settabile pe route (`compat:` în llm-pi-ai, câmpuri „offer":
+  supportsStore, supportsUsageInStreaming, maxTokensField, supportsDeveloperRole...).
+- Plan de confirmare: proxy de captură 127.0.0.1:9099 → api.mistral.ai
+  (~/9remote-uploads/mistral-capture.py, rulat), prefs provider_base_url redirectat
+  temporar la proxy, app force-stop. Așteaptă un mesaj DSH din UI → captura dă
+  payload-ul exact + cheia (pt. replay câmp-cu-câmp) → fix: compat switches în
+  dshHomePatch pentru baze Mistral → rebuild/CI/instalare → RESTAURARE prefs.
+
+## 2026-10-09 — DSH revine pe NIM; Mistral rămâne incompatibil pe openai-completions
+- Mistral CUSTOM: eșec și cu codestral-2508 (422 no body, 10:05) — confirmă ipoteza
+  câmpurilor OpenAI-only (stream_options/store/max_completion_tokens). NU s-a implementat
+  încă fixul (compat switches în dshHomePatch); documentat în progress.
+- User: a comutat providerul în UI pe NVIDIA NIM → `Route: nvidia-nim,
+  Model: nvidia/nemotron-3-super-120b-a12b` → **turn COMPLET (10:06:47, completed=true)**.
+  pi-ai detectează integrate.api.nvidia.com → compat NVIDIA corect (funcționa și ieri).
+- Proxy-ul de captură oprit, prefs re-scrise de UI (editurile mele temporary suprascrise).
+- Următor: test E2E ApprovalCard pe NIM — sarcină cu tool (ex. creează test.txt) →
+  ask → card → Allow/Reject → verificare guest `/root/.dsh/mh-approval.log`.
+
+## 2026-10-09 — Cauza „fără card": rândul approval din dsh-base
+- E2E: user a trimis test.txt → dsh a creat fișierul fără ask; `/root/.dsh/mh-approval.log`
+  are doar `{"kind":"mounted"}` → dsh nu a întrebat deloc (nu problemă de transport/UI).
+- Cauză: dsh-base/cordis.patch.yml are rândul `approval` (dsh-user-approval):
+  `policy: !!js "(DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"`.
+  App exportă DSH_PERMISSION_MODE=danger-full-access → policy=never, care câștigă
+  peste presetul permission pe care îl suprascriam. Fix: home patch suprascrie ȘI
+  rândul `approval` cu gate pe MH_APPROVAL_PORT (fără port → politica originală).
+- Spike device: patch staging + `dsh --profile sdk --dump-config` confirmă rândul
+  suprascris. guestrun LIB path reînnoit (fresh install → token nou).
+- Commit `b5f8edc` pe `fix/dsh-approval-policy` (branch rename: dany-debug-apk
+  cere prefix fix/**), CI `37899257795` în curs. Teste DshHomePatch extinse
+  (assert pe `- id: approval` + policy).
