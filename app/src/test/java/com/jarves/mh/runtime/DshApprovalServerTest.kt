@@ -63,7 +63,6 @@ class DshApprovalServerTest {
             assertNull(capturedReason.get())
         }
     }
-    }
 
     @Test
     fun aThrowingDecisionFailsClosedAsUnavailable() {
