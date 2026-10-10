@@ -119,6 +119,8 @@ internal fun parseNousAccessToken(json: String, nowEpochSeconds: Long): String? 
 }.getOrNull()
 
 private const val EXPIRES_MARGIN_SECONDS = 30L
+/** Cap on how much of a provider HTTP response we buffer before treating it as truncated. */
+private const val MAX_PROVIDER_RESPONSE_CHARS = 2 * 1024 * 1024
 
 class ProviderApiClient(
     /** Supplier of the guest's anonymous Nous token; blank/null keeps the keyless probes. */
@@ -640,7 +642,16 @@ class ProviderApiClient(
             if (body != null) connection.outputStream.use { it.write(body.toByteArray()) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val responseBody = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val responseBody = stream?.bufferedReader()?.use { reader ->
+                val buffer = CharArray(8192)
+                val sb = StringBuilder()
+                while (sb.length < MAX_PROVIDER_RESPONSE_CHARS) {
+                    val count = reader.read(buffer, 0, minOf(buffer.size, MAX_PROVIDER_RESPONSE_CHARS - sb.length))
+                    if (count < 0) break
+                    sb.append(buffer, 0, count)
+                }
+                sb.toString()
+            }.orEmpty()
             connection.disconnect()
             HttpResult(code, responseBody)
         }.getOrElse { HttpResult(0, "", it.message ?: "Network connection failed",) }
