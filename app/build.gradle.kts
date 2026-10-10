@@ -30,7 +30,7 @@ val runtimeReleaseBaseUrl =
     findProperty("runtimeReleaseBaseUrl") as String?
         ?: "https://github.com/Davinci198/Proxmox-VE-Laptop-Hybrid-Setup/releases/download/runtime-2026.10.1"
 val appUpdateManifestUrl =
-    "https://github.com/techjarves/Mobile-Harness/releases/latest/download/mobile-harness-update.json"
+    "https://github.com/Davinci198/mobile-harness-0/releases/latest/download/mobile-harness-update.json"
 val runtimeBundleDir = rootProject.layout.projectDirectory.dir("dist/runtime-bundles")
 val generatedRuntimeAssets = layout.buildDirectory.dir("generated/runtime-assets")
 
