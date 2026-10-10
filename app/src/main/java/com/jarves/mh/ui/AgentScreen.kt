@@ -3356,7 +3356,7 @@ private fun SecondaryActionButton(
 }
 
 /** Provides popular default models for providers when discovery hasn't been run or is unavailable. */
-private fun defaultModelsForProvider(kind: ProviderKind): List<DiscoveredModel> = when (kind) {
+fun defaultModelsForProvider(kind: ProviderKind): List<DiscoveredModel> = when (kind) {
     ProviderKind.DEEPSEEK -> listOf(
         DiscoveredModel("deepseek-v4-flash", "DeepSeek-V4 Flash"),
     )
