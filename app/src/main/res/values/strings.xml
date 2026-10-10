@@ -371,6 +371,9 @@
     <string name="pal_models_scanning">Scanning models…</string>
     <string name="pal_model_broken">Broken</string>
     <string name="pal_model_ok">OK</string>
+    <string name="pal_provider">Provider</string>
+    <string name="pal_search_models">Search models…</string>
+    <string name="pal_no_models_found">No models match "%1$s"</string>
     <string name="pal_stop_task">Stop task</string>
     <string name="pal_attach">Attach files</string>
     <string name="pal_share_on">Turn on screen share</string>

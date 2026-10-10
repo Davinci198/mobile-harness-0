@@ -371,6 +371,9 @@
     <string name="pal_models_scanning">Se scanează modelele…</string>
     <string name="pal_model_broken">Stricat</string>
     <string name="pal_model_ok">OK</string>
+    <string name="pal_provider">Furnizor</string>
+    <string name="pal_search_models">Caută modele…</string>
+    <string name="pal_no_models_found">Niciun model nu corespunde cu „%1$s”</string>
     <string name="pal_stop_task">Oprește sarcina</string>
     <string name="pal_attach">Atașează fișiere</string>
     <string name="pal_share_on">Pornește partajarea ecranului</string>
