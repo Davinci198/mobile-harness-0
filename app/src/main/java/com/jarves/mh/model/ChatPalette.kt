@@ -3,6 +3,7 @@ package com.jarves.mh.model
 /** Actions the "/" palette can run directly from the composer. */
 enum class PaletteAction {
     NEW_CHAT,
+    MODELS,
     STOP_TASK,
     ATTACH_FILES,
     TOGGLE_SCREEN_SHARE,

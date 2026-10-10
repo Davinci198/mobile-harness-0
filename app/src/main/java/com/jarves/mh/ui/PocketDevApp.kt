@@ -65,6 +65,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -140,6 +141,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
@@ -387,6 +389,10 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onRegenerateMessage = { viewModel.regenerateMessage(it.id) },
             onDeleteMessage = { viewModel.deleteMessage(it.id) },
             onSetEffort = viewModel::setAntigravityEffort,
+            onShowModels = viewModel::refreshModelsForPicker,
+            onPickModel = viewModel::setProviderModel,
+            onSelectProviderModel = viewModel::selectProviderAndModel,
+            onDiscoverModels = viewModel::discoverModelsForPicker,
             onRefreshFiles = viewModel::refreshProjectFiles,
             onOpenFile = viewModel::openFile,
             onCloseFile = viewModel::closeFile,
@@ -4041,6 +4047,10 @@ private fun WorkspaceScreen(
     onRegenerateMessage: (ChatMessage) -> Unit,
     onDeleteMessage: (ChatMessage) -> Unit,
     onSetEffort: (String) -> Unit,
+    onShowModels: () -> Unit = {},
+    onPickModel: (String) -> Unit = {},
+    onSelectProviderModel: (ProviderKind, String, String?, String?) -> Unit = { _, _, _, _ -> },
+    onDiscoverModels: (ProviderKind, String?, String?) -> Unit = { _, _, _ -> },
     onRefreshFiles: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
     onCloseFile: () -> Unit,
@@ -4081,6 +4091,24 @@ private fun WorkspaceScreen(
     BackHandler(onBack = onBack)
     val context = LocalContext.current
     val isAndroidProject = state.androidProjectDetected
+    var showModelsPicker by remember { mutableStateOf(false) }
+    if (showModelsPicker) {
+        ModelsPickerDialog(
+            state = state,
+            onPick = { model ->
+                showModelsPicker = false
+                onPickModel(model)
+            },
+            onPickProviderModel = { kind, model, baseUrl, dshApi ->
+                showModelsPicker = false
+                onSelectProviderModel(kind, model, baseUrl, dshApi)
+            },
+            onDiscover = { kind, baseUrl, dshApi ->
+                onDiscoverModels(kind, baseUrl, dshApi)
+            },
+            onDismiss = { showModelsPicker = false },
+        )
+    }
     /** The folder the Files tab is showing. Kept here so opening a file does not reset it. */
     var filesCurrentDir by rememberSaveable { mutableStateOf("") }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -4326,6 +4354,10 @@ private fun WorkspaceScreen(
                     askPrefill = state.askPrefill,
                     onAskPrefillConsumed = onConsumeAskPrefill,
                     onNewChat = onCreateChat,
+                    onShowModels = {
+                        showModelsPicker = true
+                        onShowModels()
+                    },
                     screenShareActive = state.screenShareActive,
                     onToggleScreenShare = onToggleScreenShare,
                 )
@@ -4914,6 +4946,330 @@ private fun WorkspaceEntryMenu(
     }
 }
 
+/** Chat "/models": pick the model the next Agent Execution uses for the active provider. */
+@Composable
+private fun ModelsPickerDialog(
+    state: AppUiState,
+    onPick: (String) -> Unit,
+    onPickProviderModel: (ProviderKind, String, String?, String?) -> Unit,
+    onDiscover: (ProviderKind, String?, String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val isAntigravity = state.agentKind == AgentKind.ANTIGRAVITY
+    val current = if (isAntigravity) state.antigravityModel else state.provider.model
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    // Which provider the dialog is browsing (defaults to the active one).
+    var browseKind by remember(state.provider.kind) { mutableStateOf(state.provider.kind) }
+    // For CUSTOM: which saved endpoint is selected (null = generic CUSTOM).
+    var browseCustomEndpointId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Providers the user can browse in the picker (excluding CLAUDE subscription).
+    val browseKinds = remember {
+        listOf(
+            ProviderKind.FREE,
+            ProviderKind.NVIDIA_NIM,
+            ProviderKind.OPENCODE_ZEN,
+            ProviderKind.ANTHROPIC,
+            ProviderKind.DEEPSEEK,
+            ProviderKind.KIMI,
+            ProviderKind.LLM_ROUTER,
+            ProviderKind.CUSTOM,
+        )
+    }
+    val browseCustomEndpoint = state.customEndpoints.firstOrNull { it.id == browseCustomEndpointId }
+
+    // Resolve the effective base URL for the browsed provider.
+    val browseBaseUrl = when {
+        browseKind == ProviderKind.CUSTOM && browseCustomEndpoint != null -> browseCustomEndpoint.baseUrl
+        else -> browseKind.defaultBaseUrl
+    }
+
+    val models = remember(
+        isAntigravity,
+        browseKind,
+        browseBaseUrl,
+        browseCustomEndpointId,
+        state.provider.kind,
+        state.provider.baseUrl,
+        state.antigravityModel,
+        state.antigravityModels,
+        state.modelCatalogs,
+        state.customEndpoints,
+        current,
+    ) {
+        val source = if (isAntigravity) {
+            state.antigravityModels.map { DiscoveredModel(it) }
+        } else {
+            val catalog = state.modelCatalogs.firstOrNull { it.matches(browseKind.name, browseBaseUrl) }
+            (catalog?.models ?: emptyList()) + defaultModelsForProvider(browseKind)
+        }
+        val withCurrent = if (current.isBlank() || browseKind != state.provider.kind) {
+            source
+        } else {
+            source + DiscoveredModel(current)
+        }
+        withCurrent.filter { it.id.isNotBlank() }.distinctBy { it.id }.sortedBy { it.isBroken }
+    }
+
+    // Filter by search query (case-insensitive contains on id + displayName).
+    val filteredModels = if (searchQuery.isBlank()) {
+        models
+    } else {
+        val q = searchQuery.trim().lowercase()
+        models.filter { it.id.lowercase().contains(q) || it.displayName.lowercase().contains(q) }
+    }
+
+    val lastScanLine = state.modelScanLines.lastOrNull()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.agent_select_model), fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                // ── Provider selector (non-antigravity only) ──
+                if (!isAntigravity) {
+                    Text(
+                        stringResource(R.string.pal_provider),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        items(browseKinds, key = { it.name }) { kind ->
+                            val selected = browseKind == kind
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (selected) PocketAccent.copy(alpha = 0.15f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (selected) PocketAccent.copy(alpha = 0.6f)
+                                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                                ),
+                                modifier = Modifier
+                                    .clickable {
+                                        browseKind = kind
+                                        if (kind != ProviderKind.CUSTOM) browseCustomEndpointId = null
+                                    },
+                            ) {
+                                Text(
+                                    kind.title,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                    color = if (selected) PocketAccent else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                )
+                            }
+                        }
+                    }
+                    // Custom endpoints sub-list when CUSTOM is selected.
+                    if (browseKind == ProviderKind.CUSTOM && state.customEndpoints.isNotEmpty()) {
+                        LazyRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            items(state.customEndpoints, key = { it.id }) { ep ->
+                                val selected = browseCustomEndpointId == ep.id
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (selected) PocketGreen.copy(alpha = 0.12f)
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (selected) PocketGreen.copy(alpha = 0.5f)
+                                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                    ),
+                                    modifier = Modifier.clickable {
+                                        browseCustomEndpointId = if (selected) null else ep.id
+                                    },
+                                ) {
+                                    Text(
+                                        ep.label,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (selected) PocketGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                // ── Header row: current provider + Discover ──
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = when {
+                            isAntigravity -> state.agentKind.title
+                            browseKind == ProviderKind.CUSTOM && browseCustomEndpoint != null ->
+                                browseCustomEndpoint.label
+                            else -> browseKind.title
+                        },
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (!isAntigravity) {
+                        TextButton(
+                            onClick = { onDiscover(browseKind, browseCustomEndpoint?.baseUrl, browseCustomEndpoint?.dshApi) },
+                            enabled = !state.isModelScanning,
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, null, Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(stringResource(R.string.pal_discover), fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                // ── Search field ──
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text(stringResource(R.string.pal_search_models), fontSize = 13.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(16.dp)) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp),
+                    textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
+                )
+
+                // ── Scan progress ──
+                if (state.isModelScanning) {
+                    Column(Modifier.padding(bottom = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                stringResource(R.string.pal_models_scanning),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (lastScanLine != null) {
+                            Text(
+                                lastScanLine,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+                } else if (lastScanLine != null) {
+                    Text(
+                        lastScanLine,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
+
+                // ── Model list ──
+                if (filteredModels.isEmpty() && searchQuery.isNotBlank()) {
+                    Text(
+                        stringResource(R.string.pal_no_models_found, searchQuery),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+                } else {
+                    LazyColumn(
+                        Modifier.heightIn(max = 280.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        items(filteredModels, key = { it.id }) { option ->
+                            val selected = !isAntigravity &&
+                                browseKind == state.provider.kind &&
+                                option.id == current
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (selected) PocketAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (selected) PocketAccent.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (isAntigravity || browseKind == state.provider.kind) {
+                                            onPick(option.id)
+                                        } else {
+                                            // Switch provider + model in one step.
+                                            onPickProviderModel(
+                                                browseKind,
+                                                option.id,
+                                                browseCustomEndpoint?.baseUrl,
+                                                browseCustomEndpoint?.dshApi,
+                                            )
+                                        }
+                                    },
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            option.displayName,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 14.sp,
+                                            color = if (selected) PocketAccent else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                        if (option.displayName != option.id) {
+                                            Text(
+                                                option.id,
+                                                fontSize = 11.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                    if (option.isBroken) {
+                                        Text(
+                                            stringResource(R.string.pal_model_broken),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    } else if (option.health != null || option.latencyLabel != null) {
+                                        Text(
+                                            option.latencyLabel ?: stringResource(R.string.pal_model_ok),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = PocketGreen,
+                                        )
+                                    }
+                                    if (selected) {
+                                        Icon(Icons.Default.Check, null, Modifier.size(18.dp), tint = PocketAccent)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_cancel)) }
+        },
+    )
+}
+
 @Composable
 private fun ChatTab(
     messages: List<ChatMessage>,
@@ -4948,6 +5304,7 @@ private fun ChatTab(
     effort: String? = null,
     onSetEffort: (String) -> Unit = {},
     onNewChat: () -> Unit = {},
+    onShowModels: () -> Unit = {},
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -5200,6 +5557,7 @@ private fun ChatTab(
                         query,
                         listOf(
                             PaletteCommand(PaletteAction.NEW_CHAT, PaletteGroup.SESSION, stringResource(R.string.pal_new_chat), listOf("chat", "start", "reset")),
+                            PaletteCommand(PaletteAction.MODELS, PaletteGroup.SESSION, stringResource(R.string.pal_models), listOf("model", "llm", "provider")),
                             PaletteCommand(PaletteAction.STOP_TASK, PaletteGroup.SESSION, stringResource(R.string.pal_stop_task), listOf("stop", "abort", "cancel"), enabled = isRunning),
                             PaletteCommand(PaletteAction.ATTACH_FILES, PaletteGroup.MEDIA, stringResource(R.string.pal_attach), listOf("file", "image", "upload"), enabled = !isRunning),
                             PaletteCommand(
@@ -5258,6 +5616,7 @@ private fun ChatTab(
                                                 prompt = ""
                                                 when (command.action) {
                                                     PaletteAction.NEW_CHAT -> onNewChat()
+                                                    PaletteAction.MODELS -> onShowModels()
                                                     PaletteAction.STOP_TASK -> onStop()
                                                     PaletteAction.ATTACH_FILES -> onAttach()
                                                     PaletteAction.TOGGLE_SCREEN_SHARE -> onToggleScreenShare()
