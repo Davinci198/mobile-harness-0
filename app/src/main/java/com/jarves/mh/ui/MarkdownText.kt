@@ -203,7 +203,8 @@ private fun CodeSnippetBlock(
 
     // Sections-collapse mode applies only when the host opts in (chat bubbles);
     // other MarkdownText callers keep the always-open behavior.
-    val prefs = remember { AppPreferences(LocalContext.current) }
+    val collapseContext = LocalContext.current
+    val prefs = remember { AppPreferences(collapseContext) }
     val mode = if (collapseCode) prefs.chatSectionsMode else ChatSectionsMode.ALWAYS
     var bodyExpanded by rememberSaveable {
         mutableStateOf(ChatSectionsPolicy.modeAcceptsOpen(mode, isRunning))

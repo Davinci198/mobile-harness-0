@@ -4969,6 +4969,7 @@ private fun ChatTab(
             !listState.canScrollForward
         }
     }
+    val newestMessageId = messages.lastOrNull()?.id
     Column(Modifier.fillMaxSize().imePadding()) {
         Box(Modifier.weight(1f)) {
             LazyColumn(
@@ -4977,13 +4978,13 @@ private fun ChatTab(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(messages, key = { it.id }) { index, message ->
+                items(messages, key = { it.id }) { message ->
                     if (message.workItems.isNotEmpty()) {
                         WorkBlockCard(message)
                     } else {
                         // Only the message being generated sees isRunning, so a new
                         // run never re-opens code blocks in older bubbles.
-                        MessageBubble(message, onRunInTerminal, onOpenAttachment, isRunning && index == messages.lastIndex)
+                        MessageBubble(message, onRunInTerminal, onOpenAttachment, isRunning && message.id == newestMessageId)
                     }
                 }
                 if (liveProcess.isNotEmpty() || thinkingActive) {
