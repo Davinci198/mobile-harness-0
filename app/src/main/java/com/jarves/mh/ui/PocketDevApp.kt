@@ -6152,22 +6152,6 @@ private fun StudioTab(installer: RuntimeInstaller) {
                         )
                     }
                 }
-                // A dead server leaves a stale WebView full of failed fetches
-                // ("page partially loaded"); notice it and rerun the normal
-                // start flow. STOPPED never reaches this branch, so an
-                // explicit user stop is never overridden.
-                LaunchedEffect(uiState) {
-                    var misses = 0
-                    while (true) {
-                        delay(3_000)
-                        if (manager.healthCheck()) {
-                            misses = 0
-                        } else if (++misses >= 2) {
-                            launch()
-                            break
-                        }
-                    }
-                }
                 Column(Modifier.fillMaxSize()) {
                     ServerControlBar(stringResource(R.string.tab_studio)) { stop() }
                     AndroidView(
@@ -6377,20 +6361,6 @@ private fun DashboardTab(installer: RuntimeInstaller) {
                                 .setAction(ACTION_KEEPALIVE)
                                 .putExtra(EXTRA_PROJECT_NAME, "Hermes Dashboard"),
                         )
-                    }
-                }
-                // Same stale-WebView guard as StudioTab: the dashboard dying
-                // while the tab sits on READY shows a dead page until refresh.
-                LaunchedEffect(uiState) {
-                    var misses = 0
-                    while (true) {
-                        delay(3_000)
-                        if (manager.healthCheck()) {
-                            misses = 0
-                        } else if (++misses >= 2) {
-                            launch()
-                            break
-                        }
                     }
                 }
                 Column(Modifier.fillMaxSize()) {
