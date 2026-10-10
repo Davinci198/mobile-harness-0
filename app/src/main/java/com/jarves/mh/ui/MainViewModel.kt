@@ -2684,8 +2684,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!preferences.autoScanEnabled(agent) || preferences.autoScanDone(agent)) return
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
         if (key.isBlank() && profile.kind != ProviderKind.FREE) return
-        viewModelScope.launch {
-            runModelScan(profile, key, models = emptyList())
+        val generation = ++modelScanGeneration
+        modelScanJob = viewModelScope.launch {
+            runModelScan(profile, key, models = emptyList(), generation)
         }
     }
 
