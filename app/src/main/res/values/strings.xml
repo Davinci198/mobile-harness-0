@@ -752,6 +752,7 @@
     <string name="submit_code_fail">Could not submit the code</string>
     <string name="signout_fail">Could not sign out</string>
     <string name="no_reasoning">This model does not offer %1$s reasoning</string>
+    <string name="chat_thinking_tokens">Thinking… ~%1$d tokens</string>
     <string name="stack_ready">%1$s tools are ready</string>
     <string name="stack_remove_guard">Stop running tasks and terminal commands before removing tools</string>
     <string name="stack_removing">Removing %1$s…</string>
