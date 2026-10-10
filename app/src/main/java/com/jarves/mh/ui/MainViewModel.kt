@@ -32,6 +32,7 @@ import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProjectChat
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
+import com.jarves.mh.model.defaultDshApiForProvider
 import com.jarves.mh.model.RuntimeEvent
 import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
@@ -3132,6 +3133,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (current.provider.model == trimmed) return
         val updated = current.provider.copy(model = trimmed)
+        preferences.saveProvider(updated, current.agentKind)
+        _state.update { it.copy(provider = updated) }
+    }
+
+    /**
+     * Switches the active provider to [kind] (optionally overriding baseUrl/dshApi
+     * for CUSTOM endpoints) and pins [model] in one step — used by the /models
+     * picker when the user browses catalogs beyond the current provider.
+     */
+    fun selectProviderAndModel(
+        kind: ProviderKind,
+        model: String,
+        baseUrl: String? = null,
+        dshApi: String? = null,
+    ) {
+        val trimmedModel = model.trim()
+        if (trimmedModel.isEmpty()) return
+        val current = _state.value
+        if (current.agentKind == AgentKind.ANTIGRAVITY) {
+            if (trimmedModel != current.antigravityModel) setAntigravityModel(trimmedModel)
+            return
+        }
+        val effectiveBaseUrl = baseUrl ?: kind.defaultBaseUrl
+        val effectiveDsh = dshApi ?: defaultDshApiForProvider(kind)
+        val updated = ProviderProfile(
+            kind = kind,
+            baseUrl = effectiveBaseUrl,
+            model = trimmedModel,
+            hasSecret = current.provider.hasSecret || vault.contains(kind.name),
+            dshApi = effectiveDsh,
+        )
         preferences.saveProvider(updated, current.agentKind)
         _state.update { it.copy(provider = updated) }
     }
