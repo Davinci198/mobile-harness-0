@@ -3095,6 +3095,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Selects the model the next Agent Execution will use. Antigravity keeps
+     * its own model list; every other agent persists the pick on the active
+     * provider profile so the next turn picks it up.
+     */
+    fun setProviderModel(model: String) {
+        val trimmed = model.trim()
+        if (trimmed.isEmpty()) return
+        val current = _state.value
+        if (current.agentKind == AgentKind.ANTIGRAVITY) {
+            if (trimmed != current.antigravityModel) setAntigravityModel(trimmed)
+            return
+        }
+        if (current.provider.model == trimmed) return
+        val updated = current.provider.copy(model = trimmed)
+        preferences.saveProvider(updated, current.agentKind)
+        _state.update { it.copy(provider = updated) }
+    }
+
+    /** Prepares model data for the chat "/models" picker (loads Antigravity's catalog when empty). */
+    fun refreshModelsForPicker() {
+        val current = _state.value
+        if (current.agentKind == AgentKind.ANTIGRAVITY && current.antigravityModels.isEmpty()) {
+            refreshAntigravityModels()
+        }
+    }
+
     fun setAntigravityEffort(effort: String) {
         if (effort !in setOf("low", "medium", "high")) return
         val current = _state.value

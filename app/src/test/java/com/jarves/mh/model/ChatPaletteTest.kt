@@ -8,9 +8,22 @@ class ChatPaletteTest {
 
     private val commands = listOf(
         PaletteCommand(PaletteAction.NEW_CHAT, PaletteGroup.SESSION, "New chat", listOf("start", "reset")),
+        PaletteCommand(PaletteAction.MODELS, PaletteGroup.SESSION, "Models", listOf("model", "llm", "provider")),
         PaletteCommand(PaletteAction.STOP_TASK, PaletteGroup.SESSION, "Stop task", listOf("abort"), enabled = false),
         PaletteCommand(PaletteAction.OPEN_TERMINAL, PaletteGroup.TERMINAL, "Open terminal", listOf("shell")),
     )
+
+    @Test
+    fun modelsCommandIsReachableFromTheSlashPalette() {
+        assertEquals(
+            listOf(PaletteAction.MODELS),
+            ChatPalette.match("/models", commands).map { it.action },
+        )
+        assertEquals(
+            listOf(PaletteAction.MODELS),
+            ChatPalette.match("provider", commands).map { it.action },
+        )
+    }
 
     @Test
     fun emptyQueryAndBareSlashShowEverything() {

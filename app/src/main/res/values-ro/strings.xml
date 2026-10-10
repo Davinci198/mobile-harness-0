@@ -366,6 +366,7 @@
     <string name="pal_group_media">Media</string>
     <string name="pal_group_terminal">Terminal</string>
     <string name="pal_new_chat">Conversație nouă</string>
+    <string name="pal_models">Modele</string>
     <string name="pal_stop_task">Oprește sarcina</string>
     <string name="pal_attach">Atașează fișiere</string>
     <string name="pal_share_on">Pornește partajarea ecranului</string>

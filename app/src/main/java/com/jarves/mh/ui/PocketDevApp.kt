@@ -229,6 +229,7 @@ import com.jarves.mh.model.withDefaultScheme
 import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
+import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.runtime.RuntimeExecutionService
 import com.jarves.mh.runtime.RuntimeExecutionService.Companion.ACTION_KEEPALIVE
 import com.jarves.mh.runtime.RuntimeExecutionService.Companion.EXTRA_PROJECT_NAME
@@ -387,6 +388,8 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onRegenerateMessage = { viewModel.regenerateMessage(it.id) },
             onDeleteMessage = { viewModel.deleteMessage(it.id) },
             onSetEffort = viewModel::setAntigravityEffort,
+            onShowModels = viewModel::refreshModelsForPicker,
+            onPickModel = viewModel::setProviderModel,
             onRefreshFiles = viewModel::refreshProjectFiles,
             onOpenFile = viewModel::openFile,
             onCloseFile = viewModel::closeFile,
@@ -4041,6 +4044,8 @@ private fun WorkspaceScreen(
     onRegenerateMessage: (ChatMessage) -> Unit,
     onDeleteMessage: (ChatMessage) -> Unit,
     onSetEffort: (String) -> Unit,
+    onShowModels: () -> Unit = {},
+    onPickModel: (String) -> Unit = {},
     onRefreshFiles: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
     onCloseFile: () -> Unit,
@@ -4081,6 +4086,17 @@ private fun WorkspaceScreen(
     BackHandler(onBack = onBack)
     val context = LocalContext.current
     val isAndroidProject = state.androidProjectDetected
+    var showModelsPicker by remember { mutableStateOf(false) }
+    if (showModelsPicker) {
+        ModelsPickerDialog(
+            state = state,
+            onPick = { model ->
+                showModelsPicker = false
+                onPickModel(model)
+            },
+            onDismiss = { showModelsPicker = false },
+        )
+    }
     /** The folder the Files tab is showing. Kept here so opening a file does not reset it. */
     var filesCurrentDir by rememberSaveable { mutableStateOf("") }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -4326,6 +4342,10 @@ private fun WorkspaceScreen(
                     askPrefill = state.askPrefill,
                     onAskPrefillConsumed = onConsumeAskPrefill,
                     onNewChat = onCreateChat,
+                    onShowModels = {
+                        showModelsPicker = true
+                        onShowModels()
+                    },
                     screenShareActive = state.screenShareActive,
                     onToggleScreenShare = onToggleScreenShare,
                 )
@@ -4914,6 +4934,96 @@ private fun WorkspaceEntryMenu(
     }
 }
 
+/** Chat "/models": pick the model the next Agent Execution uses for the active provider. */
+@Composable
+private fun ModelsPickerDialog(
+    state: AppUiState,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val isAntigravity = state.agentKind == AgentKind.ANTIGRAVITY
+    val current = if (isAntigravity) state.antigravityModel else state.provider.model
+    val models = remember(
+        isAntigravity,
+        state.provider.kind,
+        state.provider.baseUrl,
+        state.antigravityModel,
+        state.antigravityModels,
+        state.modelCatalogs,
+        current,
+    ) {
+        val source = if (isAntigravity) {
+            state.antigravityModels.map { DiscoveredModel(it) }
+        } else {
+            val catalog = state.modelCatalogs.firstOrNull { it.matches(state.provider.kind.name, state.provider.baseUrl) }
+            (catalog?.models ?: emptyList()) + defaultModelsForProvider(state.provider.kind)
+        }
+        val withCurrent = if (current.isBlank()) source else source + DiscoveredModel(current)
+        withCurrent.filter { it.id.isNotBlank() }.distinctBy { it.id }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.agent_select_model), fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text(
+                    text = if (isAntigravity) state.agentKind.title else state.provider.kind.title,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 10.dp),
+                )
+                LazyColumn(
+                    Modifier.heightIn(max = 340.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(models, key = { it.id }) { option ->
+                        val selected = option.id == current
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (selected) PocketAccent.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+                            border = BorderStroke(
+                                1.dp,
+                                if (selected) PocketAccent.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPick(option.id) },
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        option.displayName,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp,
+                                        color = if (selected) PocketAccent else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    if (option.displayName != option.id) {
+                                        Text(
+                                            option.id,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                if (selected) {
+                                    Icon(Icons.Default.Check, null, Modifier.size(18.dp), tint = PocketAccent)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_cancel)) }
+        },
+    )
+}
+
 @Composable
 private fun ChatTab(
     messages: List<ChatMessage>,
@@ -4948,6 +5058,7 @@ private fun ChatTab(
     effort: String? = null,
     onSetEffort: (String) -> Unit = {},
     onNewChat: () -> Unit = {},
+    onShowModels: () -> Unit = {},
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -5200,6 +5311,7 @@ private fun ChatTab(
                         query,
                         listOf(
                             PaletteCommand(PaletteAction.NEW_CHAT, PaletteGroup.SESSION, stringResource(R.string.pal_new_chat), listOf("chat", "start", "reset")),
+                            PaletteCommand(PaletteAction.MODELS, PaletteGroup.SESSION, stringResource(R.string.pal_models), listOf("model", "llm", "provider")),
                             PaletteCommand(PaletteAction.STOP_TASK, PaletteGroup.SESSION, stringResource(R.string.pal_stop_task), listOf("stop", "abort", "cancel"), enabled = isRunning),
                             PaletteCommand(PaletteAction.ATTACH_FILES, PaletteGroup.MEDIA, stringResource(R.string.pal_attach), listOf("file", "image", "upload"), enabled = !isRunning),
                             PaletteCommand(
@@ -5258,6 +5370,7 @@ private fun ChatTab(
                                                 prompt = ""
                                                 when (command.action) {
                                                     PaletteAction.NEW_CHAT -> onNewChat()
+                                                    PaletteAction.MODELS -> onShowModels()
                                                     PaletteAction.STOP_TASK -> onStop()
                                                     PaletteAction.ATTACH_FILES -> onAttach()
                                                     PaletteAction.TOGGLE_SCREEN_SHARE -> onToggleScreenShare()
