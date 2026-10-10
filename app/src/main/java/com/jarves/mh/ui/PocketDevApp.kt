@@ -200,6 +200,7 @@ import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChangeItem
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ChatAttachment
+import com.jarves.mh.model.ChatSectionsPolicy
 import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.DEEPSEEK_HARNESS_PROVIDERS
 import com.jarves.mh.model.DSH_PROTOCOL_PROVIDERS
@@ -4976,11 +4977,13 @@ private fun ChatTab(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(messages, key = { it.id }) { message ->
+                items(messages, key = { it.id }) { index, message ->
                     if (message.workItems.isNotEmpty()) {
                         WorkBlockCard(message)
                     } else {
-                        MessageBubble(message, onRunInTerminal, onOpenAttachment)
+                        // Only the message being generated sees isRunning, so a new
+                        // run never re-opens code blocks in older bubbles.
+                        MessageBubble(message, onRunInTerminal, onOpenAttachment, isRunning && index == messages.lastIndex)
                     }
                 }
                 if (liveProcess.isNotEmpty() || thinkingActive) {
@@ -5281,7 +5284,22 @@ private fun ClaudeActivityDisclosure(
     headline: String,
     isRunning: Boolean = false,
 ) {
+    val context = LocalContext.current
+    val prefs = remember { AppPreferences(context) }
+    val mode = prefs.chatSectionsMode
     var expandedItems by rememberSaveable { mutableStateOf(emptyList<Int>()) }
+    // Baseline whenever the setting changes (incl. first composition).
+    LaunchedEffect(mode) {
+        expandedItems = ChatSectionsPolicy.initialExpanded(mode, isRunning, items.size)
+    }
+    // AUTO collapses everything once the run finishes.
+    LaunchedEffect(mode, isRunning) {
+        if (!isRunning) expandedItems = ChatSectionsPolicy.onRunFinished(mode, expandedItems)
+    }
+    // Streaming grows the list; open the new rows where the mode would.
+    LaunchedEffect(items.size) {
+        expandedItems = ChatSectionsPolicy.onItemsGrown(mode, isRunning, items.size, expandedItems)
+    }
     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
         if (items.isEmpty()) {
             ActivitySummaryRow(
@@ -5576,7 +5594,7 @@ private fun formatDuration(totalSeconds: Long): String = when {
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage, onRunInTerminal: (String) -> Unit, onOpenAttachment: (ChatAttachment) -> Unit) {
+private fun MessageBubble(message: ChatMessage, onRunInTerminal: (String) -> Unit, onOpenAttachment: (ChatAttachment) -> Unit, isRunning: Boolean = false) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start) {
         Surface(
             color = if (message.fromUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
@@ -5598,6 +5616,8 @@ private fun MessageBubble(message: ChatMessage, onRunInTerminal: (String) -> Uni
                             modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
                             color = MaterialTheme.colorScheme.onSurface,
                             onRunCode = onRunInTerminal,
+                            collapseCode = true,
+                            isRunning = isRunning,
                         )
                     }
                 }

@@ -903,6 +903,13 @@
     <string name="voice_mic_desc">Afișează un microfon în caseta de chat. Ascultă doar cât apeși pe el și nu ascultă niciodată în fundal.</string>
     <string name="voice_speak_title">Răspunsuri rostite</string>
     <string name="voice_speak_desc">Citește cu voce tare răspunsul asistentului când se termină o sarcină.</string>
+    <string name="settings_chat_title">Conversație</string>
+    <string name="settings_chat_subtitle">Mesaje și secțiuni expandabile</string>
+    <string name="settings_chat_sections">Secțiuni expandabile</string>
+    <string name="settings_chat_sections_desc">Activitatea și blocurile de cod se deschid cât lucrează agentul, apoi se pliază.</string>
+    <string name="settings_chat_sections_auto">Auto</string>
+    <string name="settings_chat_sections_open">Deschise mereu</string>
+    <string name="settings_chat_sections_closed">Pliate mereu</string>
     <string name="voice_mic_cd">Intrare vocală</string>
     <string name="voice_mic_listening">Oprește intrarea vocală</string>
     <string name="voice_listening_hint">Se ascultă…</string>

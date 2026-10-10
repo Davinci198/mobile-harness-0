@@ -903,6 +903,13 @@
     <string name="voice_mic_desc">Show a microphone in the chat input. It listens only while you tap it, and it never listens in the background.</string>
     <string name="voice_speak_title">Speak replies</string>
     <string name="voice_speak_desc">Read the assistant\'s reply aloud when a task finishes.</string>
+    <string name="settings_chat_title">Chat</string>
+    <string name="settings_chat_subtitle">Messages and expandable sections</string>
+    <string name="settings_chat_sections">Expandable sections</string>
+    <string name="settings_chat_sections_desc">Activity and code blocks open while the agent works, then collapse.</string>
+    <string name="settings_chat_sections_auto">Auto</string>
+    <string name="settings_chat_sections_open">Always open</string>
+    <string name="settings_chat_sections_closed">Always closed</string>
     <string name="voice_mic_cd">Voice input</string>
     <string name="voice_mic_listening">Stop voice input</string>
     <string name="voice_listening_hint">Listening…</string>

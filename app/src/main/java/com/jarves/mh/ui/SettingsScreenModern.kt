@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -111,6 +112,7 @@ import com.jarves.mh.data.ApiKeyInfo
 import com.jarves.mh.data.AppLocale
 import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.model.AgentKind
+import com.jarves.mh.model.ChatSectionsMode
 import com.jarves.mh.model.DEEPSEEK_HARNESS_PROVIDERS
 import com.jarves.mh.model.DSH_PROTOCOL_PROVIDERS
 import com.jarves.mh.model.DevStack
@@ -133,7 +135,7 @@ import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketAccent
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { APPEARANCE, ACCESS, VOICE, TOOLS, PERMISSIONS, BACKGROUND, RUNTIME, UPDATE_CHANNEL }
+private enum class SettingsSection { APPEARANCE, ACCESS, VOICE, CHAT, TOOLS, PERMISSIONS, BACKGROUND, RUNTIME, UPDATE_CHANNEL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -188,6 +190,7 @@ fun SettingsScreen(
     val voicePrefs = remember { AppPreferences(context) }
     var voiceMicEnabled by remember { mutableStateOf(voicePrefs.voiceMicEnabled) }
     var voiceSpeakEnabled by remember { mutableStateOf(voicePrefs.voiceSpeakEnabled) }
+    var chatSectionsMode by remember { mutableStateOf(voicePrefs.chatSectionsMode) }
     val backgroundSettingsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) {
@@ -368,6 +371,49 @@ fun SettingsScreen(
                                 voicePrefs.voiceSpeakEnabled = value
                             },
                         )
+                    }
+                }
+            }
+
+            item {
+                SettingsAccordion(
+                    title = stringResource(R.string.settings_chat_title),
+                    subtitle = stringResource(R.string.settings_chat_subtitle),
+                    icon = Icons.Default.Psychology,
+                    expanded = expanded == SettingsSection.CHAT,
+                    onClick = { toggle(SettingsSection.CHAT) },
+                ) {
+                    Text(stringResource(R.string.settings_chat_sections), fontWeight = FontWeight.SemiBold)
+                    Text(
+                        stringResource(R.string.settings_chat_sections_desc),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            ChatSectionsMode.AUTO to R.string.settings_chat_sections_auto,
+                            ChatSectionsMode.ALWAYS to R.string.settings_chat_sections_open,
+                            ChatSectionsMode.NEVER to R.string.settings_chat_sections_closed,
+                        ).forEach { (modeValue, labelRes) ->
+                            val selected = chatSectionsMode == modeValue
+                            OutlinedButton(
+                                onClick = {
+                                    chatSectionsMode = modeValue
+                                    voicePrefs.chatSectionsMode = modeValue
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                ),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(
+                                    stringResource(labelRes),
+                                    fontSize = 12.sp,
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
                     }
                 }
             }
