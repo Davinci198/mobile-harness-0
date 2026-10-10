@@ -363,6 +363,10 @@
     <string name="chat_title_history">%1$s · History</string>
     <string name="chat_title_provider">%1$s · %2$s</string>
     <string name="chat_worked">Worked for %1$s</string>
+    <string name="chat_action_copy">Copy</string>
+    <string name="chat_action_edit">Edit</string>
+    <string name="chat_action_regenerate">Regenerate</string>
+    <string name="chat_action_delete">Delete</string>
     <string name="claude_connect_desc">Connect a Claude Pro, Max, Team, or Enterprise subscription to Claude Code.</string>
     <string name="claude_paste_token">Paste token</string>
     <string name="claude_save_continue">Save and continue</string>
