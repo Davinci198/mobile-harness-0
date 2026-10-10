@@ -229,7 +229,6 @@ import com.jarves.mh.model.withDefaultScheme
 import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
-import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.runtime.RuntimeExecutionService
 import com.jarves.mh.runtime.RuntimeExecutionService.Companion.ACTION_KEEPALIVE
 import com.jarves.mh.runtime.RuntimeExecutionService.Companion.EXTRA_PROJECT_NAME
