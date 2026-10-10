@@ -117,6 +117,38 @@ enum class ApiPingStatus { IDLE, PINGING, OK, FAILED }
 enum class AppUpdateStatus { AVAILABLE, PERMISSION_REQUIRED, DOWNLOADING, INSTALLING, ERROR }
 enum class GitHubAuthStatus { DISCONNECTED, STARTING, AWAITING_USER, CONNECTED, ERROR }
 
+data class ExportSelection(
+    val defaultIncluded: Boolean = true,
+    val overrides: Map<String, Boolean> = emptyMap(),
+) {
+    fun includes(path: String): Boolean {
+        val normalized = path.trim('/')
+        return overrides.entries
+            .asSequence()
+            .filter { (rule, _) -> normalized == rule || normalized.startsWith("$rule/") }
+            .maxByOrNull { it.key.length }
+            ?.value ?: defaultIncluded
+    }
+
+    fun canContainIncluded(path: String): Boolean {
+        val normalized = path.trim('/')
+        return includes(normalized) || overrides.any { (rule, included) ->
+            included && rule.startsWith("$normalized/")
+        }
+    }
+
+    fun toggled(path: String, directory: Boolean): ExportSelection {
+        val normalized = path.trim('/')
+        val nextValue = !includes(normalized)
+        val next = overrides.toMutableMap()
+        if (directory) next.keys.filter { it.startsWith("$normalized/") }.forEach(next::remove)
+        next[normalized] = nextValue
+        return copy(overrides = next)
+    }
+}
+
+enum class FileReadOnlyReason { TOO_LARGE, BINARY, INVALID_UTF8, UNSAFE, READ_ERROR }
+
 data class TerminalOutputLine(
     val id: String = java.util.UUID.randomUUID().toString(),
     val command: String,
@@ -323,6 +355,8 @@ data class AppUiState(
     val openedFileEditing: Boolean = false,
     /** Too large to read whole: the draft on screen is not the file, so it must not go back. */
     val openedFileTruncated: Boolean = false,
+    /** Why the open file cannot be written back; null when it is a normal editable text file. */
+    val openedFileReadOnlyReason: FileReadOnlyReason? = null,
     val messages: List<ChatMessage> = listOf(
         ChatMessage(fromUser = false, text = "Hi! Tell me what you want to build or change."),
     ),
@@ -4754,7 +4788,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshProjectFiles()
     }
 
-    fun exportActiveProject(uri: Uri) {
+    fun exportActiveProject(uri: Uri, selection: ExportSelection = ExportSelection()) {
         val current = _state.value
         val project = current.activeProject ?: return
         if (current.isRunning || current.projectTerminalRunning) {
@@ -4778,7 +4812,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                         true
                                     } else {
                                         val relative = directory.relativeTo(root).invariantSeparatorsPath
-                                        !isExportExcludedPath(relative) &&
+                                        selection.canContainIncluded(relative) &&
+                                            !isExportExcludedPath(relative) &&
                                             !Files.isSymbolicLink(directory.toPath()) &&
                                             runCatching { directory.canonicalFile.toPath().startsWith(rootPath) }.getOrDefault(false)
                                     }
@@ -4787,7 +4822,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 .filter { file ->
                                     !Files.isSymbolicLink(file.toPath()) &&
                                         runCatching { file.canonicalFile.toPath().startsWith(rootPath) }.getOrDefault(false) &&
-                                        !isExportExcludedPath(file.relativeTo(root).invariantSeparatorsPath)
+                                        !isExportExcludedPath(file.relativeTo(root).invariantSeparatorsPath) &&
+                                        if (file.isDirectory) {
+                                            selection.canContainIncluded(file.relativeTo(root).invariantSeparatorsPath)
+                                        } else {
+                                            selection.includes(file.relativeTo(root).invariantSeparatorsPath)
+                                        }
                                 }
                                 .forEach { file ->
                                     val relative = file.relativeTo(root).invariantSeparatorsPath
@@ -4895,26 +4935,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 fileContentLoading = true,
                 openedFileEditing = startEditing,
                 openedFileTruncated = false,
+                openedFileReadOnlyReason = null,
             )
         }
         viewModelScope.launch {
             val file = File(projectWorkspaceRoot(project), entry.path)
             val tooLarge = withContext(Dispatchers.IO) { file.length() > MAX_OPEN_FILE_BYTES }
-            val content = withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (tooLarge) {
+                    val bytes = if (tooLarge) {
                         file.inputStream().use { stream ->
                             val buf = ByteArray(MAX_OPEN_FILE_BYTES.toInt())
                             val read = stream.read(buf)
-                            String(buf, 0, read)
-                        } + "\n\n[File truncated — too large to display fully]"
+                            buf.copyOf(read.coerceAtLeast(0))
+                        }
                     } else {
-                        file.readText()
+                        file.readBytes()
                     }
-                }.getOrElse { s(R.string.file_read_fail, it.message) }
+                    val hasNul = bytes.any { it == 0.toByte() }
+                    val decoded = String(bytes, Charsets.UTF_8)
+                    val validUtf8 = !decoded.contains('\uFFFD')
+                    when {
+                        hasNul || !validUtf8 -> null to (if (hasNul) FileReadOnlyReason.BINARY else FileReadOnlyReason.INVALID_UTF8)
+                        tooLarge -> (decoded + "\n\n[File truncated — too large to display fully]") to FileReadOnlyReason.TOO_LARGE
+                        else -> decoded to null
+                    }
+                }.getOrElse { (s(R.string.file_read_fail, it.message)) to FileReadOnlyReason.READ_ERROR }
             }
+            val (content, readOnlyReason) = result
             _state.update {
-                it.copy(openedFileContent = content, fileContentLoading = false, openedFileTruncated = tooLarge)
+                it.copy(
+                    openedFileContent = content,
+                    fileContentLoading = false,
+                    openedFileTruncated = tooLarge,
+                    openedFileReadOnlyReason = readOnlyReason,
+                    openedFileEditing = startEditing && readOnlyReason == null,
+                )
             }
         }
     }
@@ -4928,6 +4984,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val project = _state.value.activeProject ?: return
         val path = _state.value.openedFilePath ?: return
         if (_state.value.fileContentSaving) return
+        if (_state.value.openedFileReadOnlyReason != null) return
         _state.update { it.copy(fileContentSaving = true) }
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { File(projectWorkspaceRoot(project), path).writeText(text) }

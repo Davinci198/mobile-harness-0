@@ -4170,6 +4170,7 @@ private fun WorkspaceScreen(
             saving = state.fileContentSaving,
             startEditing = state.openedFileEditing,
             truncated = state.openedFileTruncated,
+            readOnlyReason = state.openedFileReadOnlyReason,
             onClose = {
                 onCloseFile()
                 selectedTab = WorkspaceTab.FILES
@@ -4483,6 +4484,8 @@ internal fun FileViewerScreen(
     startEditing: Boolean,
     /** The read stopped early: what is on screen is a head of the file, not the file. */
     truncated: Boolean,
+    /** Why the file cannot be written back; null when it is a normal editable text file. */
+    readOnlyReason: com.jarves.mh.ui.FileReadOnlyReason? = null,
     onClose: () -> Unit,
     onSave: (String) -> Unit,
 ) {
@@ -4496,13 +4499,14 @@ internal fun FileViewerScreen(
     var draft by remember { mutableStateOf(content.orEmpty()) }
     var pendingEdit by remember { mutableStateOf(startEditing) }
     var underway by remember { mutableStateOf(false) }
+    val readOnly = readOnlyReason != null
 
     // The menu can ask for the editor before the bytes have arrived, and switching straight
     // away would open an empty draft over a file that has content — saving it would wipe
-    // the file. The switch waits, and never happens over a truncated read.
-    LaunchedEffect(pendingEdit, content, loading, truncated) {
+    // the file. The switch waits, and never happens over a truncated or read-only read.
+    LaunchedEffect(pendingEdit, content, loading, truncated, readOnly) {
         if (!pendingEdit) return@LaunchedEffect
-        if (truncated) {
+        if (truncated || readOnly) {
             pendingEdit = false
         } else if (content != null && !loading) {
             draft = content
@@ -4567,7 +4571,7 @@ internal fun FileViewerScreen(
                         }
                         IconButton(
                             onClick = { draft = content.orEmpty(); editing = true },
-                            enabled = !loading && content != null && !truncated,
+                            enabled = !loading && content != null && !truncated && !readOnly,
                         ) {
                             Icon(
                                 Icons.Default.Edit,
@@ -4590,6 +4594,76 @@ internal fun FileViewerScreen(
                 }
                 content == null -> {
                     EmptyState(Icons.Default.Description, stringResource(R.string.files_no_content), stringResource(R.string.files_couldnt_read))
+                }
+                readOnly -> {
+                    Column(Modifier.fillMaxSize()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = when (readOnlyReason) {
+                                    com.jarves.mh.ui.FileReadOnlyReason.TOO_LARGE -> stringResource(R.string.file_read_only_too_large)
+                                    com.jarves.mh.ui.FileReadOnlyReason.BINARY -> stringResource(R.string.file_read_only_binary)
+                                    com.jarves.mh.ui.FileReadOnlyReason.INVALID_UTF8 -> stringResource(R.string.file_read_only_invalid_utf8)
+                                    com.jarves.mh.ui.FileReadOnlyReason.UNSAFE -> stringResource(R.string.file_read_only_unsafe)
+                                    com.jarves.mh.ui.FileReadOnlyReason.READ_ERROR -> stringResource(R.string.file_read_only_read_error)
+                                    else -> stringResource(R.string.file_read_only_generic)
+                                },
+                                modifier = Modifier.padding(12.dp),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontSize = 13.sp,
+                            )
+                        }
+                        if (isMarkdown) {
+                            LazyColumn(
+                                contentPadding = PaddingValues(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                            ) {
+                                item { MarkdownText(markdown = content, color = MaterialTheme.colorScheme.onSurface) }
+                            }
+                        } else {
+                            LazyColumn(
+                                contentPadding = PaddingValues(0.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .background(Color(0xFF0D1117)),
+                            ) {
+                                val lines = content.lines()
+                                items(lines.size) { idx ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 1.dp),
+                                        verticalAlignment = Alignment.Top,
+                                    ) {
+                                        Text(
+                                            text = "${idx + 1}",
+                                            modifier = Modifier
+                                                .width(42.dp)
+                                                .padding(start = 8.dp, end = 6.dp),
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF4A5568),
+                                            textAlign = TextAlign.End,
+                                        )
+                                        Text(
+                                            text = lines[idx],
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(end = 12.dp),
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                            fontSize = 13.sp,
+                                            lineHeight = 19.sp,
+                                            color = Color(0xFFE2E8F0),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 editing -> {
                     Column(Modifier.fillMaxSize()) {
