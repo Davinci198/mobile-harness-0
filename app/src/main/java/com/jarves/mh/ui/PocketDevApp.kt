@@ -379,6 +379,8 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onStop = viewModel::stopTask,
             onApproval = viewModel::answerApproval,
             onQuestion = viewModel::answerQuestion,
+            onRegenerateMessage = { viewModel.regenerateMessage(it.id) },
+            onDeleteMessage = { viewModel.deleteMessage(it.id) },
             onRefreshFiles = viewModel::refreshProjectFiles,
             onOpenFile = viewModel::openFile,
             onCloseFile = viewModel::closeFile,
@@ -4030,6 +4032,8 @@ private fun WorkspaceScreen(
     onStop: () -> Unit,
     onApproval: (Boolean) -> Unit,
     onQuestion: (List<QuestionAnswer>) -> Unit,
+    onRegenerateMessage: (ChatMessage) -> Unit,
+    onDeleteMessage: (ChatMessage) -> Unit,
     onRefreshFiles: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
     onCloseFile: () -> Unit,
@@ -4308,6 +4312,8 @@ private fun WorkspaceScreen(
                         onTerminalOpened()
                         onTerminalPrepare(command)
                     },
+                    onRegenerateMessage = onRegenerateMessage,
+                    onDeleteMessage = onDeleteMessage,
                     askPrefill = state.askPrefill,
                     onAskPrefillConsumed = onConsumeAskPrefill,
                     screenShareActive = state.screenShareActive,
@@ -4918,6 +4924,8 @@ private fun ChatTab(
     onRemoveAttachment: (String) -> Unit,
     onOpenAttachment: (ChatAttachment) -> Unit,
     onRunInTerminal: (String) -> Unit,
+    onRegenerateMessage: (ChatMessage) -> Unit = {},
+    onDeleteMessage: (ChatMessage) -> Unit = {},
     readOnly: Boolean = false,
     readOnlyBlocked: Boolean = false,
     onContinueHere: () -> Unit = {},
@@ -4936,6 +4944,7 @@ private fun ChatTab(
         onDispose { view.keepScreenOn = false }
     }
     var prompt by rememberSaveable { mutableStateOf("") }
+    var selectedMessageId by rememberSaveable { mutableStateOf<String?>(null) }
     val promptFocus = remember { FocusRequester() }
     LaunchedEffect(askPrefill) {
         val ask = askPrefill ?: return@LaunchedEffect
@@ -4984,7 +4993,30 @@ private fun ChatTab(
                     } else {
                         // Only the message being generated sees isRunning, so a new
                         // run never re-opens code blocks in older bubbles.
-                        MessageBubble(message, onRunInTerminal, onOpenAttachment, isRunning && message.id == newestMessageId)
+                        MessageBubble(
+                            message = message,
+                            onRunInTerminal = onRunInTerminal,
+                            onOpenAttachment = onOpenAttachment,
+                            isRunning = isRunning && message.id == newestMessageId,
+                            selected = selectedMessageId != null && selectedMessageId == message.id,
+                            actionsEnabled = !isRunning && !readOnly,
+                            onTap = {
+                                selectedMessageId = if (selectedMessageId == message.id) null else message.id
+                            },
+                            onEdit = {
+                                selectedMessageId = null
+                                prompt = message.text
+                                runCatching { promptFocus.requestFocus() }
+                            },
+                            onRegenerate = {
+                                selectedMessageId = null
+                                onRegenerateMessage(message)
+                            },
+                            onDelete = {
+                                selectedMessageId = null
+                                onDeleteMessage(message)
+                            },
+                        )
                     }
                 }
                 if (liveProcess.isNotEmpty() || thinkingActive) {
@@ -5224,6 +5256,7 @@ private fun ChatTab(
                                         onClick = {
                                             if (canSend && onSend(prompt)) {
                                                 prompt = ""
+                                                selectedMessageId = null
                                             }
                                         },
                                     ),
@@ -5595,12 +5628,27 @@ private fun formatDuration(totalSeconds: Long): String = when {
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage, onRunInTerminal: (String) -> Unit, onOpenAttachment: (ChatAttachment) -> Unit, isRunning: Boolean = false) {
+private fun MessageBubble(
+    message: ChatMessage,
+    onRunInTerminal: (String) -> Unit,
+    onOpenAttachment: (ChatAttachment) -> Unit,
+    isRunning: Boolean = false,
+    selected: Boolean = false,
+    actionsEnabled: Boolean = true,
+    onTap: () -> Unit = {},
+    onEdit: () -> Unit = {},
+    onRegenerate: () -> Unit = {},
+    onDelete: () -> Unit = {},
+) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember(message.id) { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start) {
         Surface(
             color = if (message.fromUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(18.dp),
-            modifier = Modifier.fillMaxWidth(if (message.fromUser) .82f else .92f),
+            modifier = Modifier
+                .fillMaxWidth(if (message.fromUser) .82f else .92f)
+                .clickable(onClick = onTap),
         ) {
             Column(Modifier.padding(top = 12.dp)) {
                 SelectionContainer {
@@ -5640,9 +5688,68 @@ private fun MessageBubble(message: ChatMessage, onRunInTerminal: (String) -> Uni
                         }
                     }
                 }
+                if (selected) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(start = 6.dp, end = 6.dp, bottom = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        MessageActionButton(
+                            label = stringResource(R.string.chat_action_copy),
+                            icon = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                            onClick = {
+                                clipboard.setText(AnnotatedString(message.text))
+                                copied = true
+                            },
+                        )
+                        if (actionsEnabled) {
+                            if (message.fromUser) {
+                                MessageActionButton(
+                                    label = stringResource(R.string.chat_action_edit),
+                                    icon = Icons.Default.Edit,
+                                    onClick = onEdit,
+                                )
+                            } else {
+                                MessageActionButton(
+                                    label = stringResource(R.string.chat_action_regenerate),
+                                    icon = Icons.Default.Refresh,
+                                    onClick = onRegenerate,
+                                )
+                            }
+                            MessageActionButton(
+                                label = stringResource(R.string.chat_action_delete),
+                                icon = Icons.Default.Delete,
+                                tint = MaterialTheme.colorScheme.error,
+                                onClick = onDelete,
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun MessageActionButton(
+    label: String,
+    icon: ImageVector,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(14.dp), tint = tint)
+        Spacer(Modifier.width(4.dp))
+        Text(label, fontSize = 12.sp, color = tint)
     }
 }
 

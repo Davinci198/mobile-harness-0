@@ -22,6 +22,7 @@ import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.model.ActivityItem
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChangeItem
+import com.jarves.mh.model.ChatHistoryActions
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ChatAttachment
 import com.jarves.mh.model.CustomEndpoint
@@ -4951,6 +4952,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun sanitizeAttachmentName(name: String): String {
         val clean = name.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._ -]"), "_").trim().trim('.').take(100)
         return clean.ifBlank { "attachment-${UUID.randomUUID().toString().take(8)}" }
+    }
+
+    /**
+     * Message actions: drop a message from the visible and persisted chat
+     * history. Refused while an Agent Execution is active so the streaming
+     * turn never loses the list it is writing into.
+     */
+    fun deleteMessage(messageId: String) {
+        if (_state.value.isRunning) return
+        _state.update { it.copy(messages = ChatHistoryActions.withoutMessage(it.messages, messageId)) }
+        persistMessages()
+    }
+
+    /**
+     * Message actions: drop the stale exchange that produced [messageId] and
+     * re-send its prompt as a fresh Agent Execution. Returns false when the
+     * id is unknown, there is nothing to resend, or a run is already active.
+     */
+    fun regenerateMessage(messageId: String): Boolean {
+        if (_state.value.isRunning) return false
+        val plan = ChatHistoryActions.planRegenerate(_state.value.messages, messageId) ?: return false
+        _state.update { it.copy(messages = plan.kept) }
+        persistMessages()
+        return sendPrompt(plan.resend)
     }
 
     fun sendPrompt(prompt: String): Boolean {

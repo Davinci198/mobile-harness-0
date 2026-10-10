@@ -363,6 +363,10 @@
     <string name="chat_title_history">%1$s · Istoric</string>
     <string name="chat_title_provider">%1$s · %2$s</string>
     <string name="chat_worked">A lucrat %1$s</string>
+    <string name="chat_action_copy">Copiază</string>
+    <string name="chat_action_edit">Editează</string>
+    <string name="chat_action_regenerate">Regenerează</string>
+    <string name="chat_action_delete">Șterge</string>
     <string name="claude_connect_desc">Conectează un abonament Claude Pro, Max, Team sau Enterprise la Claude Code.</string>
     <string name="claude_paste_token">Lipește tokenul</string>
     <string name="claude_save_continue">Salvează și continuă</string>
