@@ -1148,6 +1148,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         androidBuildMessage = s(R.string.build_building),
                         androidBuildLog = "$ $command\n",
                     )
+                }
                 val process = installer.process(
                     installed.proot, installed.rootfs, workspace, emptyMap(),
                     listOf("/usr/bin/bash", "-lc", command),
