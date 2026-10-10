@@ -3177,14 +3177,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Chat "/models" discover+scan: fetches the active provider's catalog and
+     * Chat "/models" discover+scan: fetches the browsed provider's catalog and
      * probes every model so working ones surface with health and latency.
-     * Antigravity keeps its CLI-backed list and has no HTTP catalog to scan.
+     * [kind]/[baseUrl]/[dshApi] come from the picker's provider chip (and
+     * optional saved CUSTOM endpoint); when omitted, the active provider is
+     * scanned. Antigravity keeps its CLI-backed list and has no HTTP catalog.
      */
-    fun discoverModelsForPicker() {
+    fun discoverModelsForPicker(
+        kind: ProviderKind? = null,
+        baseUrl: String? = null,
+        dshApi: String? = null,
+    ) {
         val current = _state.value
         if (current.agentKind == AgentKind.ANTIGRAVITY) return
-        scanModels(current.provider, secret = "", models = emptyList())
+        val effectiveKind = kind ?: current.provider.kind
+        val profile = ProviderProfile(
+            kind = effectiveKind,
+            baseUrl = baseUrl ?: effectiveKind.defaultBaseUrl,
+            model = current.provider.model,
+            hasSecret = current.provider.hasSecret || vault.contains(effectiveKind.name),
+            dshApi = dshApi ?: defaultDshApiForProvider(effectiveKind),
+        )
+        scanModels(profile, secret = "", models = emptyList())
     }
 
     fun setAntigravityEffort(effort: String) {

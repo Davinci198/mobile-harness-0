@@ -4050,7 +4050,7 @@ private fun WorkspaceScreen(
     onShowModels: () -> Unit = {},
     onPickModel: (String) -> Unit = {},
     onSelectProviderModel: (ProviderKind, String, String?, String?) -> Unit = { _, _, _, _ -> },
-    onDiscoverModels: () -> Unit = {},
+    onDiscoverModels: (ProviderKind, String?, String?) -> Unit = { _, _, _ -> },
     onRefreshFiles: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
     onCloseFile: () -> Unit,
@@ -4103,7 +4103,9 @@ private fun WorkspaceScreen(
                 showModelsPicker = false
                 onSelectProviderModel(kind, model, baseUrl, dshApi)
             },
-            onDiscover = onDiscoverModels,
+            onDiscover = { kind, baseUrl, dshApi ->
+                onDiscoverModels(kind, baseUrl, dshApi)
+            },
             onDismiss = { showModelsPicker = false },
         )
     }
@@ -4950,7 +4952,7 @@ private fun ModelsPickerDialog(
     state: AppUiState,
     onPick: (String) -> Unit,
     onPickProviderModel: (ProviderKind, String, String?, String?) -> Unit,
-    onDiscover: () -> Unit,
+    onDiscover: (ProviderKind, String?, String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val isAntigravity = state.agentKind == AgentKind.ANTIGRAVITY
@@ -5119,7 +5121,10 @@ private fun ModelsPickerDialog(
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (!isAntigravity) {
-                        TextButton(onClick = onDiscover, enabled = !state.isModelScanning) {
+                        TextButton(
+                            onClick = { onDiscover(browseKind, browseCustomEndpoint?.baseUrl, browseCustomEndpoint?.dshApi) },
+                            enabled = !state.isModelScanning,
+                        ) {
                             Icon(Icons.Default.AutoAwesome, null, Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
                             Text(stringResource(R.string.pal_discover), fontSize = 12.sp)
