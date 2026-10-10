@@ -367,6 +367,10 @@
     <string name="pal_group_terminal">Terminal</string>
     <string name="pal_new_chat">Conversație nouă</string>
     <string name="pal_models">Modele</string>
+    <string name="pal_discover">Descoperă modelele</string>
+    <string name="pal_models_scanning">Se scanează modelele…</string>
+    <string name="pal_model_broken">Stricat</string>
+    <string name="pal_model_ok">OK</string>
     <string name="pal_stop_task">Oprește sarcina</string>
     <string name="pal_attach">Atașează fișiere</string>
     <string name="pal_share_on">Pornește partajarea ecranului</string>
