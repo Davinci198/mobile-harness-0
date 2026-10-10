@@ -339,6 +339,8 @@ data class AppUiState(
     val antigravityModelsLoading: Boolean = false,
     val modelScanLines: List<String> = emptyList(),
     val isModelScanning: Boolean = false,
+    /** When the current scan started; lets a wedged scan time out and unblock Discover. */
+    val modelScanStartedAtMillis: Long = 0L,
     val brokenModelIds: Set<String> = emptySet(),
     val hideBrokenModels: Boolean = false,
     val autoScanEnabled: Boolean = true,
@@ -407,6 +409,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var pendingAsk: String? = null
     @Volatile private var githubAuthProcess: Process? = null
     private var githubAuthJob: kotlinx.coroutines.Job? = null
+    private var modelScanJob: kotlinx.coroutines.Job? = null
+    private var modelScanGeneration: Int = 0
     @Volatile private var lastOpenedAntigravityAuthUrl: String? = null
     private var activeRuntimeRequest: RuntimeRetryRequest? = null
     private val failedApiKeyIds = mutableSetOf<String>()
@@ -2721,7 +2725,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * If [models] is empty, discovers the catalog first.
      */
     fun scanModels(profile: ProviderProfile, secret: String, models: List<DiscoveredModel>) {
-        if (_state.value.isModelScanning) return
+        // A wedged scan (cancelled coroutine, dead network call) must not block
+        // Discover forever; after 5 minutes treat the flag as stale, cancel the
+        // old job, and re-enter.
+        val now = System.currentTimeMillis()
+        val scanStuck = _state.value.isModelScanning &&
+            now - _state.value.modelScanStartedAtMillis > 5 * 60 * 1000L
+        if (_state.value.isModelScanning && !scanStuck) return
+        if (scanStuck) modelScanJob?.cancel()
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
         // The Hermes free tier and OpenCode Zen scan keyless, and a loopback
         // gateway answers without credentials; only remote keyed providers
@@ -2735,17 +2746,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
-        viewModelScope.launch { runModelScan(profile, key, models) }
+        val generation = ++modelScanGeneration
+        modelScanJob = viewModelScope.launch { runModelScan(profile, key, models, generation) }
     }
 
-    private suspend fun runModelScan(profile: ProviderProfile, key: String, models: List<DiscoveredModel>) {
+    private suspend fun runModelScan(
+        profile: ProviderProfile,
+        key: String,
+        models: List<DiscoveredModel>,
+        generation: Int,
+    ) {
         val agent = _state.value.agentKind
-        if (_state.value.isModelScanning) return
+        val startedAt = System.currentTimeMillis()
+        // Stale-generation guard: a cancelled predecessor must not clobber state
+        // after a newer scan has already taken over.
+        fun stillCurrent() = generation == modelScanGeneration
         val startedHeader = mutableListOf(
             "$ scan ${profile.kind.title} — discovering catalog…",
         )
         _state.update {
-            it.copy(isModelScanning = true, modelScanLines = startedHeader)
+            it.copy(isModelScanning = true, modelScanStartedAtMillis = startedAt, modelScanLines = startedHeader)
         }
         try {
             var catalog = models
@@ -2753,12 +2773,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 when (val discovery = providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, agent))) {
                     is ModelDiscoveryResult.Success -> {
                         catalog = discovery.models
-                        _state.update {
+                        if (stillCurrent()) _state.update {
                             it.copy(modelScanLines = it.modelScanLines + "✓ ${catalog.size} models in catalog")
                         }
                     }
                     is ModelDiscoveryResult.Failure -> {
-                        _state.update {
+                        if (stillCurrent()) _state.update {
                             it.copy(
                                 modelScanLines = it.modelScanLines + "! discovery failed: ${discovery.message}",
                                 isModelScanning = false,
@@ -2768,7 +2788,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } else {
-                _state.update {
+                if (stillCurrent()) _state.update {
                     it.copy(modelScanLines = it.modelScanLines + "✓ testing ${catalog.size} models")
                 }
             }
@@ -2776,7 +2796,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // turns, so free-tier scans probe gently; every other provider may
             // fan out at the full concurrency.
             val probeConcurrency = if (profile.kind == ProviderKind.FREE) 2 else 5
-            _state.update {
+            if (stillCurrent()) _state.update {
                 it.copy(modelScanLines = it.modelScanLines + "$ concurrency $probeConcurrency, timeout 30s, 429 backoff")
             }
             val protocol = providerProtocolForAgent(profile, agent)
@@ -2787,11 +2807,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 models = catalog,
                 concurrency = probeConcurrency,
                 onProgress = { health ->
-                    _state.update { state ->
+                    if (stillCurrent()) _state.update { state ->
                         state.copy(modelScanLines = state.modelScanLines + formatModelHealthLine(health))
                     }
                 },
             )
+            if (!stillCurrent()) return
             val broken = results.filter(ModelHealth::isBroken).map(ModelHealth::modelId).toSet()
             val okCount = results.size - broken.size
             preferences.setBrokenModels(agent, broken)
@@ -2828,7 +2849,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         } catch (t: Throwable) {
-            _state.update {
+            if (stillCurrent()) _state.update {
                 it.copy(
                     isModelScanning = false,
                     modelScanLines = it.modelScanLines + "! scan failed: ${t.message}",

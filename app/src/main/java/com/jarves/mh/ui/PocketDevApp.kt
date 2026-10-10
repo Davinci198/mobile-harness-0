@@ -4989,17 +4989,29 @@ private fun ModelsPickerDialog(
                     }
                 }
                 if (state.isModelScanning) {
-                    Row(
-                        Modifier.padding(bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            stringResource(R.string.pal_models_scanning),
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Column(Modifier.padding(bottom = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                stringResource(R.string.pal_models_scanning),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        // Live terminal-style progress: the last health line updates
+                        // as each model is probed, so a 400+ model scan is not a
+                        // silent multi-minute spinner.
+                        if (lastScanLine != null) {
+                            Text(
+                                lastScanLine,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
                     }
                 } else if (lastScanLine != null) {
                     Text(
