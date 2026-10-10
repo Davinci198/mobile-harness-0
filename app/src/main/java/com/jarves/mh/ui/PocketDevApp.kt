@@ -210,6 +210,7 @@ import com.jarves.mh.model.ProjectKind
 import com.jarves.mh.model.ProjectChat
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
+import com.jarves.mh.model.ReasoningEffort
 import com.jarves.mh.model.QuestionAnswer
 import com.jarves.mh.model.QuestionItem
 import com.jarves.mh.model.QuestionRequest
@@ -378,6 +379,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onStop = viewModel::stopTask,
             onApproval = viewModel::answerApproval,
             onQuestion = viewModel::answerQuestion,
+            onSetEffort = viewModel::setAntigravityEffort,
             onRefreshFiles = viewModel::refreshProjectFiles,
             onOpenFile = viewModel::openFile,
             onCloseFile = viewModel::closeFile,
@@ -4029,6 +4031,7 @@ private fun WorkspaceScreen(
     onStop: () -> Unit,
     onApproval: (Boolean) -> Unit,
     onQuestion: (List<QuestionAnswer>) -> Unit,
+    onSetEffort: (String) -> Unit,
     onRefreshFiles: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
     onCloseFile: () -> Unit,
@@ -4292,6 +4295,8 @@ private fun WorkspaceScreen(
                     listState = chatListState,
                     question = state.pendingQuestion,
                     onQuestion = onQuestion,
+                    effort = state.antigravityEffort,
+                    onSetEffort = onSetEffort,
                     taskStartedAtMillis = state.workSegmentStartedAtMillis ?: state.taskStartedAtMillis,
                     taskFinishedAtMillis = state.taskFinishedAtMillis,
                     thinkingActive = state.liveThinking,
@@ -4926,6 +4931,8 @@ private fun ChatTab(
     onToggleScreenShare: () -> Unit = {},
     question: QuestionRequest? = null,
     onQuestion: (List<QuestionAnswer>) -> Unit = {},
+    effort: String? = null,
+    onSetEffort: (String) -> Unit = {},
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -5090,6 +5097,55 @@ private fun ChatTab(
                 }
 
                 val canSend = prompt.isNotBlank() || pendingAttachments.isNotEmpty()
+
+                // Composer header: reasoning-effort indicator, only for agents that
+                // honestly expose the knob (ReasoningEffort.levelsFor).
+                val effortLevels = ReasoningEffort.levelsFor(agentKind)
+                if (!readOnly && effort != null && effortLevels.isNotEmpty()) {
+                    var effortMenu by remember { mutableStateOf(false) }
+                    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.clickable { effortMenu = true },
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Default.Speed, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    effort.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Icon(Icons.Default.KeyboardArrowDown, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        DropdownMenu(expanded = effortMenu, onDismissRequest = { effortMenu = false }) {
+                            effortLevels.forEach { level ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(level.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() })
+                                    },
+                                    leadingIcon = {
+                                        if (level == effort) {
+                                            Icon(Icons.Default.Check, null, Modifier.size(16.dp))
+                                        } else {
+                                            Spacer(Modifier.size(16.dp))
+                                        }
+                                    },
+                                    onClick = {
+                                        effortMenu = false
+                                        if (level in effortLevels) onSetEffort(level)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
 
                 Surface(
                     shape = RoundedCornerShape(26.dp),

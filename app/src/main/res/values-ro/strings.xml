@@ -748,6 +748,7 @@
     <string name="submit_code_fail">Nu s-a putut trimite codul</string>
     <string name="signout_fail">Nu s-a putut deconecta</string>
     <string name="no_reasoning">Acest model nu oferă raționament %1$s</string>
+    <string name="chat_thinking_tokens">Gândește… ~%1$d tokeni</string>
     <string name="stack_ready">Instrumentele %1$s sunt gata</string>
     <string name="stack_remove_guard">Oprește sarcinile în execuție și comenzile de terminal înainte de a elimina instrumentele</string>
     <string name="stack_removing">Se elimină %1$s…</string>

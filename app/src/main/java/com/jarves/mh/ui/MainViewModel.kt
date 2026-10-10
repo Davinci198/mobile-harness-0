@@ -5279,10 +5279,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // After that segment has been committed to the timeline, later
                     // agent turns must not repeat the same request summary.
                     if (existingIndex < 0) return@update current
+                    val currentDetail = current.liveProcess.getOrNull(existingIndex)?.detail
+                    val synthetic = requestPlanningSummary(current.currentTaskRequest.orEmpty(), current.agentKind)
+                    // Real reasoning wins: keep a summary that already landed, otherwise
+                    // replace the synthetic planning line with the live token counter —
+                    // the synthetic line is a fallback for runs with no reasoning stream.
+                    val detail = when {
+                        currentDetail != null && currentDetail.isNotBlank() && currentDetail != synthetic -> currentDetail
+                        event.estimatedTokens > 0 -> s(R.string.chat_thinking_tokens, event.estimatedTokens)
+                        else -> currentDetail ?: synthetic
+                    }
                     val reasoning = ActivityItem(
                         title = "Think",
-                        detail = current.liveProcess.getOrNull(existingIndex)?.detail
-                            ?: requestPlanningSummary(current.currentTaskRequest.orEmpty(), current.agentKind),
+                        detail = detail,
                         isComplete = false,
                     )
                     val process = if (existingIndex >= 0) {
