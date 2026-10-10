@@ -2,6 +2,7 @@ package com.jarves.mh.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -27,16 +30,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -47,6 +53,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.jarves.mh.data.AppPreferences
+import com.jarves.mh.model.ChatSectionsMode
+import com.jarves.mh.model.ChatSectionsPolicy
 import com.jarves.mh.ui.theme.PocketAccent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -67,6 +76,8 @@ fun MarkdownText(
     modifier: Modifier = Modifier,
     color: Color = Color.Unspecified,
     onRunCode: ((String) -> Unit)? = null,
+    collapseCode: Boolean = false,
+    isRunning: Boolean = false,
 ) {
     val blocks = remember(markdown) { parseMarkdown(markdown) }
 
@@ -74,7 +85,7 @@ fun MarkdownText(
         blocks.forEach { block ->
             when (block) {
                 is MarkdownBlock.Header -> HeaderBlock(block)
-                is MarkdownBlock.CodeBlock -> CodeSnippetBlock(block, onRunCode)
+                is MarkdownBlock.CodeBlock -> CodeSnippetBlock(block, onRunCode, collapseCode, isRunning)
                 is MarkdownBlock.BulletItem -> BulletBlock(block, color)
                 is MarkdownBlock.NumberedItem -> NumberedBlock(block, color)
                 is MarkdownBlock.BlockQuote -> QuoteBlock(block)
@@ -180,10 +191,30 @@ private fun QuoteBlock(quote: MarkdownBlock.BlockQuote) {
 }
 
 @Composable
-private fun CodeSnippetBlock(block: MarkdownBlock.CodeBlock, onRunCode: ((String) -> Unit)?) {
+private fun CodeSnippetBlock(
+    block: MarkdownBlock.CodeBlock,
+    onRunCode: ((String) -> Unit)?,
+    collapseCode: Boolean = false,
+    isRunning: Boolean = false,
+) {
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    // Sections-collapse mode applies only when the host opts in (chat bubbles);
+    // other MarkdownText callers keep the always-open behavior.
+    val collapseContext = LocalContext.current
+    val prefs = remember { AppPreferences(collapseContext) }
+    val mode = if (collapseCode) prefs.chatSectionsMode else ChatSectionsMode.ALWAYS
+    var bodyExpanded by rememberSaveable {
+        mutableStateOf(ChatSectionsPolicy.modeAcceptsOpen(mode, isRunning))
+    }
+    LaunchedEffect(collapseCode, mode) {
+        if (collapseCode) bodyExpanded = ChatSectionsPolicy.modeAcceptsOpen(mode, isRunning)
+    }
+    LaunchedEffect(collapseCode, mode, isRunning) {
+        if (collapseCode && mode == ChatSectionsMode.AUTO && !isRunning) bodyExpanded = false
+    }
 
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -197,17 +228,34 @@ private fun CodeSnippetBlock(block: MarkdownBlock.CodeBlock, onRunCode: ((String
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color(0xFF1C202B))
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .then(
+                        if (collapseCode) {
+                            Modifier.clickable { bodyExpanded = !bodyExpanded }
+                        } else {
+                            Modifier
+                        },
+                    ),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = block.language.ifBlank { "code" },
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF9AA0A6),
-                    fontFamily = FontFamily.Monospace,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = block.language.ifBlank { "code" },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF9AA0A6),
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    if (collapseCode) {
+                        Icon(
+                            imageVector = if (bodyExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = Color(0xFF9AA0A6),
+                            modifier = Modifier.padding(start = 4.dp).size(16.dp),
+                        )
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val shellLanguage = block.language.lowercase() in setOf("", "bash", "sh", "shell", "zsh", "console", "terminal")
                     if (onRunCode != null && shellLanguage) {
@@ -243,19 +291,21 @@ private fun CodeSnippetBlock(block: MarkdownBlock.CodeBlock, onRunCode: ((String
                     }
                 }
             }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(12.dp),
-            ) {
-                Text(
-                    text = block.code,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    color = Color(0xFFE2E8F0),
-                )
+            if (bodyExpanded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(12.dp),
+                ) {
+                    Text(
+                        text = block.code,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
+                        color = Color(0xFFE2E8F0),
+                    )
+                }
             }
         }
     }

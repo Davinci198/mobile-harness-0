@@ -5,6 +5,7 @@ import com.jarves.mh.R
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ChatAttachment
+import com.jarves.mh.model.ChatSectionsMode
 import com.jarves.mh.model.CustomEndpoint
 import com.jarves.mh.model.decodeCustomEndpoints
 import com.jarves.mh.model.encodeCustomEndpoints
@@ -63,6 +64,17 @@ class AppPreferences(private val context: Context) {
     var voiceSpeakEnabled: Boolean
         get() = preferences.getBoolean("voice_speak_enabled", true)
         set(value) { preferences.edit().putBoolean("voice_speak_enabled", value).apply() }
+
+    /**
+     * How expandable chat sections behave: [ChatSectionsMode.AUTO] opens
+     * activity rows and code blocks while the agent works and collapses
+     * them when the run finishes, ALWAYS keeps them open, NEVER keeps them
+     * closed. Manual taps win in every mode (AUTO resets them only when
+     * the run finishes).
+     */
+    var chatSectionsMode: String
+        get() = preferences.getString("chat_sections_mode", ChatSectionsMode.AUTO) ?: ChatSectionsMode.AUTO
+        set(value) { preferences.edit().putString("chat_sections_mode", value).apply() }
 
     /** Coding agent engine the user picked during setup. Absent = pre-agent-choice install → Claude. */
     var agentKind: String
