@@ -74,6 +74,11 @@ import com.jarves.mh.runtime.RuntimeSetupStatus
 import com.jarves.mh.runtime.ScreenShareService
 import com.jarves.mh.runtime.supportsArm64Runtime
 import com.jarves.mh.runtime.AndroidAppInstaller
+import com.jarves.mh.runtime.androidGradleCommand
+import com.jarves.mh.runtime.findAndroidProjectRoot
+import com.jarves.mh.runtime.findDebugApk
+import com.jarves.mh.runtime.findReusableDebugApk
+import com.jarves.mh.runtime.parseAndroidBuildIssues
 import com.jarves.mh.update.AppUpdateInfo
 import com.jarves.mh.update.AppUpdater
 import java.io.File
@@ -1030,26 +1035,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val installed = installer.installedRuntime()
                 val workspace = findAndroidGradleProjectRoot(projectWorkspaceRoot(project))
                     ?: error(s(R.string.build_no_gradle))
-                val process = installer.process(
-                    installed.proot, installed.rootfs, workspace, emptyMap(),
-                    listOf(
-                        "/usr/bin/bash", "-lc",
-                        "gradle --init-script /root/.gradle/init.d/pocketdev-android.gradle " +
-                            "-Pandroid.aapt2FromMavenOverride=/root/android-sdk/build-tools/35.0.0/aapt2 " +
-                            "--no-daemon assembleDebug --console=plain",
-                    ),
-                    projectGuestRoot(project),
-                )
-                val exitCode = process.waitFor()
-                val buildOutput = (process as? NativeSpawnProcess)?.outputFile?.readTailText(MAX_PROCESS_OUTPUT_BYTES).orEmpty()
-                check(exitCode == 0) {
-                    buildOutput.trim().takeLast(2_000).ifBlank { s(R.string.build_failed_exit, exitCode) }
+                val cachedApk = findReusableDebugApk(workspace)
+                if (cachedApk != null) {
+                    AndroidAppInstaller.install(getApplication(), cachedApk)
+                } else {
+                    val process = installer.process(
+                        installed.proot, installed.rootfs, workspace, emptyMap(),
+                        listOf("/usr/bin/bash", "-lc", androidGradleCommand(workspace, "assembleDebug")),
+                        projectGuestRoot(project),
+                    )
+                    val exitCode = process.waitFor()
+                    val buildOutput = (process as? NativeSpawnProcess)?.outputFile?.readTailText(MAX_PROCESS_OUTPUT_BYTES).orEmpty()
+                    check(exitCode == 0) {
+                        parseAndroidBuildIssues(buildOutput, workspace, exitCode)
+                            .joinToString("\n") { issue -> "• ${issue.title}: ${issue.detail}" }
+                            .ifBlank { buildOutput.trim().takeLast(2_000) }
+                            .ifBlank { s(R.string.build_failed_exit, exitCode) }
+                    }
+                    val apk = findDebugApk(workspace) ?: error(s(R.string.build_no_apk))
+                    AndroidAppInstaller.install(getApplication(), apk)
                 }
-                val apk = workspace.walkTopDown()
-                    .filter { it.isFile && it.extension.equals("apk", ignoreCase = true) && it.path.contains("/outputs/apk/debug/") }
-                    .maxByOrNull(File::lastModified)
-                    ?: error(s(R.string.build_no_apk))
-                AndroidAppInstaller.install(getApplication(), apk)
             }.onSuccess {
                 withContext(Dispatchers.Main) {
                     _state.update {
