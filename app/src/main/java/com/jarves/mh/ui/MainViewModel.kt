@@ -56,6 +56,7 @@ import com.jarves.mh.runtime.AntigravityAuthController
 import com.jarves.mh.runtime.AntigravityAuthState
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.AntigravityRuntimeBridge
+import com.jarves.mh.runtime.readTailText
 import com.jarves.mh.runtime.ChangeHistoryMutationStatus
 import com.jarves.mh.runtime.ChangeSelection
 import com.jarves.mh.runtime.NativeSpawnProcess
@@ -1040,7 +1041,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     projectGuestRoot(project),
                 )
                 val exitCode = process.waitFor()
-                val buildOutput = (process as? NativeSpawnProcess)?.outputFile?.readText().orEmpty()
+                val buildOutput = (process as? NativeSpawnProcess)?.outputFile?.readTailText(MAX_PROCESS_OUTPUT_BYTES).orEmpty()
                 check(exitCode == 0) {
                     buildOutput.trim().takeLast(2_000).ifBlank { s(R.string.build_failed_exit, exitCode) }
                 }
@@ -3150,7 +3151,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 while (process.isAlive) delay(50)
                 check(process.waitFor() == 0) { s(R.string.ag_list_models_fail) }
-                val output = (process as? NativeSpawnProcess)?.outputFile?.readText().orEmpty()
+                val output = (process as? NativeSpawnProcess)?.outputFile?.readTailText(MAX_PROCESS_OUTPUT_BYTES).orEmpty()
                 output.lineSequence()
                     .map { sanitizeTerminalOutput(it).trim() }
                     .mapNotNull { line -> line.split(Regex("\\s+"), limit = 2).firstOrNull() }
@@ -3986,7 +3987,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             outputFile = output,
                         )
                         val exit = process.waitFor()
-                        val details = output.readText().trim()
+                        val details = output.readTailText(MAX_PROCESS_OUTPUT_BYTES).trim()
                         check(exit == 0) { details.takeLast(600).ifBlank { s(R.string.gh_clone_exit, exit) } }
                         val metadata = detectImportedProjectMetadata(workspace)
                         Project(
@@ -4252,7 +4253,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 outputFile = outputFile,
             )
             val exit = process.waitFor()
-            exit to sanitizeTerminalOutput(outputFile.takeIf(File::isFile)?.readText().orEmpty()).trim()
+            exit to sanitizeTerminalOutput(outputFile.takeIf(File::isFile)?.readTailText(MAX_PROCESS_OUTPUT_BYTES).orEmpty()).trim()
         } finally {
             outputFile.delete()
         }
@@ -5174,7 +5175,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun isNoisyRuntimeItem(item: ActivityItem): Boolean {
-        val combined = "${item.title} ${item.detail}"
+        val combined = "${item.title} ${item.detail.take(NOISY_ITEM_SCAN_CHARS)}"
         return combined.contains("Starting Claude Code", true) ||
             combined.contains("Agent process started", true) ||
             combined.contains("Claude Code connected", true) ||
@@ -5223,9 +5224,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun boundedActivityItem(item: ActivityItem): ActivityItem {
+        if (item.detail.length <= MAX_ACTIVITY_DETAIL_CHARS) return item
+        return item.copy(
+            detail = "… Earlier output omitted …\n" + item.detail.takeLast(MAX_ACTIVITY_DETAIL_CHARS),
+        )
+    }
+
     private fun finishWorkSegment(current: AppUiState, finishedAt: Long = System.currentTimeMillis()): AppUiState {
         val meaningfulItems = current.liveProcess.filterNot(::isNoisyRuntimeItem)
             .map { if (it.isComplete) it else it.copy(isComplete = true) }
+            .map(::boundedActivityItem)
+            .takeLast(MAX_VISIBLE_WORK_ITEMS)
         if (!current.liveThinking && meaningfulItems.isEmpty()) {
             return current.copy(liveProcess = emptyList(), workSegmentStartedAtMillis = null)
         }
@@ -5245,6 +5255,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    /** Drops only rebuildable or already-persisted data when Android reports memory pressure. */
+    fun releaseMemoryCaches() {
+        _state.update { current ->
+            current.copy(
+                projectTerminalLines = current.projectTerminalLines.takeLast(MEMORY_PRESSURE_TERMINAL_LINES),
+                projectTerminalLiveOutput = current.projectTerminalLiveOutput.takeLast(MEMORY_PRESSURE_TEXT_CHARS),
+            )
+        }
+    }
+
     /** Adds the complete request duration to the response produced after the latest user message. */
     private fun attachTaskDuration(current: AppUiState, finishedAt: Long): AppUiState {
         val startedAt = current.taskStartedAtMillis ?: return current
@@ -5261,8 +5281,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun appendWorkItem(current: AppUiState, item: ActivityItem): AppUiState {
         if (isNoisyRuntimeItem(item)) return current
+        val boundedItem = boundedActivityItem(item)
         return current.copy(
-            liveProcess = current.liveProcess.map { if (!it.isComplete) it.copy(isComplete = true) else it } + item,
+            liveProcess = current.liveProcess.map { if (!it.isComplete) it.copy(isComplete = true) else it }
+                .plus(boundedItem)
+                .takeLast(MAX_VISIBLE_WORK_ITEMS),
             liveThinking = false,
             workSegmentStartedAtMillis = current.workSegmentStartedAtMillis ?: System.currentTimeMillis(),
         )
@@ -5607,6 +5630,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val MAX_ATTACHMENT_BYTES = 25L * 1024L * 1024L
         private const val MAX_IMPORTED_PROJECT_BYTES = 8L * 1024L * 1024L * 1024L
         private const val MAX_IMPORTED_ZIP_ENTRIES = 100_000
+        /** A long-running agent can poll a managed command hundreds of times. Keep the chat
+         * responsive by retaining the latest useful steps instead of composing an unbounded list. */
+        private const val MAX_VISIBLE_WORK_ITEMS = 32
+        private const val MAX_ACTIVITY_DETAIL_CHARS = 8_000
+        private const val NOISY_ITEM_SCAN_CHARS = 320
+        private const val MAX_PROCESS_OUTPUT_BYTES = 512 * 1024
+        private const val MEMORY_PRESSURE_TERMINAL_LINES = 20
+        private const val MEMORY_PRESSURE_TEXT_CHARS = 64 * 1024
         private const val LEGACY_GITHUB_TOKEN_KEY = "GITHUB_APP"
         private const val GITHUB_DEVICE_URL = "https://github.com/login/device"
         private val GITHUB_DEVICE_CODE = Regex("\\b[A-Z0-9]{4}-[A-Z0-9]{4}\\b")

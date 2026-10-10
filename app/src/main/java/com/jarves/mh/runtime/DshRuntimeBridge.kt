@@ -868,6 +868,7 @@ private suspend fun emitReasoningSummary(
                 !msg.text.contains("API Error")
             }
             .dropLast(1)
+            .recentWithinCharacterBudget(MAX_CONVERSATION_HISTORY_CHARACTERS)
 
         val sb = StringBuilder()
         sb.appendLine("The <project-context> and <conversation_history> sections below are plain text provided in this message. They are NOT files on disk — do not try to read, edit, glob, or otherwise locate any file mentioned by their names (for example response.md, project-context.txt, or conversation_history.txt does not exist). Answer the user's latest message directly at the end of this conversation.")
@@ -1011,6 +1012,8 @@ private suspend fun emitReasoningSummary(
         const val DSH_HOME_GUEST_PATH = "/root/.dsh"
         const val FALLBACK_KEY_ENV = "MH_DSH_API_KEY"
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
+        /** Cap on how much prior chat text is forwarded into the prompt. */
+        private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 40_000
         private const val SDK_INITIALIZE_ID = 1
         private const val SDK_PROMPT_ID = 2
         private const val SDK_SHUTDOWN_ID = 3

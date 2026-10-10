@@ -1,5 +1,6 @@
 package com.jarves.mh
 
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
@@ -68,6 +69,14 @@ class MainActivity : ComponentActivity() {
                 ?.toString()
                 .orEmpty()
             viewModel.handleAsk(reply)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            viewModel.releaseMemoryCaches()
         }
     }
 

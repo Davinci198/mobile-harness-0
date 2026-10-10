@@ -594,6 +594,7 @@ class ClaudeRuntimeBridge(
                 !msg.text.contains("API Error")
             }
             .dropLast(1) // Drop the current prompt which was just added
+            .recentWithinCharacterBudget(MAX_CONVERSATION_HISTORY_CHARACTERS)
 
         val sb = StringBuilder()
         sb.appendLine("<project-context>")
@@ -748,5 +749,7 @@ class ClaudeRuntimeBridge(
 
     companion object {
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
+        /** Cap on how much prior chat text is forwarded into the prompt. */
+        private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 40_000
     }
 }
