@@ -3122,6 +3122,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Chat "/models" discover+scan: fetches the active provider's catalog and
+     * probes every model so working ones surface with health and latency.
+     * Antigravity keeps its CLI-backed list and has no HTTP catalog to scan.
+     */
+    fun discoverModelsForPicker() {
+        val current = _state.value
+        if (current.agentKind == AgentKind.ANTIGRAVITY) return
+        scanModels(current.provider, secret = "", models = emptyList())
+    }
+
     fun setAntigravityEffort(effort: String) {
         if (effort !in setOf("low", "medium", "high")) return
         val current = _state.value

@@ -389,6 +389,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onSetEffort = viewModel::setAntigravityEffort,
             onShowModels = viewModel::refreshModelsForPicker,
             onPickModel = viewModel::setProviderModel,
+            onDiscoverModels = viewModel::discoverModelsForPicker,
             onRefreshFiles = viewModel::refreshProjectFiles,
             onOpenFile = viewModel::openFile,
             onCloseFile = viewModel::closeFile,
@@ -4045,6 +4046,7 @@ private fun WorkspaceScreen(
     onSetEffort: (String) -> Unit,
     onShowModels: () -> Unit = {},
     onPickModel: (String) -> Unit = {},
+    onDiscoverModels: () -> Unit = {},
     onRefreshFiles: () -> Unit,
     onOpenFile: (WorkspaceEntry) -> Unit,
     onCloseFile: () -> Unit,
@@ -4093,6 +4095,7 @@ private fun WorkspaceScreen(
                 showModelsPicker = false
                 onPickModel(model)
             },
+            onDiscover = onDiscoverModels,
             onDismiss = { showModelsPicker = false },
         )
     }
@@ -4938,6 +4941,7 @@ private fun WorkspaceEntryMenu(
 private fun ModelsPickerDialog(
     state: AppUiState,
     onPick: (String) -> Unit,
+    onDiscover: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val isAntigravity = state.agentKind == AgentKind.ANTIGRAVITY
@@ -4958,21 +4962,57 @@ private fun ModelsPickerDialog(
             (catalog?.models ?: emptyList()) + defaultModelsForProvider(state.provider.kind)
         }
         val withCurrent = if (current.isBlank()) source else source + DiscoveredModel(current)
-        withCurrent.filter { it.id.isNotBlank() }.distinctBy { it.id }
+        withCurrent.filter { it.id.isNotBlank() }.distinctBy { it.id }.sortedBy { it.isBroken }
     }
+    val lastScanLine = state.modelScanLines.lastOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.agent_select_model), fontWeight = FontWeight.Bold) },
         text = {
             Column {
-                Text(
-                    text = if (isAntigravity) state.agentKind.title else state.provider.kind.title,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 10.dp),
-                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (isAntigravity) state.agentKind.title else state.provider.kind.title,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!isAntigravity) {
+                        TextButton(onClick = onDiscover, enabled = !state.isModelScanning) {
+                            Icon(Icons.Default.AutoAwesome, null, Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(stringResource(R.string.pal_discover), fontSize = 12.sp)
+                        }
+                    }
+                }
+                if (state.isModelScanning) {
+                    Row(
+                        Modifier.padding(bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.pal_models_scanning),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else if (lastScanLine != null) {
+                    Text(
+                        lastScanLine,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
                 LazyColumn(
-                    Modifier.heightIn(max = 340.dp),
+                    Modifier.heightIn(max = 320.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     items(models, key = { it.id }) { option ->
@@ -5007,6 +5047,21 @@ private fun ModelsPickerDialog(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
+                                }
+                                if (option.isBroken) {
+                                    Text(
+                                        stringResource(R.string.pal_model_broken),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                } else if (option.health != null || option.latencyLabel != null) {
+                                    Text(
+                                        option.latencyLabel ?: stringResource(R.string.pal_model_ok),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = PocketGreen,
+                                    )
                                 }
                                 if (selected) {
                                     Icon(Icons.Default.Check, null, Modifier.size(18.dp), tint = PocketAccent)
