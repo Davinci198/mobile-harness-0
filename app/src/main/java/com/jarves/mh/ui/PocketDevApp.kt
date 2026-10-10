@@ -199,6 +199,10 @@ import com.jarves.mh.model.ActivityItem
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChangeItem
 import com.jarves.mh.model.ChatMessage
+import com.jarves.mh.model.ChatPalette
+import com.jarves.mh.model.PaletteAction
+import com.jarves.mh.model.PaletteCommand
+import com.jarves.mh.model.PaletteGroup
 import com.jarves.mh.model.ChatAttachment
 import com.jarves.mh.model.ChatSectionsPolicy
 import com.jarves.mh.model.DevStack
@@ -4321,6 +4325,7 @@ private fun WorkspaceScreen(
                     onDeleteMessage = onDeleteMessage,
                     askPrefill = state.askPrefill,
                     onAskPrefillConsumed = onConsumeAskPrefill,
+                    onNewChat = onCreateChat,
                     screenShareActive = state.screenShareActive,
                     onToggleScreenShare = onToggleScreenShare,
                 )
@@ -4942,6 +4947,7 @@ private fun ChatTab(
     onQuestion: (List<QuestionAnswer>) -> Unit = {},
     effort: String? = null,
     onSetEffort: (String) -> Unit = {},
+    onNewChat: () -> Unit = {},
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -4969,6 +4975,9 @@ private fun ChatTab(
     val chatScope = rememberCoroutineScope()
     val voiceContext = LocalContext.current
     val voicePrefs = remember { AppPreferences(voiceContext) }
+    // Compose mirrors of the voice prefs so palette toggles recompose live.
+    var micEnabled by remember { mutableStateOf(voicePrefs.voiceMicEnabled) }
+    var speakEnabled by remember { mutableStateOf(voicePrefs.voiceSpeakEnabled) }
     val replySpeaker = rememberReplySpeaker()
     var micListening by remember { mutableStateOf(false) }
     val latestMessages by rememberUpdatedState(messages)
@@ -5182,6 +5191,114 @@ private fun ChatTab(
                         }
                     }
                 }
+                // "/" command palette: real app commands only (session, media,
+                // terminal). A query with no match hides the palette so raw text
+                // (e.g. an agent-native slash command) still reaches the agent.
+                val paletteQuery = prompt.takeIf { it.startsWith("/") && !readOnly }
+                val paletteMatches = paletteQuery?.let { query ->
+                    ChatPalette.match(
+                        query,
+                        listOf(
+                            PaletteCommand(PaletteAction.NEW_CHAT, PaletteGroup.SESSION, stringResource(R.string.pal_new_chat), listOf("chat", "start", "reset")),
+                            PaletteCommand(PaletteAction.STOP_TASK, PaletteGroup.SESSION, stringResource(R.string.pal_stop_task), listOf("stop", "abort", "cancel"), enabled = isRunning),
+                            PaletteCommand(PaletteAction.ATTACH_FILES, PaletteGroup.MEDIA, stringResource(R.string.pal_attach), listOf("file", "image", "upload"), enabled = !isRunning),
+                            PaletteCommand(
+                                PaletteAction.TOGGLE_SCREEN_SHARE,
+                                PaletteGroup.MEDIA,
+                                stringResource(if (screenShareActive) R.string.pal_share_off else R.string.pal_share_on),
+                                listOf("screen", "share", "record"),
+                            ),
+                            PaletteCommand(
+                                PaletteAction.TOGGLE_MIC,
+                                PaletteGroup.MEDIA,
+                                stringResource(if (micEnabled) R.string.pal_mic_off else R.string.pal_mic_on),
+                                listOf("mic", "voice", "dictate"),
+                            ),
+                            PaletteCommand(
+                                PaletteAction.TOGGLE_SPEAK,
+                                PaletteGroup.MEDIA,
+                                stringResource(if (speakEnabled) R.string.pal_speak_off else R.string.pal_speak_on),
+                                listOf("speak", "read", "voice"),
+                            ),
+                            PaletteCommand(PaletteAction.OPEN_TERMINAL, PaletteGroup.TERMINAL, stringResource(R.string.pal_open_terminal), listOf("shell", "console", "command")),
+                        ),
+                    )
+                }
+                if (!paletteMatches.isNullOrEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    ) {
+                        LazyColumn(Modifier.heightIn(max = 260.dp)) {
+                            PaletteGroup.entries.forEach { group ->
+                                val groupCommands = paletteMatches.filter { it.group == group }
+                                if (groupCommands.isEmpty()) return@forEach
+                                item(key = "palette-group-$group") {
+                                    Text(
+                                        stringResource(
+                                            when (group) {
+                                                PaletteGroup.SESSION -> R.string.pal_group_session
+                                                PaletteGroup.MEDIA -> R.string.pal_group_media
+                                                PaletteGroup.TERMINAL -> R.string.pal_group_terminal
+                                            },
+                                        ),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 2.dp),
+                                    )
+                                }
+                                items(groupCommands, key = { it.action.name }) { command ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable(enabled = command.enabled) {
+                                                prompt = ""
+                                                when (command.action) {
+                                                    PaletteAction.NEW_CHAT -> onNewChat()
+                                                    PaletteAction.STOP_TASK -> onStop()
+                                                    PaletteAction.ATTACH_FILES -> onAttach()
+                                                    PaletteAction.TOGGLE_SCREEN_SHARE -> onToggleScreenShare()
+                                                    PaletteAction.TOGGLE_MIC -> {
+                                                        micEnabled = !micEnabled
+                                                        voicePrefs.voiceMicEnabled = micEnabled
+                                                    }
+                                                    PaletteAction.TOGGLE_SPEAK -> {
+                                                        speakEnabled = !speakEnabled
+                                                        voicePrefs.voiceSpeakEnabled = speakEnabled
+                                                    }
+                                                    PaletteAction.OPEN_TERMINAL -> onRunInTerminal("")
+                                                }
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            command.label,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (command.enabled) {
+                                                MaterialTheme.colorScheme.onSurface
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        if (!command.enabled) {
+                                            Text(
+                                                stringResource(R.string.pal_busy),
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 Surface(
                     shape = RoundedCornerShape(26.dp),
@@ -5211,7 +5328,7 @@ private fun ChatTab(
                             )
                         }
 
-                        if (voicePrefs.voiceMicEnabled) {
+                        if (micEnabled) {
                             VoiceMicButton(
                                 onResult = { heard ->
                                     prompt = if (prompt.isEmpty()) heard else "$prompt $heard"
