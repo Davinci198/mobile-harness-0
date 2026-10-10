@@ -792,6 +792,11 @@
         <item quantity="one">%1$d attachment</item>
         <item quantity="other">%1$d attachments</item>
     </plurals>
+    <string name="an_process_project_terminal">Project terminal</string>
+    <string name="an_process_quick_terminal">Quick terminal</string>
+    <string name="diagnostics_inactive_stopped">Inactive processes stopped</string>
+    <string name="diagnostics_cache_busy">Wait for active work to finish before clearing output</string>
+    <string name="diagnostics_cache_cleared">Disposable runtime output cleared</string>
     <string name="prov_test_sending">Sending a minimal test request…</string>
     <string name="prov_test_ok">API responded successfully</string>
     <string name="zip_reading">Reading project archive…</string>

@@ -177,6 +177,42 @@ data class QueuedFollowUp(
     val attachments: List<ChatAttachment>,
 )
 
+data class DeveloperDiagnostics(
+    val loading: Boolean = false,
+    val appPssBytes: Long = 0L,
+    val javaHeapBytes: Long = 0L,
+    val javaHeapMaxBytes: Long = 0L,
+    val activeProcesses: List<String> = emptyList(),
+    val messageCount: Int = 0,
+    val liveActivityCount: Int = 0,
+    val terminalBufferBytes: Long = 0L,
+    val buildLogBytes: Long = 0L,
+    val fileEntries: Int = 0,
+    val runtimeCacheBytes: Long = 0L,
+    val recentExit: String? = null,
+    val refreshedAtMillis: Long? = null,
+)
+
+/** Counts UTF-8 storage without allocating a second byte array for large logs. */
+internal fun utf8SizeInBytes(value: String): Long {
+    var bytes = 0L
+    var index = 0
+    while (index < value.length) {
+        val char = value[index]
+        when {
+            char.code < 0x80 -> bytes += 1
+            char.code < 0x800 -> bytes += 2
+            char.isHighSurrogate() && index + 1 < value.length && value[index + 1].isLowSurrogate() -> {
+                bytes += 4
+                index += 1
+            }
+            else -> bytes += 3
+        }
+        index += 1
+    }
+    return bytes
+}
+
 data class AppUiState(
     val startupStage: StartupStage = StartupStage.CHECKING,
     val startupProgress: Float = 0f,
@@ -307,6 +343,7 @@ data class AppUiState(
     val previewUrl: String? = null,
     val isRunning: Boolean = false,
     val queuedFollowUps: List<QueuedFollowUp> = emptyList(),
+    val diagnostics: DeveloperDiagnostics = DeveloperDiagnostics(),
     val isSending: Boolean = false,
     val activeSessionId: String? = null,
     val toastMessage: String? = null,
@@ -445,6 +482,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var androidBuildStopRequested: Boolean = false
     private val pendingFollowUps = java.util.ArrayDeque<QueuedFollowUp>()
     @Volatile private var steeringToFollowUp: Boolean = false
+    private var diagnosticsJob: kotlinx.coroutines.Job? = null
+    @Volatile private var lastDiagnosticsRefreshAtElapsedMillis = 0L
+    private var cachedRecentExitSummary: String? = null
+    @Volatile private var recentExitLoadedAtElapsedMillis = 0L
     private val transcriptWrites = Channel<TranscriptWrite>(Channel.UNLIMITED)
     private val initialAgentKind = AgentKind.fromStored(preferences.agentKind)
     private val initialPrimaryAgentKind = preferences.primaryAgentKind
@@ -831,6 +872,135 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.projectTerminalRunning) return
         _state.update { it.copy(projectTerminalLines = emptyList(), projectTerminalLiveOutput = "") }
         saveProjectTerminal(project.id, _state.value.projectTerminalCwd, emptyList())
+    }
+
+    fun refreshDeveloperDiagnostics() {
+        if (diagnosticsJob?.isActive == true) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastDiagnosticsRefreshAtElapsedMillis < DIAGNOSTICS_REFRESH_COOLDOWN_MS) return
+        _state.update { it.copy(diagnostics = it.diagnostics.copy(loading = true)) }
+        diagnosticsJob = viewModelScope.launch {
+            try {
+                val snapshot = withContext(Dispatchers.IO) { collectDeveloperDiagnostics() }
+                lastDiagnosticsRefreshAtElapsedMillis = android.os.SystemClock.elapsedRealtime()
+                _state.update { it.copy(diagnostics = snapshot) }
+            } finally {
+                diagnosticsJob = null
+            }
+        }
+    }
+
+    fun stopInactiveDeveloperProcesses() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = _state.value
+            if (!current.isRunning) {
+                runCatching { claudeRuntime.stopActiveSession() }
+                runCatching { dshRuntime.stopActiveSession() }
+                runCatching { antigravityRuntime.stopActiveSession() }
+            }
+            if (!current.projectTerminalRunning) {
+                projectTerminalProcess?.takeIf(Process::isAlive)?.destroyForcibly()
+                projectTerminalProcess = null
+            }
+            if (!current.androidBuildRunning) {
+                androidBuildProcess?.takeIf(Process::isAlive)?.destroyForcibly()
+                androidBuildProcess = null
+            }
+            withContext(Dispatchers.Main) {
+                _state.update { it.copy(toastMessage = s(R.string.diagnostics_inactive_stopped)) }
+                lastDiagnosticsRefreshAtElapsedMillis = 0L
+                refreshDeveloperDiagnostics()
+            }
+        }
+    }
+
+    fun clearDeveloperRuntimeCache() {
+        val current = _state.value
+        if (current.isRunning || current.projectTerminalRunning || current.androidBuildRunning) {
+            _state.update { it.copy(toastMessage = s(R.string.diagnostics_cache_busy)) }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            getApplication<Application>().cacheDir.listFiles().orEmpty()
+                .filter { it.isFile && it.name.startsWith("runtime-output-") }
+                .forEach { runCatching { it.delete() } }
+            withContext(Dispatchers.Main) {
+                _state.update { it.copy(toastMessage = s(R.string.diagnostics_cache_cleared)) }
+                lastDiagnosticsRefreshAtElapsedMillis = 0L
+                refreshDeveloperDiagnostics()
+            }
+        }
+    }
+
+    /** Drops only rebuildable or already-persisted data when Android reports memory pressure. */
+    fun releaseMemoryCaches() {
+        cachedRecentExitSummary = null
+        _state.update { current ->
+            current.copy(
+                projectTerminalLines = current.projectTerminalLines.takeLast(MEMORY_PRESSURE_TERMINAL_LINES),
+                projectTerminalLiveOutput = current.projectTerminalLiveOutput.takeLast(MEMORY_PRESSURE_TEXT_CHARS),
+            )
+        }
+    }
+
+    private fun collectDeveloperDiagnostics(): DeveloperDiagnostics {
+        val current = _state.value
+        val memory = android.os.Debug.MemoryInfo().also(android.os.Debug::getMemoryInfo)
+        val runtime = Runtime.getRuntime()
+        val active = buildList {
+            if (current.isRunning) add(current.agentKind.title)
+            if (current.projectTerminalRunning || projectTerminalProcess?.isAlive == true) add(s(R.string.an_process_project_terminal))
+            if (terminalProcess?.isAlive == true) add(s(R.string.an_process_quick_terminal))
+            if (current.androidBuildRunning || androidBuildProcess?.isAlive == true) add(s(R.string.build_building))
+        }
+        val runtimeCache = getApplication<Application>().cacheDir.listFiles().orEmpty()
+            .asSequence()
+            .filter { it.isFile && it.name.startsWith("runtime-output-") }
+            .sumOf(File::length)
+        return DeveloperDiagnostics(
+            appPssBytes = memory.totalPss.toLong() * 1_024L,
+            javaHeapBytes = runtime.totalMemory() - runtime.freeMemory(),
+            javaHeapMaxBytes = runtime.maxMemory(),
+            activeProcesses = active,
+            messageCount = current.messages.size,
+            liveActivityCount = current.liveProcess.size,
+            terminalBufferBytes = utf8SizeInBytes(current.projectTerminalLiveOutput) +
+                current.projectTerminalLines.sumOf { utf8SizeInBytes(it.output) },
+            buildLogBytes = utf8SizeInBytes(current.androidBuildMessage.orEmpty()),
+            fileEntries = current.workspaceFiles.size,
+            runtimeCacheBytes = runtimeCache,
+            recentExit = recentAppExitSummary(),
+            refreshedAtMillis = System.currentTimeMillis(),
+        )
+    }
+
+    private fun recentAppExitSummary(): String? {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - recentExitLoadedAtElapsedMillis < RECENT_EXIT_CACHE_MS) return cachedRecentExitSummary
+        recentExitLoadedAtElapsedMillis = now
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return null
+        val manager = getApplication<Application>().getSystemService(android.app.ActivityManager::class.java)
+        val exit = manager.getHistoricalProcessExitReasons(getApplication<Application>().packageName, 0, 8)
+            .firstOrNull { info ->
+                info.reason == android.app.ApplicationExitInfo.REASON_ANR ||
+                    info.reason == android.app.ApplicationExitInfo.REASON_CRASH ||
+                    info.reason == android.app.ApplicationExitInfo.REASON_CRASH_NATIVE ||
+                    info.reason == android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE ||
+                    info.reason == android.app.ApplicationExitInfo.REASON_LOW_MEMORY
+            } ?: run {
+                cachedRecentExitSummary = null
+                return null
+            }
+        val reason = when (exit.reason) {
+            android.app.ApplicationExitInfo.REASON_ANR -> "ANR"
+            android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "Low memory"
+            android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "Excessive resource usage"
+            android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "Native crash"
+            else -> "Crash"
+        }
+        val time = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(exit.timestamp))
+        return ("$reason · $time" + exit.description?.takeIf(String::isNotBlank)?.let { " · ${it.take(160)}" }.orEmpty())
+            .also { cachedRecentExitSummary = it }
     }
 
     private fun runProjectTerminalProcess(projectId: String, command: String, cwd: String): ProjectTerminalResult {
@@ -5906,6 +6076,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val MEMORY_PRESSURE_TERMINAL_LINES = 20
         private const val MEMORY_PRESSURE_TEXT_CHARS = 64 * 1024
         private const val MAX_ANDROID_BUILD_LOG = 400_000
+        private const val DIAGNOSTICS_REFRESH_COOLDOWN_MS = 3_000L
+        private const val RECENT_EXIT_CACHE_MS = 30_000L
         private const val LEGACY_GITHUB_TOKEN_KEY = "GITHUB_APP"
         private const val GITHUB_DEVICE_URL = "https://github.com/login/device"
         private val GITHUB_DEVICE_CODE = Regex("\\b[A-Z0-9]{4}-[A-Z0-9]{4}\\b")
