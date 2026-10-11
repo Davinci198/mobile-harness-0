@@ -1141,6 +1141,10 @@
     <string name="android_build_tab">Build</string>
     <string name="android_health_tab">Health</string>
     <string name="android_screen_title">Android</string>
+    <string name="android_minimize">Minimize</string>
+    <string name="android_minimized_restore">Android panel (tap to open)</string>
+    <string name="android_minimized_close">Close Android panel</string>
+    <string name="android_minimized_logcat">Logcat capturing · %1$d lines</string>
     <string name="health_tab_logcat">Logcat</string>
     <string name="android_health_needs_attention">%1$d checks need attention</string>
     <string name="android_health_checks_passed">%1$d checks passed</string>

@@ -138,6 +138,7 @@ object AndroidAppInstaller {
 
     fun installedMatches(context: Context, apk: File): Boolean {
         val packageName = archivePackageName(context, apk) ?: return false
+        if (!isInstalled(context, packageName)) return false
         return installedFingerprint(context, packageName) == fingerprint(apk)
     }
 
