@@ -114,20 +114,31 @@ internal fun findAndroidProjectRoot(workspace: File): File? {
         }
 }
 
-internal fun findDebugApk(projectRoot: File): File? {
-    val metadata = projectRoot.walkTopDown().maxDepth(8)
+internal fun findDebugApk(
+    projectRoot: File,
+    isPackageInstalled: ((String) -> Boolean)? = null,
+): File? {
+    val candidates = projectRoot.walkTopDown().maxDepth(8)
         .filter { it.isFile && it.name == "output-metadata.json" && "/outputs/apk/" in it.invariantSeparatorsPath }
-        .maxByOrNull(File::lastModified)
-    if (metadata != null) {
-        runCatching {
-            val json = JSONObject(metadata.readText())
-            val elements = json.optJSONArray("elements") ?: return@runCatching null
-            (0 until elements.length()).asSequence()
-                .mapNotNull { elements.optJSONObject(it)?.optString("outputFile") }
-                .map { File(metadata.parentFile, it) }
-                .firstOrNull { it.isFile && it.length() > 0L }
-        }.getOrNull()?.let { return it }
-    }
+        .mapNotNull { metadata ->
+            runCatching {
+                val json = JSONObject(metadata.readText())
+                val applicationId = json.optString("applicationId").takeIf(String::isNotBlank)
+                val elements = json.optJSONArray("elements") ?: return@runCatching null
+                val file = (0 until elements.length()).asSequence()
+                    .mapNotNull { elements.optJSONObject(it)?.optString("outputFile") }
+                    .map { File(metadata.parentFile, it) }
+                    .firstOrNull { it.isFile && it.length() > 0L }
+                    ?: return@runCatching null
+                Triple(file, applicationId, metadata.lastModified())
+            }.getOrNull()
+        }
+        .toList()
+    // Multi-flavor projects ship several APKs; prefer the one whose package is actually
+    // installed so Install/Run/Uninstall act on a real package, not a sibling flavor.
+    candidates.firstOrNull { (_, pkg, _) -> pkg != null && isPackageInstalled?.invoke(pkg) == true }
+        ?.let { return it.first }
+    candidates.maxByOrNull { it.third }?.let { return it.first }
     return projectRoot.walkTopDown().maxDepth(10)
         .filter { it.isFile && it.extension.equals("apk", true) && "/outputs/apk/debug/" in it.invariantSeparatorsPath }
         .maxByOrNull(File::lastModified)
