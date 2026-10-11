@@ -792,6 +792,11 @@
         <item quantity="one">%1$d atașament</item>
         <item quantity="other">%1$d atașamente</item>
     </plurals>
+    <string name="an_process_project_terminal">Terminalul proiectului</string>
+    <string name="an_process_quick_terminal">Terminal rapid</string>
+    <string name="diagnostics_inactive_stopped">Procesele inactive au fost oprite</string>
+    <string name="diagnostics_cache_busy">Așteaptă finalizarea activității înainte de a goli ieșirea</string>
+    <string name="diagnostics_cache_cleared">Ieșirea reutilizabilă a runtime-ului a fost golită</string>
     <string name="prov_test_sending">Se trimite o cerere minimă de test…</string>
     <string name="prov_test_ok">API-ul a răspuns cu succes</string>
     <string name="zip_reading">Se citește arhiva proiectului…</string>
