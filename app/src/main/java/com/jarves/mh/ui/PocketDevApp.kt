@@ -4614,6 +4614,11 @@ private fun WorkspaceScreen(
             state = state,
             onCancel = onCancelAndroidBuild,
             onDismiss = { buildPanelDismissed = true },
+            onMinimize = {
+                showAndroidScreen = true
+                androidScreenMinimized = true
+                buildPanelDismissed = true
+            },
         )
     }
 }
@@ -7696,6 +7701,7 @@ private fun AndroidBuildPanelDialog(
     state: AppUiState,
     onCancel: () -> Unit,
     onDismiss: () -> Unit,
+    onMinimize: () -> Unit,
 ) {
     val running = state.androidBuildRunning
     AlertDialog(
@@ -7777,6 +7783,13 @@ private fun AndroidBuildPanelDialog(
                         )
                     }
                 }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onMinimize) {
+                Icon(Icons.Default.Minimize, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(stringResource(R.string.android_minimize))
             }
         },
         confirmButton = {
