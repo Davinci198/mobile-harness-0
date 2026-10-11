@@ -838,6 +838,12 @@
     <string name="export_failed">Exportul a eșuat: %1$s</string>
     <string name="file_read_fail">Nu s-a putut citi fișierul: %1$s</string>
     <string name="file_write_fail">Nu s-a putut scrie fișierul: %1$s</string>
+    <string name="file_read_only_generic">Acest fișier nu poate fi editat.</string>
+    <string name="file_read_only_too_large">Acest fișier este prea mare pentru a fi editat în siguranță.</string>
+    <string name="file_read_only_binary">Acesta este un fișier binar și nu poate fi editat ca text.</string>
+    <string name="file_read_only_invalid_utf8">Acest fișier nu este text UTF-8 valid și nu poate fi editat în siguranță.</string>
+    <string name="file_read_only_unsafe">Acest fișier nu poate fi editat din motive de siguranță.</string>
+    <string name="file_read_only_read_error">Fișierul nu a putut fi citit, așa că este afișat doar pentru citire.</string>
     <string name="attach_max">Poți atașa maximum %1$d fișiere pe mesaj</string>
     <string name="attach_fail">Nu s-a putut atașa fișierul</string>
     <string name="attach_more_one">Mai poate fi adăugat doar %1$d fișier</string>

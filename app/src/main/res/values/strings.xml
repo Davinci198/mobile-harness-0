@@ -838,6 +838,12 @@
     <string name="export_failed">Export failed: %1$s</string>
     <string name="file_read_fail">Could not read file: %1$s</string>
     <string name="file_write_fail">Could not write file: %1$s</string>
+    <string name="file_read_only_generic">This file cannot be edited.</string>
+    <string name="file_read_only_too_large">This file is too large to edit safely.</string>
+    <string name="file_read_only_binary">This is a binary file and cannot be edited as text.</string>
+    <string name="file_read_only_invalid_utf8">This file is not valid UTF-8 text and cannot be edited safely.</string>
+    <string name="file_read_only_unsafe">This file cannot be edited for safety reasons.</string>
+    <string name="file_read_only_read_error">The file could not be read, so it is shown read-only.</string>
     <string name="attach_max">You can attach up to %1$d files per message</string>
     <string name="attach_fail">Could not attach file</string>
     <string name="attach_more_one">Only %1$d more file could be added</string>
