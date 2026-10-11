@@ -2333,6 +2333,9 @@ private fun RootScreenHost(
                     onClearDebugUpdateManifestUrl = viewModel::clearDebugUpdateManifestUrl,
                     onSetToolPermissionGlobal = viewModel::setToolPermissionGlobal,
                     onSetToolPermissionOverride = viewModel::setToolPermissionOverride,
+                    onRefreshDiagnostics = viewModel::refreshDeveloperDiagnostics,
+                    onStopInactiveProcesses = viewModel::stopInactiveDeveloperProcesses,
+                    onClearRuntimeCache = viewModel::clearDeveloperRuntimeCache,
                 )
             }
         }
@@ -4291,6 +4294,12 @@ private fun WorkspaceScreen(
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.nav_projects)) } },
                 actions = {
                     if (isAndroidProject) {
+                        val buildBlockedReason = when {
+                            state.androidBuildRunning -> null
+                            state.isRunning -> stringResource(R.string.build_wait_claude)
+                            state.projectTerminalRunning -> stringResource(R.string.build_wait_terminal)
+                            else -> null
+                        }
                         IconButton(
                             onClick = {
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
@@ -4305,10 +4314,17 @@ private fun WorkspaceScreen(
                                     onBuildAndRunAndroid()
                                 }
                             },
-                            enabled = !state.androidBuildRunning && !state.isRunning && !state.projectTerminalRunning,
                         ) {
                             if (state.androidBuildRunning) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                             else Icon(Icons.Default.PlayArrow, stringResource(R.string.term_build_run))
+                        }
+                        if (buildBlockedReason != null) {
+                            Text(
+                                buildBlockedReason,
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
                         }
                     }
                     IconButton(onClick = { showChats = true }) { Icon(Icons.Default.History, stringResource(R.string.proj_chats)) }

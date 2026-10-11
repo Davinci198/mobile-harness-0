@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
@@ -51,6 +52,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
@@ -174,6 +176,9 @@ fun SettingsScreen(
     onClearDebugUpdateManifestUrl: () -> Unit = {},
     onSetToolPermissionGlobal: (com.jarves.mh.tools.ToolPermissionLevel) -> Unit = {},
     onSetToolPermissionOverride: (String, com.jarves.mh.tools.ToolPermissionLevel?) -> Unit = { _, _ -> },
+    onRefreshDiagnostics: () -> Unit = {},
+    onStopInactiveProcesses: () -> Unit = {},
+    onClearRuntimeCache: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var expanded by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
@@ -739,6 +744,15 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
+
+            item {
+                DeveloperDiagnosticsSection(
+                    diagnostics = state.diagnostics,
+                    onRefresh = onRefreshDiagnostics,
+                    onStopInactive = onStopInactiveProcesses,
+                    onClearCache = onClearRuntimeCache,
+                )
             }
 
             if (BuildConfig.DEBUG) {
@@ -1588,4 +1602,73 @@ private fun DebugUpdateChannelSection(
             )
         }
     }
+}
+
+@Composable
+private fun DeveloperDiagnosticsSection(
+    diagnostics: DeveloperDiagnostics,
+    onRefresh: () -> Unit,
+    onStopInactive: () -> Unit,
+    onClearCache: () -> Unit,
+) {
+    SettingsAccordion(
+        title = stringResource(R.string.settings_diagnostics),
+        subtitle = stringResource(R.string.settings_diagnostics_subtitle),
+        icon = Icons.Default.BugReport,
+        expanded = false,
+        onClick = { },
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            if (diagnostics.loading) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+            }
+            DiagnosticsRow(stringResource(R.string.diag_app_memory), formatBytes(diagnostics.appPssBytes))
+            DiagnosticsRow(stringResource(R.string.diag_java_heap), "${formatBytes(diagnostics.javaHeapBytes)} / ${formatBytes(diagnostics.javaHeapMaxBytes)}")
+            DiagnosticsRow(stringResource(R.string.diag_messages), diagnostics.messageCount.toString())
+            DiagnosticsRow(stringResource(R.string.diag_live_activities), diagnostics.liveActivityCount.toString())
+            DiagnosticsRow(stringResource(R.string.diag_active_processes), diagnostics.activeProcesses.size.toString())
+            DiagnosticsRow(stringResource(R.string.diag_terminal_buffer), formatBytes(diagnostics.terminalBufferBytes))
+            DiagnosticsRow(stringResource(R.string.diag_build_log), formatBytes(diagnostics.buildLogBytes))
+            DiagnosticsRow(stringResource(R.string.diag_file_entries), diagnostics.fileEntries.toString())
+            DiagnosticsRow(stringResource(R.string.diag_runtime_cache), formatBytes(diagnostics.runtimeCacheBytes))
+            diagnostics.recentExit?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onRefresh, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.diag_refresh), fontSize = 12.sp)
+                }
+                OutlinedButton(onClick = onStopInactive, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.Stop, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.diag_stop), fontSize = 12.sp)
+                }
+                OutlinedButton(onClick = onClearCache, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.DeleteSweep, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.diag_clear), fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticsRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> String.format("%.1f GB", bytes / (1L shl 30).toDouble())
+    bytes >= 1L shl 20 -> String.format("%.1f MB", bytes / (1L shl 20).toDouble())
+    bytes >= 1L shl 10 -> String.format("%.1f KB", bytes / (1L shl 10).toDouble())
+    else -> "$bytes B"
 }
