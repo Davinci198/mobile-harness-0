@@ -1528,7 +1528,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         androidBuildStage = AndroidBuildStage.COMPLETE,
                         androidBuildIssues = emptyList(),
                         androidBuildMessage = s(R.string.an_no_changes_opened_app),
-                        androidBuildLog = "Gradle skipped: project files have not changed since the last successful build.\n",
+                        androidBuildLog = "Gradle skipped: project files have not changed since the last successful build.\n" +
+                            current.androidBuildLog.takeLast(MAX_ANDROID_BUILD_LOG),
                         androidBuildStartedAtMillis = now,
                         androidBuildFinishedAtMillis = now,
                         androidBuildApkPath = apk.absolutePath,
@@ -1552,7 +1553,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 androidBuildStage = AndroidBuildStage.COMPLETE,
                 androidBuildIssues = emptyList(),
                 androidBuildMessage = message,
-                androidBuildLog = "Gradle skipped: project files have not changed since the last successful build.\n",
+                androidBuildLog = "Gradle skipped: project files have not changed since the last successful build.\n" +
+                    _state.value.androidBuildLog.takeLast(MAX_ANDROID_BUILD_LOG),
                 androidBuildStartedAtMillis = now,
                 androidBuildFinishedAtMillis = now,
                 androidBuildApkPath = apk.absolutePath,
