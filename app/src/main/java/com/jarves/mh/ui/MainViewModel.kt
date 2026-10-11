@@ -79,6 +79,9 @@ import com.jarves.mh.runtime.AndroidBuildPhase
 import com.jarves.mh.runtime.AndroidAction
 import com.jarves.mh.runtime.AndroidBuildStage
 import com.jarves.mh.runtime.AndroidBuildIssue
+import com.jarves.mh.runtime.AndroidHealthCheck
+import com.jarves.mh.runtime.AndroidHealthFix
+import com.jarves.mh.runtime.AndroidHealthStatus
 import com.jarves.mh.runtime.androidGradleCommand
 import com.jarves.mh.runtime.findAndroidProjectRoot
 import com.jarves.mh.runtime.findDebugApk
@@ -452,6 +455,10 @@ data class AppUiState(
     val androidBuildApkSizeBytes: Long? = null,
     val androidBuildRecentDurationsMillis: List<Long> = emptyList(),
     val androidBuildMessage: String? = null,
+    val androidHealthLoading: Boolean = false,
+    val androidHealthChecks: List<AndroidHealthCheck> = emptyList(),
+    val androidHealthFixing: String? = null,
+    val androidHealthMessage: String? = null,
     val appUpdate: AppUpdateInfo? = null,
     val appUpdateStatus: AppUpdateStatus? = null,
     val appUpdateDownloadedBytes: Long = 0L,
@@ -522,6 +529,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val pendingFollowUps = java.util.ArrayDeque<QueuedFollowUp>()
     @Volatile private var steeringToFollowUp: Boolean = false
     private var diagnosticsJob: kotlinx.coroutines.Job? = null
+    private var androidHealthJob: kotlinx.coroutines.Job? = null
     @Volatile private var lastDiagnosticsRefreshAtElapsedMillis = 0L
     private var cachedRecentExitSummary: String? = null
     @Volatile private var recentExitLoadedAtElapsedMillis = 0L
@@ -927,6 +935,222 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 diagnosticsJob = null
             }
         }
+    }
+
+    fun refreshAndroidHealth() {
+        if (androidHealthJob?.isActive == true) return
+        _state.update { it.copy(androidHealthLoading = true, androidHealthMessage = null) }
+        androidHealthJob = viewModelScope.launch {
+            try {
+                val checks = withContext(Dispatchers.IO) { collectAndroidHealth() }
+                _state.update {
+                    it.copy(androidHealthLoading = false, androidHealthChecks = checks, androidHealthMessage = null)
+                }
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(androidHealthLoading = false, androidHealthMessage = e.message ?: s(R.string.build_could))
+                }
+            } finally {
+                androidHealthJob = null
+            }
+        }
+    }
+
+    fun fixAndroidHealth(fix: AndroidHealthFix, checkId: String) {
+        if (_state.value.androidHealthFixing != null) return
+        _state.update { it.copy(androidHealthFixing = checkId, androidHealthMessage = null) }
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    when (fix) {
+                        AndroidHealthFix.INSTALL_COMPILE_SDK -> {
+                            installer.ensureAndroidCompileSdkPlatform { progress ->
+                                _state.update {
+                                    it.copy(androidHealthMessage = progress.message)
+                                }
+                            }
+                        }
+                        AndroidHealthFix.INSTALL_TOOLS -> {
+                            installer.ensureStackInstalled(DevStack.ANDROID) { progress ->
+                                _state.update { it.copy(androidHealthMessage = progress.message) }
+                            }
+                        }
+                        AndroidHealthFix.CLEAN -> performAndroidAction(AndroidAction.CLEAN)
+                        AndroidHealthFix.OPEN_INSTALL_SETTINGS -> {
+                            val app = getApplication<Application>()
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                                .setData(android.net.Uri.parse("package:${app.packageName}"))
+                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            app.startActivity(intent)
+                        }
+                        AndroidHealthFix.OPEN_NETWORK_SETTINGS -> {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
+                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            getApplication<Application>().startActivity(intent)
+                        }
+                        AndroidHealthFix.OPEN_STORAGE_SETTINGS -> {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS)
+                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            getApplication<Application>().startActivity(intent)
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+            _state.update { it.copy(androidHealthFixing = null) }
+            result.onFailure { error ->
+                _state.update { it.copy(androidHealthMessage = error.message ?: s(R.string.build_could)) }
+            }
+            refreshAndroidHealth()
+        }
+    }
+
+    private fun collectAndroidHealth(): List<AndroidHealthCheck> {
+        val current = _state.value
+        val project = current.activeProject
+        val stackInstalled = installer.isStackInstalled(DevStack.ANDROID)
+        val runtimeReady = installer.isInstalled()
+        val rootfs = runCatching { installer.installedRuntime().rootfs }.getOrNull()
+        val androidHome = rootfs?.let { File(it, "root/android-sdk") }
+        val jdk = rootfs?.let { File(it, "opt/jdk-17.0.20.1+1/bin/java") }
+        val gradle = rootfs?.let { File(it, "opt/gradle/gradle-8.14.3/bin/gradle") }
+        val aapt2 = androidHome?.let { File(it, "build-tools/35.0.0/aapt2") }
+        val checks = mutableListOf<AndroidHealthCheck>()
+
+        checks += AndroidHealthCheck(
+            id = "tools",
+            title = s(R.string.health_tools),
+            detail = if (stackInstalled) s(R.string.health_tools_ok) else s(R.string.health_tools_missing),
+            status = if (stackInstalled) AndroidHealthStatus.PASSED else AndroidHealthStatus.FAILED,
+            fix = if (stackInstalled) AndroidHealthFix.NONE else AndroidHealthFix.INSTALL_TOOLS,
+        )
+
+        val projectRoot = project?.let { p ->
+            runCatching { findAndroidProjectRoot(projectWorkspaceRoot(p)) }.getOrNull()
+        }
+        checks += AndroidHealthCheck(
+            id = "project",
+            title = s(R.string.health_project),
+            detail = if (projectRoot != null) {
+                s(R.string.health_project_ok, projectRoot.name)
+            } else {
+                s(R.string.health_project_missing)
+            },
+            status = if (projectRoot != null) AndroidHealthStatus.PASSED else AndroidHealthStatus.WARNING,
+        )
+
+        val hasGradleLauncher = projectRoot?.let { File(it, "gradlew").isFile || gradle?.isFile == true } == true
+        checks += AndroidHealthCheck(
+            id = "gradle",
+            title = s(R.string.health_gradle),
+            detail = if (hasGradleLauncher) s(R.string.health_gradle_ok) else s(R.string.health_gradle_missing),
+            status = if (hasGradleLauncher) AndroidHealthStatus.PASSED else AndroidHealthStatus.WARNING,
+        )
+
+        val toolchainOk = jdk?.canExecute() == true && gradle?.canExecute() == true && aapt2?.canExecute() == true
+        checks += AndroidHealthCheck(
+            id = "toolchain",
+            title = s(R.string.health_toolchain),
+            detail = if (toolchainOk) s(R.string.health_toolchain_ok) else s(R.string.health_toolchain_missing),
+            status = if (toolchainOk) AndroidHealthStatus.PASSED else AndroidHealthStatus.FAILED,
+            fix = if (toolchainOk) AndroidHealthFix.NONE else AndroidHealthFix.INSTALL_TOOLS,
+        )
+
+        val compileSdkApi = projectRoot?.let { detectCompileSdk(it) }
+        val platform34 = androidHome?.let { File(it, "platforms/android-34/android.jar").isFile } == true
+        val platform36 = androidHome?.let { File(it, "platforms/android-36/android.jar").isFile } == true
+        val compileOk = when {
+            compileSdkApi == null -> platform36
+            compileSdkApi <= 36 -> platform36 || (compileSdkApi == 34 && platform34) || platformAvailable(androidHome, compileSdkApi)
+            else -> false
+        }
+        checks += AndroidHealthCheck(
+            id = "compile-sdk",
+            title = s(R.string.health_compile_sdk),
+            detail = when {
+                compileOk -> s(R.string.health_compile_sdk_ok, compileSdkApi ?: 36)
+                compileSdkApi != null -> s(R.string.health_compile_sdk_missing, compileSdkApi)
+                else -> s(R.string.health_compile_sdk_unknown)
+            },
+            status = when {
+                compileOk -> AndroidHealthStatus.PASSED
+                stackInstalled -> AndroidHealthStatus.FAILED
+                else -> AndroidHealthStatus.WARNING
+            },
+            fix = if (compileOk) AndroidHealthFix.NONE else AndroidHealthFix.INSTALL_COMPILE_SDK,
+        )
+
+        val networkOk = runCatching {
+            java.net.URL("https://dl.google.com").openConnection().apply {
+                connectTimeout = 3000
+                readTimeout = 3000
+            }.getInputStream().use { }
+            true
+        }.getOrDefault(false)
+        checks += AndroidHealthCheck(
+            id = "network",
+            title = s(R.string.health_network),
+            detail = if (networkOk) s(R.string.health_network_ok) else s(R.string.health_network_missing),
+            status = if (networkOk) AndroidHealthStatus.PASSED else AndroidHealthStatus.FAILED,
+            fix = if (networkOk) AndroidHealthFix.NONE else AndroidHealthFix.OPEN_NETWORK_SETTINGS,
+        )
+
+        val storageBytes = androidHome?.let { dir ->
+            val stats = android.os.StatFs(dir.parentFile?.parentFile?.absolutePath ?: dir.absolutePath)
+            stats.availableBlocksLong * stats.blockSizeLong
+        } ?: run {
+            val stats = android.os.StatFs(getApplication<Application>().filesDir.absolutePath)
+            stats.availableBlocksLong * stats.blockSizeLong
+        }
+        val storageMb = storageBytes / (1024L * 1024L)
+        checks += AndroidHealthCheck(
+            id = "storage",
+            title = s(R.string.health_storage),
+            detail = s(R.string.health_storage_ok, storageMb),
+            status = if (storageMb >= 2048L) AndroidHealthStatus.PASSED else AndroidHealthStatus.WARNING,
+            fix = if (storageMb >= 2048L) AndroidHealthFix.NONE else AndroidHealthFix.OPEN_STORAGE_SETTINGS,
+        )
+
+        val canInstall = runCatching {
+            getApplication<Application>().packageManager.canRequestPackageInstalls()
+        }.getOrDefault(false)
+        checks += AndroidHealthCheck(
+            id = "install-perm",
+            title = s(R.string.health_install_perm),
+            detail = if (canInstall) s(R.string.health_install_perm_ok) else s(R.string.health_install_perm_missing),
+            status = if (canInstall) AndroidHealthStatus.PASSED else AndroidHealthStatus.WARNING,
+            fix = if (canInstall) AndroidHealthFix.NONE else AndroidHealthFix.OPEN_INSTALL_SETTINGS,
+        )
+
+        val apk = projectRoot?.let { findDebugApk(it) }
+        checks += AndroidHealthCheck(
+            id = "debug-apk",
+            title = s(R.string.health_debug_apk),
+            detail = if (apk != null) {
+                s(R.string.health_debug_apk_ok, apk.name, apk.length() / (1024L * 1024L))
+            } else {
+                s(R.string.health_debug_apk_missing)
+            },
+            status = if (apk != null) AndroidHealthStatus.PASSED else AndroidHealthStatus.WARNING,
+        )
+
+        return checks
+    }
+
+    private fun platformAvailable(androidHome: File?, api: Int): Boolean =
+        androidHome?.let { File(it, "platforms/android-$api/android.jar").isFile } == true
+
+    private fun detectCompileSdk(projectRoot: File): Int? {
+        val candidates = listOf("build.gradle.kts", "build.gradle").map { File(projectRoot, it) } +
+            listOf("app/build.gradle.kts", "app/build.gradle").map { File(projectRoot, it) }
+        val pattern = Regex("""compileSdk(?:Version)?\s*[=(]\s*(\d+)""")
+        for (file in candidates) {
+            if (!file.isFile) continue
+            runCatching { file.readText() }.getOrNull()?.let { text ->
+                pattern.find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+            }
+        }
+        return null
     }
 
     fun stopInactiveDeveloperProcesses() {

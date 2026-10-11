@@ -1550,6 +1550,22 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     /**
+     * Public repair path for the Health tab: installs the compileSdk platform
+     * (e.g. android-34) when the project needs it but only android-36 is present.
+     */
+    suspend fun ensureAndroidCompileSdkPlatform(
+        onProgress: suspend (RuntimeInstallProgress) -> Unit = {},
+    ) {
+        val runtime = installedRuntime()
+        ensureCompileSdkPlatform(
+            runtime.proot,
+            File(rootfs, "root/android-sdk"),
+            ANDROID_COMPILE_SDK_FALLBACK,
+            onProgress,
+        )
+    }
+
+    /**
      * Projects pin compileSdk (e.g. 34) while the offline Android bundle only ships
      * android-36. Install the missing platform via sdkmanager inside the guest so
      * AGP can resolve the target hash instead of failing with
