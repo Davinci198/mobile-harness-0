@@ -1615,12 +1615,16 @@ private fun DeveloperDiagnosticsSection(
     onStopInactive: () -> Unit,
     onClearCache: () -> Unit,
 ) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
     SettingsAccordion(
         title = stringResource(R.string.settings_diagnostics),
         subtitle = stringResource(R.string.settings_diagnostics_subtitle),
         icon = Icons.Default.BugReport,
-        expanded = false,
-        onClick = { },
+        expanded = expanded,
+        onClick = {
+            expanded = !expanded
+            if (expanded) onRefresh()
+        },
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             if (diagnostics.loading) {
