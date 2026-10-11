@@ -4138,24 +4138,6 @@ private fun WorkspaceScreen(
     }
     val showBuildPanel = !buildPanelDismissed && state.androidBuildMessage != null &&
         (state.androidBuildRunning || state.androidBuildPhase != AndroidBuildPhase.IDLE)
-    if (showAndroidScreen) {
-        AndroidScreen(
-            state = state,
-            onCancel = onCancelAndroidBuild,
-            onBuild = onBuildAndRunAndroid,
-            onClean = onAndroidClean,
-            onForceBuild = onAndroidForceBuild,
-            onRefreshHealth = onAndroidHealthRefresh,
-            onFixHealth = onAndroidHealthFix,
-            onDismiss = { showAndroidScreen = false },
-        )
-    } else if (showBuildPanel) {
-        AndroidBuildPanelDialog(
-            state = state,
-            onCancel = onCancelAndroidBuild,
-            onDismiss = { buildPanelDismissed = true },
-        )
-    }
     if (showModelsPicker) {
         ModelsPickerDialog(
             state = state,
@@ -4536,6 +4518,25 @@ private fun WorkspaceScreen(
                 }
             }
         }
+    }
+    // Drawn after the project Scaffold so it covers the whole screen.
+    if (showAndroidScreen) {
+        AndroidScreen(
+            state = state,
+            onCancel = onCancelAndroidBuild,
+            onBuild = onBuildAndRunAndroid,
+            onClean = onAndroidClean,
+            onForceBuild = onAndroidForceBuild,
+            onRefreshHealth = onAndroidHealthRefresh,
+            onFixHealth = onAndroidHealthFix,
+            onDismiss = { showAndroidScreen = false },
+        )
+    } else if (showBuildPanel) {
+        AndroidBuildPanelDialog(
+            state = state,
+            onCancel = onCancelAndroidBuild,
+            onDismiss = { buildPanelDismissed = true },
+        )
     }
 }
 
