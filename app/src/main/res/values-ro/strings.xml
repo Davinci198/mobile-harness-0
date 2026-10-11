@@ -1103,6 +1103,8 @@
     <string name="an_apk_install_failed">Instalarea APK-ului a eșuat</string>
     <string name="an_install_apk_before_logcat">Instalează APK-ul înainte de a deschide Logcat.</string>
     <string name="an_installed_app_not_found">App-ul instalat nu a putut fi găsit.</string>
+    <string name="an_uninstall_requested">Dezinstalare cerută pentru %1$s</string>
+    <string name="an_uninstall_failed">Nu s-a putut porni dezinstalarea pentru %1$s</string>
     <string name="an_logcat_stopped">Logcat oprit</string>
     <string name="logcat_access_required">Este necesar accesul la Logcat</string>
     <string name="logcat_access_description">Acordă o dată permisiunea de log de dezvoltare cu ADB, apoi reîmprospătează ecranul.</string>

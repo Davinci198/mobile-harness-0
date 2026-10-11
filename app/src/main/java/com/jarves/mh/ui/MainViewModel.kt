@@ -1779,22 +1779,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val app = getApplication<Application>()
-        val intent = Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName"))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val launched = runCatching {
-            app.startActivity(intent)
-            true
-        }.getOrDefault(false)
-        if (!launched) {
-            // Fallback: open app details so the user can uninstall from Settings.
-            runCatching {
-                app.startActivity(
-                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = runCatching { AndroidAppInstaller.uninstall(app, packageName) }.getOrDefault(false)
+            _state.update {
+                it.copy(
+                    toastMessage = if (ok) {
+                        s(R.string.an_uninstall_requested, packageName)
+                    } else {
+                        s(R.string.an_uninstall_failed)
+                    },
                 )
-            }.onFailure { error ->
-                _state.update { it.copy(toastMessage = error.message ?: s(R.string.an_installed_app_not_found)) }
             }
+            if (ok) refreshAndroidApkInfo()
         }
     }
 

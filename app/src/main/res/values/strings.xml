@@ -1103,6 +1103,8 @@
     <string name="an_apk_install_failed">APK installation failed</string>
     <string name="an_install_apk_before_logcat">Install the APK before opening Logcat.</string>
     <string name="an_installed_app_not_found">The installed app could not be found.</string>
+    <string name="an_uninstall_requested">Uninstall requested for %1$s</string>
+    <string name="an_uninstall_failed">Could not start uninstall for %1$s</string>
     <string name="an_logcat_stopped">Logcat stopped</string>
     <string name="logcat_access_required">Logcat access required</string>
     <string name="logcat_access_description">Grant the development log permission once with ADB, then refresh this screen.</string>
