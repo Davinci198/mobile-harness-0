@@ -85,7 +85,13 @@ data class AndroidBuildRecord(
 )
 
 internal fun androidGradleCommand(root: File, task: String): String {
-    val launcher = File(root, "gradlew").takeIf(File::isFile)?.let { "bash ./gradlew" } ?: "gradle"
+    // Git checkouts and some workspace imports lose the executable bit on
+    // gradlew; bash ./gradlew still works, but chmod keeps every path happy.
+    val gradlew = File(root, "gradlew")
+    if (gradlew.isFile) {
+        runCatching { gradlew.setExecutable(true, false) }
+    }
+    val launcher = gradlew.takeIf(File::isFile)?.let { "bash ./gradlew" } ?: "gradle"
     val env = "JAVA_HOME=/opt/jdk-17.0.20.1+1 ANDROID_HOME=/root/android-sdk ANDROID_SDK_ROOT=/root/android-sdk"
     return "$env $launcher -Dorg.gradle.jvmargs= --no-daemon --max-workers=2 " +
         "--init-script /root/.gradle/init.d/pocketdev-android.gradle " +
