@@ -2051,9 +2051,9 @@ class RuntimeInstaller(private val context: Context) {
                     Os.symlink(destination, link.absolutePath)
                 }
             }
-            File(rootfs, "usr/bin/env").canExecute() &&
-                File(rootfs, "usr/bin/bash").canExecute() &&
-                File(rootfs, "lib/ld-linux-aarch64.so.1").exists()
+            File(targetRootfs, "usr/bin/env").canExecute() &&
+                File(targetRootfs, "usr/bin/bash").canExecute() &&
+                File(targetRootfs, "lib/ld-linux-aarch64.so.1").exists()
         }.onFailure {
             android.util.Log.e("RuntimeInstaller", "Could not repair Linux compatibility links", it)
         }.getOrDefault(false)
