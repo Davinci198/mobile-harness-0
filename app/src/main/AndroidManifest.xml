@@ -18,6 +18,9 @@
         tools:ignore="ScopedStorage" />
     <!-- Shizuku: lets the app ask for shell-level (uid=shell) access on this device. -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <!-- Logcat viewer: only usable after `adb shell pm grant com.jarves.mh android.permission.READ_LOGS`.
+         Without the grant the Logcat tab shows the grant command instead of live lines. -->
+    <uses-permission android:name="android.permission.READ_LOGS" />
 
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
