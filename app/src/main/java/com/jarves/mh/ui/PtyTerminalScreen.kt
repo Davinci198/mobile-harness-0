@@ -620,8 +620,10 @@ private class PtyTerminalBackend(
 
     init {
         val installed = installer.installedRuntime()
-        // Self-heal la fiecare sesiune de terminal: pune comanda mtop in PATH.
+        // Self-heal la fiecare sesiune de terminal: pune comanda mtop in PATH
+        // si rescrie profile.d (ANDROID_HOME etc.) pentru gradle/gradlew.
         installer.ensureMtop()
+        installer.ensureSettingsAndHooks()
         val guestWorkspacePath = "/workspace/$projectSlug"
         // Proiectele stau in workspaces/<projectId> (clone, chat, file-browser);
         // workspace/<slug> e doar fallback pentru terminalul global, fara proiect.
@@ -655,7 +657,12 @@ private class PtyTerminalBackend(
         }
         val env = arrayOf(
             "HOME=/root",
-            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "ANDROID_HOME=/root/android-sdk",
+            "ANDROID_SDK_ROOT=/root/android-sdk",
+            "GRADLE_HOME=/opt/gradle/gradle-8.14.3",
+            "GRADLE_USER_HOME=/root/.gradle",
+            "ORG_GRADLE_PROJECT_android.aapt2FromMavenOverride=/root/android-sdk/build-tools/35.0.0/aapt2",
+            "PATH=/opt/gradle/gradle-8.14.3/bin:/root/android-sdk/build-tools/35.0.0:/root/android-sdk/cmdline-tools/latest/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "LANG=C.UTF-8",
             "TERM=xterm-256color",
             "LD_LIBRARY_PATH=${appContext.applicationInfo.nativeLibraryDir}",

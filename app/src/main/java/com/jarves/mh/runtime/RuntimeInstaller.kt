@@ -2348,6 +2348,7 @@ fi
         writeGuestIpv4Pins()
         writeAptSandboxConfig()
         writeNpmPathConfig()
+        writeAndroidSdkProfileConfig()
     }
 
     /**
@@ -2449,6 +2450,28 @@ fi
     private fun writeNpmPathConfig() {
         File(rootfs, "etc/profile.d/10-nodejs-bins.sh").writeText(
             "export PATH=/usr/local/lib/nodejs/bin:\$PATH\n",
+        )
+    }
+
+    /**
+     * Interactive login shells (and any bare `gradle`/`gradlew` the user runs
+     * in the terminal tab) never go through RuntimeInstaller.process(), so
+     * they used to miss ANDROID_HOME and Gradle demanded a project-local
+     * local.properties for every cloned Android repo. Profile the login shell
+     * the same way headless agent sessions already set the SDK.
+     */
+    private fun writeAndroidSdkProfileConfig() {
+        val androidHome = File(rootfs, "root/android-sdk")
+        if (!androidHome.isDirectory) return
+        File(rootfs, "etc/profile.d/10-android-sdk.sh").writeText(
+            """
+            export ANDROID_HOME=/root/android-sdk
+            export ANDROID_SDK_ROOT=/root/android-sdk
+            export GRADLE_HOME=/opt/gradle/gradle-8.14.3
+            export GRADLE_USER_HOME=/root/.gradle
+            export ORG_GRADLE_PROJECT_android.aapt2FromMavenOverride=/root/android-sdk/build-tools/35.0.0/aapt2
+            export PATH=/opt/gradle/gradle-8.14.3/bin:/root/android-sdk/build-tools/35.0.0:/root/android-sdk/cmdline-tools/latest/bin:${'$'}PATH
+            """.trimIndent() + "\n",
         )
     }
 
