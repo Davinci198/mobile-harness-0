@@ -262,9 +262,9 @@ data class AppUiState(
     val activeApiKeyName: String? = null,
     val customEndpoints: List<CustomEndpoint> = emptyList(),
     val themeMode: com.jarves.mh.ui.theme.AppThemeMode = com.jarves.mh.ui.theme.AppThemeMode.DARK,
-    val colorTheme: com.jarves.mh.ui.theme.AppColorTheme = com.jarves.mh.ui.theme.AppColorTheme.VIOLET,
-    val customAccent: Int = 0xFF7C5CFC.toInt(),
-    val customBackground: Int = 0xFF0F0F10.toInt(),
+    val colorTheme: com.jarves.mh.ui.theme.AppColorTheme = com.jarves.mh.ui.theme.AppColorTheme.DEV,
+    val customAccent: Int = 0xFF22C55E.toInt(),
+    val customBackground: Int = 0xFF0B0F14.toInt(),
     val accessLevel: com.jarves.mh.tools.AccessLevel = com.jarves.mh.tools.AccessLevel.STANDARD,
     val shizuku: com.jarves.mh.runtime.ShizukuStatus = com.jarves.mh.runtime.ShizukuStatus(
         installed = false,
@@ -562,7 +562,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             themeMode = runCatching { com.jarves.mh.ui.theme.AppThemeMode.valueOf(preferences.themeMode.uppercase()) }
                 .getOrDefault(com.jarves.mh.ui.theme.AppThemeMode.DARK),
             colorTheme = runCatching { com.jarves.mh.ui.theme.AppColorTheme.valueOf(preferences.colorTheme.uppercase()) }
-                .getOrDefault(com.jarves.mh.ui.theme.AppColorTheme.VIOLET),
+                .getOrDefault(com.jarves.mh.ui.theme.AppColorTheme.DEV),
             customAccent = preferences.customAccent,
             customBackground = preferences.customBackground,
             accessLevel = com.jarves.mh.tools.AccessLevel.fromString(preferences.accessLevel),
@@ -1509,8 +1509,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resetColorTheme() {
-        preferences.colorTheme = "violet"
-        _state.update { it.copy(colorTheme = com.jarves.mh.ui.theme.AppColorTheme.VIOLET) }
+        preferences.colorTheme = "dev"
+        _state.update { it.copy(colorTheme = com.jarves.mh.ui.theme.AppColorTheme.DEV) }
     }
 
     /**

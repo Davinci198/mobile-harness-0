@@ -297,7 +297,11 @@ fun SettingsScreen(
                     )
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ColorThemeChoice(stringResource(R.string.settings_theme_dev), listOf(Color(0xFF22C55E), Color(0xFF111823)), state.colorTheme == AppColorTheme.DEV, { onSetColorTheme(AppColorTheme.DEV) }, Modifier.weight(1f))
                         ColorThemeChoice(stringResource(R.string.settings_theme_violet), listOf(Color(0xFF7C5CFC), Color(0xFF1F1F28)), state.colorTheme == AppColorTheme.VIOLET, { onSetColorTheme(AppColorTheme.VIOLET) }, Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ColorThemeChoice(stringResource(R.string.settings_theme_green), listOf(Color(0xFF43A047), Color(0xFF0A140E)), state.colorTheme == AppColorTheme.GREEN, { onSetColorTheme(AppColorTheme.GREEN) }, Modifier.weight(1f))
                         ColorThemeChoice(stringResource(R.string.settings_theme_rose), listOf(Color(0xFFDB2777), Color(0xFF7C3AED)), state.colorTheme == AppColorTheme.ROSE, { onSetColorTheme(AppColorTheme.ROSE) }, Modifier.weight(1f))
                     }
