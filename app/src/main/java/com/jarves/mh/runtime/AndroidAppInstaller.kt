@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Process
 import androidx.core.content.FileProvider
@@ -140,6 +141,47 @@ object AndroidAppInstaller {
         val packageName = archivePackageName(context, apk) ?: return false
         if (!isInstalled(context, packageName)) return false
         return installedFingerprint(context, packageName) == fingerprint(apk)
+    }
+
+    /**
+     * Uninstalls [packageName]. Tries silent Shizuku first, then the PackageInstaller
+     * session API, then the system delete confirmation. Returns true on a known success.
+     */
+    suspend fun uninstall(context: Context, packageName: String): Boolean {
+        if (packageName.isBlank()) return false
+        if (ShizukuBridge.hasPermission()) {
+            val result = ShizukuBridge.execute("pm uninstall $packageName", timeoutMs = SHORT_TIMEOUT_MS)
+            if (result.exitCode == 0 || result.stdout.contains("Success", ignoreCase = true)) return true
+        }
+        val installer = context.packageManager.packageInstaller
+        val success = runCatching {
+            val intent = Intent(context, AndroidAppInstallReceiver::class.java)
+                .setAction(ACTION_INSTALL_RESULT)
+                .setPackage(context.packageName)
+                .addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                .putExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
+                .putExtra(EXTRA_OPERATION_ID, "uninstall-$packageName")
+                .putExtra(EXTRA_LAUNCH_AFTER_INSTALL, false)
+            val mutabilityFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_MUTABLE
+            } else {
+                0
+            }
+            val pending = PendingIntent.getBroadcast(
+                context, packageName.hashCode(), intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or mutabilityFlag,
+            )
+            installer.uninstall(packageName, pending.intentSender)
+            true
+        }.getOrDefault(false)
+        if (success) return true
+        return runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            true
+        }.getOrDefault(false)
     }
 
     fun apkFingerprint(apk: File): String = fingerprint(apk)

@@ -1528,7 +1528,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         androidBuildStage = AndroidBuildStage.COMPLETE,
                         androidBuildIssues = emptyList(),
                         androidBuildMessage = s(R.string.an_no_changes_opened_app),
-                        androidBuildLog = "Gradle skipped: project files have not changed since the last successful build.\n",
+                        androidBuildLog = "Gradle skipped: project files have not changed since the last successful build.\n" +
+                            current.androidBuildLog.takeLast(MAX_ANDROID_BUILD_LOG),
                         androidBuildStartedAtMillis = now,
                         androidBuildFinishedAtMillis = now,
                         androidBuildApkPath = apk.absolutePath,
@@ -1552,7 +1553,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 androidBuildStage = AndroidBuildStage.COMPLETE,
                 androidBuildIssues = emptyList(),
                 androidBuildMessage = message,
-                androidBuildLog = "Gradle skipped: project files have not changed since the last successful build.\n",
+                androidBuildLog = "Gradle skipped: project files have not changed since the last successful build.\n" +
+                    _state.value.androidBuildLog.takeLast(MAX_ANDROID_BUILD_LOG),
                 androidBuildStartedAtMillis = now,
                 androidBuildFinishedAtMillis = now,
                 androidBuildApkPath = apk.absolutePath,
@@ -1779,22 +1781,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val app = getApplication<Application>()
-        val intent = Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName"))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val launched = runCatching {
-            app.startActivity(intent)
-            true
-        }.getOrDefault(false)
-        if (!launched) {
-            // Fallback: open app details so the user can uninstall from Settings.
-            runCatching {
-                app.startActivity(
-                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = runCatching { AndroidAppInstaller.uninstall(app, packageName) }.getOrDefault(false)
+            _state.update {
+                it.copy(
+                    toastMessage = if (ok) {
+                        s(R.string.an_uninstall_requested, packageName)
+                    } else {
+                        s(R.string.an_uninstall_failed)
+                    },
                 )
-            }.onFailure { error ->
-                _state.update { it.copy(toastMessage = error.message ?: s(R.string.an_installed_app_not_found)) }
             }
+            if (ok) refreshAndroidApkInfo()
         }
     }
 

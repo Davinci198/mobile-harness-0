@@ -54,6 +54,8 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.WindowInsets
@@ -7984,6 +7986,7 @@ private fun AndroidScreen(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun AndroidBuildTab(
     state: AppUiState,
     onCancel: () -> Unit,
@@ -8204,11 +8207,14 @@ private fun AndroidBuildTab(
                         ),
                         fontSize = 11.sp,
                     )
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // FlowRow so Uninstall/App info stay reachable without horizontal scroll.
+                    FlowRow(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
                         TextButton(onClick = onShareApk) { Text(stringResource(R.string.share), fontSize = 12.sp) }
                         TextButton(onClick = onSaveApk) { Text(stringResource(R.string.save_copy), fontSize = 12.sp) }
                         TextButton(onClick = { clipboard.setText(AnnotatedString(info.path)) }) { Text(stringResource(R.string.copy_path), fontSize = 12.sp) }
-                        // Package present (even if fingerprint drifted) — app info / uninstall must still work.
                         TextButton(onClick = onOpenAppDetails, enabled = info.installed) { Text(stringResource(R.string.app_info), fontSize = 12.sp) }
                         TextButton(onClick = onUninstallApp, enabled = info.installed) { Text(stringResource(R.string.uninstall), fontSize = 12.sp) }
                     }
