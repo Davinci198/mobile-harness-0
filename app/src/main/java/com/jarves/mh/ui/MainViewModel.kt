@@ -5685,16 +5685,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /** Drops only rebuildable or already-persisted data when Android reports memory pressure. */
-    fun releaseMemoryCaches() {
-        _state.update { current ->
-            current.copy(
-                projectTerminalLines = current.projectTerminalLines.takeLast(MEMORY_PRESSURE_TERMINAL_LINES),
-                projectTerminalLiveOutput = current.projectTerminalLiveOutput.takeLast(MEMORY_PRESSURE_TEXT_CHARS),
-            )
-        }
-    }
-
     /** Adds the complete request duration to the response produced after the latest user message. */
     private fun attachTaskDuration(current: AppUiState, finishedAt: Long): AppUiState {
         val startedAt = current.taskStartedAtMillis ?: return current
