@@ -4,6 +4,7 @@
     <files-path name="updates" path="updates/" />
     <files-path name="shizuku" path="shizuku/" />
     <files-path name="sandbox" path="." />
+    <cache-path name="camera" path="camera/" />
     <external-path name="shared" path="." />
     <root-path name="shell_tmp" path="data/local/tmp/mh-open/" />
 </paths>

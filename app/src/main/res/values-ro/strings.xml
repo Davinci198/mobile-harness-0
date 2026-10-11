@@ -343,6 +343,9 @@
     <string name="ch_undo_task">Anulează sarcina</string>
     <string name="chat_allow_once">Permite o dată</string>
     <string name="chat_attach">Atașează fișiere</string>
+    <string name="chat_take_photo">Fă o poză</string>
+    <string name="chat_choose_files">Alege fișiere</string>
+    <string name="chat_camera_unavailable">Camera nu este disponibilă</string>
     <string name="chat_current">Conversație curentă</string>
     <string name="chat_current_badge">Curent</string>
     <string name="chat_finish_task">Termină sarcina care rulează înainte de a schimba conversația.</string>
