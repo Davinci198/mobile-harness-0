@@ -4352,19 +4352,9 @@ private fun WorkspaceScreen(
                         }
                         IconButton(
                             onClick = {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                                    !context.packageManager.canRequestPackageInstalls()) {
-                                    unknownAppsLauncher.launch(
-                                        Intent(
-                                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                            Uri.parse("package:${context.packageName}"),
-                                        ),
-                                    )
-                                } else {
-                                    buildPanelDismissed = false
-                                    showAndroidScreen = true
-                                    onAndroidHealthRefresh()
-                                }
+                                buildPanelDismissed = false
+                                showAndroidScreen = true
+                                onAndroidHealthRefresh()
                             },
                         ) {
                             if (state.androidBuildRunning) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
