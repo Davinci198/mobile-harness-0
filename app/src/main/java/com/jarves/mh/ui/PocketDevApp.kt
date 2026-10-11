@@ -180,6 +180,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -423,6 +424,8 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onBuildAndRunAndroid = viewModel::buildAndRunAndroidApp,
             onConsumeAskPrefill = viewModel::consumeAskPrefill,
             onToggleScreenShare = viewModel::toggleScreenShare,
+            onSteerFollowUp = viewModel::steerQueuedFollowUp,
+            onRemoveFollowUp = viewModel::removeQueuedFollowUp,
         )
         else -> RootScreenHost(state, viewModel, projectsListState)
     }
@@ -4077,6 +4080,8 @@ private fun WorkspaceScreen(
     onBuildAndRunAndroid: () -> Unit,
     onConsumeAskPrefill: () -> Unit,
     onToggleScreenShare: () -> Unit,
+    onSteerFollowUp: (String) -> Unit,
+    onRemoveFollowUp: (String) -> Unit,
 ) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
@@ -4328,6 +4333,9 @@ private fun WorkspaceScreen(
                     onNewChat = onCreateChat,
                     screenShareActive = state.screenShareActive,
                     onToggleScreenShare = onToggleScreenShare,
+                    queuedFollowUps = state.queuedFollowUps,
+                    onSteerFollowUp = onSteerFollowUp,
+                    onRemoveFollowUp = onRemoveFollowUp,
                 )
                 WorkspaceTab.DASHBOARD -> {
                     val dashContext = LocalContext.current
@@ -4948,6 +4956,9 @@ private fun ChatTab(
     effort: String? = null,
     onSetEffort: (String) -> Unit = {},
     onNewChat: () -> Unit = {},
+    queuedFollowUps: List<QueuedFollowUp> = emptyList(),
+    onSteerFollowUp: (String) -> Unit = {},
+    onRemoveFollowUp: (String) -> Unit = {},
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -5123,6 +5134,24 @@ private fun ChatTab(
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
+                if (queuedFollowUps.isNotEmpty()) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 180.dp)
+                            .verticalScroll(rememberScrollState())
+                            .padding(bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        queuedFollowUps.forEach { followUp ->
+                            QueuedFollowUpCard(
+                                followUp = followUp,
+                                onSteer = { onSteerFollowUp(followUp.id) },
+                                onRemove = { onRemoveFollowUp(followUp.id) },
+                            )
+                        }
+                    }
+                }
                 if (pendingAttachments.isNotEmpty()) {
                     Row(
                         Modifier
@@ -5445,6 +5474,51 @@ private fun ChatTab(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QueuedFollowUpCard(
+    followUp: QueuedFollowUp,
+    onSteer: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 14.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    followUp.prompt,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (followUp.attachments.isNotEmpty()) {
+                    Text(
+                        pluralStringResource(R.plurals.an_attachments, followUp.attachments.size, followUp.attachments.size),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            TextButton(onClick = onSteer) { Text(stringResource(R.string.an_steer)) }
+            IconButton(onClick = onRemove, modifier = Modifier.size(38.dp)) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = stringResource(R.string.an_remove_queued_follow_up),
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

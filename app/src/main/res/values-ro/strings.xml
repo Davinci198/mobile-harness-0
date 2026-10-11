@@ -783,6 +783,15 @@
     <string name="ag_no_models">Antigravity nu a returnat niciun model</string>
     <string name="ag_load_models_fail">Nu s-au putut încărca modelele Antigravity</string>
     <string name="ag_settings_first">Autentifică-te în Antigravity din Setări înainte de a porni o sarcină.</string>
+    <string name="an_wait_terminal_then_send">Așteaptă să se termine terminalul înainte de a trimite un nou prompt.</string>
+    <string name="an_follow_up_queued">Follow-up-ul a fost pus la coadă. Va rula când se termină sarcina curentă.</string>
+    <string name="an_steering_to_follow_up">Opresc sarcina curentă pentru a rula follow-up-ul selectat…</string>
+    <string name="an_steer">Direcționează</string>
+    <string name="an_remove_queued_follow_up">Elimină follow-up-ul din coadă</string>
+    <plurals name="an_attachments">
+        <item quantity="one">%1$d atașament</item>
+        <item quantity="other">%1$d atașamente</item>
+    </plurals>
     <string name="prov_test_sending">Se trimite o cerere minimă de test…</string>
     <string name="prov_test_ok">API-ul a răspuns cu succes</string>
     <string name="zip_reading">Se citește arhiva proiectului…</string>

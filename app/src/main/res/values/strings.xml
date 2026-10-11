@@ -783,6 +783,15 @@
     <string name="ag_no_models">Antigravity returned no models</string>
     <string name="ag_load_models_fail">Could not load Antigravity models</string>
     <string name="ag_settings_first">Sign in to Antigravity from Settings before starting a task.</string>
+    <string name="an_wait_terminal_then_send">Wait for the terminal to finish before sending a new prompt.</string>
+    <string name="an_follow_up_queued">Follow-up queued. It will run when the current task finishes.</string>
+    <string name="an_steering_to_follow_up">Stopping current task to run the selected follow-up…</string>
+    <string name="an_steer">Steer</string>
+    <string name="an_remove_queued_follow_up">Remove queued follow-up</string>
+    <plurals name="an_attachments">
+        <item quantity="one">%1$d attachment</item>
+        <item quantity="other">%1$d attachments</item>
+    </plurals>
     <string name="prov_test_sending">Sending a minimal test request…</string>
     <string name="prov_test_ok">API responded successfully</string>
     <string name="zip_reading">Reading project archive…</string>
