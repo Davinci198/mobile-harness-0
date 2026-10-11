@@ -109,6 +109,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Minimize
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.BatterySaver
@@ -4172,14 +4173,20 @@ private fun WorkspaceScreen(
     var showModelsPicker by remember { mutableStateOf(false) }
     var buildPanelDismissed by remember { mutableStateOf(false) }
     var showAndroidScreen by remember { mutableStateOf(false) }
+    var androidScreenMinimized by remember { mutableStateOf(false) }
     LaunchedEffect(state.androidBuildRunning) {
         if (state.androidBuildRunning) {
             buildPanelDismissed = false
+            androidScreenMinimized = false
             showAndroidScreen = true
         }
     }
+    // Only surface the legacy dialog while a build is running or failed — never after success
+    // (the Android screen + toast already cover that; the popup used to re-appear over the project).
     val showBuildPanel = !buildPanelDismissed && state.androidBuildMessage != null &&
-        (state.androidBuildRunning || state.androidBuildPhase != AndroidBuildPhase.IDLE)
+        (state.androidBuildRunning ||
+            state.androidBuildPhase == AndroidBuildPhase.FAILED ||
+            state.androidBuildPhase == AndroidBuildPhase.CANCELLING)
     if (showModelsPicker) {
         ModelsPickerDialog(
             state = state,
@@ -4562,7 +4569,20 @@ private fun WorkspaceScreen(
         }
     }
     // Drawn after the project Scaffold so it covers the whole screen.
-    if (showAndroidScreen) {
+    if (showAndroidScreen && androidScreenMinimized) {
+        LaunchedEffect(Unit) { onStartAndroidLogcat() }
+        AndroidScreenMinimizedBubble(
+            buildRunning = state.androidBuildRunning,
+            logcatRunning = state.androidLogcat.running,
+            logcatLines = state.androidLogcat.lines.size,
+            onRestore = { androidScreenMinimized = false },
+            onClose = {
+                showAndroidScreen = false
+                androidScreenMinimized = false
+                onStopAndroidLogcat()
+            },
+        )
+    } else if (showAndroidScreen) {
         AndroidScreen(
             state = state,
             onCancel = onCancelAndroidBuild,
@@ -4586,7 +4606,8 @@ private fun WorkspaceScreen(
             onClearLogcat = onClearAndroidLogcat,
             onLogcatQuery = onAndroidLogcatQuery,
             onLogcatLevel = onAndroidLogcatLevel,
-            onDismiss = { showAndroidScreen = false },
+            onMinimize = { androidScreenMinimized = true },
+            onDismiss = { androidScreenMinimized = true },
         )
     } else if (showBuildPanel) {
         AndroidBuildPanelDialog(
@@ -7578,6 +7599,60 @@ private fun BrandMark(modifier: Modifier = Modifier, compact: Boolean = false) {
     }
 }
 
+/** Floating re-entry chip while the Android screen is minimized; keeps logcat capture alive. */
+@Composable
+private fun AndroidScreenMinimizedBubble(
+    buildRunning: Boolean,
+    logcatRunning: Boolean,
+    logcatLines: Int,
+    onRestore: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+        Surface(
+            modifier = Modifier
+                .padding(16.dp)
+                .clickable(onClick = onRestore),
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.primaryContainer,
+            shadowElevation = 8.dp,
+            tonalElevation = 4.dp,
+        ) {
+            Row(
+                Modifier.padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (buildRunning) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Default.Android, null, tint = MaterialTheme.colorScheme.primary)
+                }
+                Column {
+                    Text(
+                        stringResource(R.string.android_minimized_restore),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    if (logcatRunning) {
+                        Text(
+                            stringResource(R.string.android_minimized_logcat, logcatLines),
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        stringResource(R.string.android_minimized_close),
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+        }
+    }
+}
 
 /**
  * Shares what the user picked, as the real path it sits at.
@@ -7743,6 +7818,7 @@ private fun AndroidScreen(
     onClearLogcat: () -> Unit,
     onLogcatQuery: (String) -> Unit,
     onLogcatLevel: (AndroidLogLevel) -> Unit,
+    onMinimize: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
@@ -7758,18 +7834,22 @@ private fun AndroidScreen(
         onRefreshApk()
         onStartLogcat()
     }
-    DisposableEffect(Unit) { onDispose(onStopLogcat) }
-    BackHandler(onBack = onDismiss)
+    // Minimize keeps the screen in the composition tree only via the bubble; logcat lives in the
+    // ViewModel, so dispose must not kill the capture the user asked to keep in the background.
+    BackHandler(onBack = onMinimize)
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.android_screen_title), fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_close))
+                    IconButton(onClick = onMinimize) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.android_minimize))
                     }
                 },
                 actions = {
+                    IconButton(onClick = onMinimize) {
+                        Icon(Icons.Default.Minimize, stringResource(R.string.android_minimize))
+                    }
                     IconButton(onClick = { onRefreshHealth(); onRefreshApk() }) {
                         Icon(Icons.Default.Refresh, stringResource(R.string.health_refresh))
                     }
@@ -8089,7 +8169,7 @@ private fun AndroidBuildTab(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Text(if (info.installedMatches) stringResource(R.string.installed) else stringResource(R.string.not_installed), fontSize = 10.sp)
+                        Text(if (info.installed || info.installedMatches) stringResource(R.string.installed) else stringResource(R.string.not_installed), fontSize = 10.sp)
                     }
                     if (info.stale) {
                         Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(8.dp)) {
@@ -8115,6 +8195,7 @@ private fun AndroidBuildTab(
                         TextButton(onClick = onShareApk) { Text(stringResource(R.string.share), fontSize = 12.sp) }
                         TextButton(onClick = onSaveApk) { Text(stringResource(R.string.save_copy), fontSize = 12.sp) }
                         TextButton(onClick = { clipboard.setText(AnnotatedString(info.path)) }) { Text(stringResource(R.string.copy_path), fontSize = 12.sp) }
+                        // Package present (even if fingerprint drifted) — app info / uninstall must still work.
                         TextButton(onClick = onOpenAppDetails, enabled = info.installed) { Text(stringResource(R.string.app_info), fontSize = 12.sp) }
                         TextButton(onClick = onUninstallApp, enabled = info.installed) { Text(stringResource(R.string.uninstall), fontSize = 12.sp) }
                     }
