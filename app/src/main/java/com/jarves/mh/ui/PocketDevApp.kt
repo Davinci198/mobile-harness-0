@@ -7795,20 +7795,17 @@ private fun AndroidBuildTab(
                                 strokeWidth = 3.dp,
                             )
                         } else {
-                            Icon(
-                                when (state.androidBuildPhase) {
-                                    AndroidBuildPhase.SUCCEEDED -> Icons.Default.Check
-                                    AndroidBuildPhase.FAILED -> Icons.Default.Warning
-                                    else -> Icons.Default.Android,
-                                },
-                                null,
-                                Modifier.size(32.dp),
-                                tint = when (state.androidBuildPhase) {
-                                    AndroidBuildPhase.SUCCEEDED -> PocketGreen
-                                    AndroidBuildPhase.FAILED -> MaterialTheme.colorScheme.error
-                                    else -> PocketAccent
-                                },
-                            )
+                            val phaseIcon = when (state.androidBuildPhase) {
+                                AndroidBuildPhase.SUCCEEDED -> Icons.Default.Check
+                                AndroidBuildPhase.FAILED -> Icons.Default.Warning
+                                else -> Icons.Default.Code
+                            }
+                            val phaseTint = when (state.androidBuildPhase) {
+                                AndroidBuildPhase.SUCCEEDED -> PocketGreen
+                                AndroidBuildPhase.FAILED -> MaterialTheme.colorScheme.error
+                                else -> PocketAccent
+                            }
+                            Icon(phaseIcon, null, Modifier.size(32.dp), tint = phaseTint)
                         }
                     }
                     Column {

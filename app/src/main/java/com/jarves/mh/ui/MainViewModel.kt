@@ -1047,7 +1047,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             status = if (hasGradleLauncher) AndroidHealthStatus.PASSED else AndroidHealthStatus.WARNING,
         )
 
-        val toolchainOk = jdk?.canExecute == true && gradle?.canExecute == true && aapt2?.canExecute == true
+        val toolchainOk = jdk?.canExecute() == true && gradle?.canExecute() == true && aapt2?.canExecute() == true
         checks += AndroidHealthCheck(
             id = "toolchain",
             title = s(R.string.health_toolchain),
@@ -1099,7 +1099,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val stats = android.os.StatFs(dir.parentFile?.parentFile?.absolutePath ?: dir.absolutePath)
             stats.availableBlocksLong * stats.blockSizeLong
         } ?: run {
-            val stats = android.os.StatFs(context.filesDir.absolutePath)
+            val stats = android.os.StatFs(getApplication<Application>().filesDir.absolutePath)
             stats.availableBlocksLong * stats.blockSizeLong
         }
         val storageMb = storageBytes / (1024L * 1024L)
