@@ -1708,8 +1708,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val info = runCatching {
                 val projectRoot = findAndroidProjectRoot(projectWorkspaceRoot(project)) ?: return@runCatching null
-                val apk = findDebugApk(projectRoot) ?: return@runCatching null
                 val app = getApplication<Application>()
+                // Prefer an APK whose package is already installed (multi-flavor builds).
+                val apk = findDebugApk(projectRoot) { AndroidAppInstaller.isInstalled(app, it) }
+                    ?: findDebugApk(projectRoot)
+                    ?: return@runCatching null
                 @Suppress("DEPRECATION")
                 val archive = app.packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
                 val packageName = archive?.packageName ?: AndroidAppInstaller.packageName(app, apk)
@@ -1770,10 +1773,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun uninstallAndroidApp() {
-        val packageName = _state.value.androidApkInfo?.packageName ?: return
-        getApplication<Application>().startActivity(
-            Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
+        val packageName = _state.value.androidApkInfo?.packageName
+        if (packageName.isNullOrBlank()) {
+            _state.update { it.copy(toastMessage = s(R.string.an_installed_app_not_found)) }
+            return
+        }
+        val app = getApplication<Application>()
+        val intent = Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val launched = runCatching {
+            app.startActivity(intent)
+            true
+        }.getOrDefault(false)
+        if (!launched) {
+            // Fallback: open app details so the user can uninstall from Settings.
+            runCatching {
+                app.startActivity(
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }.onFailure { error ->
+                _state.update { it.copy(toastMessage = error.message ?: s(R.string.an_installed_app_not_found)) }
+            }
+        }
     }
 
     fun startAndroidLogcat() {
