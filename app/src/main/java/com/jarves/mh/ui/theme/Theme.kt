@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -12,14 +13,45 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import com.jarves.mh.R
 
 /**
- * Selectable app-wide color theme. VIOLET is the original agent redesign palette
- * (mobile_xf5_harness_redesign_agent.html); GREEN and ROSE sample the Gboard
- * keyboards the user shipped as screenshots.
+ * Selectable app-wide color theme. DEV is the default terminal/IDE palette;
+ * VIOLET is the original agent redesign palette; GREEN and ROSE sample the
+ * Gboard keyboards the user shipped as screenshots.
  */
-enum class AppColorTheme { VIOLET, GREEN, ROSE, CUSTOM }
+enum class AppColorTheme { DEV, VIOLET, GREEN, ROSE, CUSTOM }
+
+val JetBrainsMono: FontFamily = FontFamily(
+    Font(R.font.jetbrains_mono_regular, FontWeight.Normal),
+    Font(R.font.jetbrains_mono_medium, FontWeight.Medium),
+    Font(R.font.jetbrains_mono_bold, FontWeight.Bold),
+)
+
+val DevTypography: Typography = Typography().run {
+    copy(
+        displayLarge = displayLarge.copy(fontFamily = JetBrainsMono),
+        displayMedium = displayMedium.copy(fontFamily = JetBrainsMono),
+        displaySmall = displaySmall.copy(fontFamily = JetBrainsMono),
+        headlineLarge = headlineLarge.copy(fontFamily = JetBrainsMono),
+        headlineMedium = headlineMedium.copy(fontFamily = JetBrainsMono),
+        headlineSmall = headlineSmall.copy(fontFamily = JetBrainsMono),
+        titleLarge = titleLarge.copy(fontFamily = JetBrainsMono),
+        titleMedium = titleMedium.copy(fontFamily = JetBrainsMono),
+        titleSmall = titleSmall.copy(fontFamily = JetBrainsMono),
+        bodyLarge = bodyLarge.copy(fontFamily = JetBrainsMono, fontSize = 14.sp, lineHeight = 21.sp),
+        bodyMedium = bodyMedium.copy(fontFamily = JetBrainsMono, fontSize = 13.sp, lineHeight = 19.sp),
+        bodySmall = bodySmall.copy(fontFamily = JetBrainsMono),
+        labelLarge = labelLarge.copy(fontFamily = JetBrainsMono),
+        labelMedium = labelMedium.copy(fontFamily = JetBrainsMono),
+        labelSmall = labelSmall.copy(fontFamily = JetBrainsMono),
+    )
+}
 
 /**
  * Brand colors + Material3 schemes for one [AppColorTheme]. The [darkColors] and
@@ -39,6 +71,58 @@ data class PocketPalette(
     val muted: Color,
     val darkColors: ColorScheme,
     val lightColors: ColorScheme,
+)
+
+/** Terminal/IDE dark: near-black blue-tinted bg, green run accent, cyan AI accent. */
+private val DevPalette = PocketPalette(
+    accent = Color(0xFF22C55E),
+    accentTeal = Color(0xFF22D3EE),
+    blue = Color(0xFF60A5FA),
+    green = Color(0xFF4ADE80),
+    background = Color(0xFF0B0F14),
+    surface = Color(0xFF111823),
+    surfaceVariant = Color(0xFF1A2332),
+    outline = Color(0xFF2A3A4D),
+    cardBorder = Color(0xFF1E2A3A),
+    muted = Color(0xFF8B9BB4),
+    darkColors = darkColorScheme(
+        primary = Color(0xFF22C55E),
+        onPrimary = Color(0xFF052E16),
+        primaryContainer = Color(0xFF14361F),
+        onPrimaryContainer = Color(0xFFB9F6CA),
+        secondary = Color(0xFF22D3EE),
+        onSecondary = Color(0xFF00313A),
+        secondaryContainer = Color(0xFF0C3A44),
+        onSecondaryContainer = Color(0xFFA7F3FC),
+        tertiary = Color(0xFF60A5FA),
+        onTertiary = Color(0xFF002F65),
+        background = Color(0xFF0B0F14),
+        onBackground = Color(0xFFE2E8F0),
+        surface = Color(0xFF111823),
+        onSurface = Color(0xFFE2E8F0),
+        surfaceVariant = Color(0xFF1A2332),
+        onSurfaceVariant = Color(0xFF8B9BB4),
+        outline = Color(0xFF2A3A4D),
+        outlineVariant = Color(0xFF1E2A3A),
+    ),
+    lightColors = lightColorScheme(
+        primary = Color(0xFF15803D),
+        onPrimary = Color(0xFFFFFFFF),
+        primaryContainer = Color(0xFFDCFCE7),
+        onPrimaryContainer = Color(0xFF14532D),
+        secondary = Color(0xFF0E7490),
+        onSecondary = Color(0xFFFFFFFF),
+        tertiary = Color(0xFF1D4ED8),
+        onTertiary = Color(0xFFFFFFFF),
+        background = Color(0xFFF8FAFC),
+        onBackground = Color(0xFF0F172A),
+        surface = Color(0xFFFFFFFF),
+        onSurface = Color(0xFF0F172A),
+        surfaceVariant = Color(0xFFF1F5F9),
+        onSurfaceVariant = Color(0xFF475569),
+        outline = Color(0xFFCBD5E1),
+        outlineVariant = Color(0xFFE2E8F0),
+    ),
 )
 
 private val VioletPalette = PocketPalette(
@@ -198,7 +282,7 @@ private val RosePalette = PocketPalette(
     ),
 )
 
-private val ActivePalette = mutableStateOf(VioletPalette)
+private val ActivePalette = mutableStateOf(DevPalette)
 val PocketAccent: Color get() = ActivePalette.value.accent
 val PocketAccentTeal: Color get() = ActivePalette.value.accentTeal
 val PocketBlue: Color get() = ActivePalette.value.blue
@@ -210,10 +294,11 @@ val PocketOutline: Color get() = ActivePalette.value.outline
 val PocketCardBorder: Color get() = ActivePalette.value.cardBorder
 val PocketMuted: Color get() = ActivePalette.value.muted
 
-val DefaultCustomAccent: Int = 0xFF7C5CFC.toInt()
-val DefaultCustomBackground: Int = 0xFF0F0F10.toInt()
+val DefaultCustomAccent: Int = 0xFF22C55E.toInt()
+val DefaultCustomBackground: Int = 0xFF0B0F14.toInt()
 
 private fun paletteFor(colorTheme: AppColorTheme, customAccent: Int, customBackground: Int): PocketPalette = when (colorTheme) {
+    AppColorTheme.DEV -> DevPalette
     AppColorTheme.VIOLET -> VioletPalette
     AppColorTheme.GREEN -> GreenPalette
     AppColorTheme.ROSE -> RosePalette
@@ -225,7 +310,7 @@ enum class AppThemeMode { SYSTEM, DARK, LIGHT }
 @Composable
 fun PocketTheme(
     themeMode: AppThemeMode = AppThemeMode.SYSTEM,
-    colorTheme: AppColorTheme = AppColorTheme.VIOLET,
+    colorTheme: AppColorTheme = AppColorTheme.DEV,
     customAccent: Int = DefaultCustomAccent,
     customBackground: Int = DefaultCustomBackground,
     content: @Composable () -> Unit,
@@ -253,6 +338,7 @@ fun PocketTheme(
 
     MaterialTheme(
         colorScheme = if (isDark) palette.darkColors else palette.lightColors,
+        typography = DevTypography,
         content = content,
     )
 }

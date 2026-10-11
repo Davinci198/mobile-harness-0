@@ -18,6 +18,7 @@
     <string name="settings_chip_light">Light</string>
     <string name="settings_chip_system">System</string>
     <string name="settings_color_theme">Color theme</string>
+    <string name="settings_theme_dev">Terminal</string>
     <string name="settings_theme_violet">Violet</string>
     <string name="settings_theme_green">Green</string>
     <string name="settings_theme_rose">Purple &amp; pink</string>
