@@ -16,6 +16,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.WebChromeClient
 import android.widget.Toast
+import androidx.core.content.FileProvider
 import com.jarves.mh.BuildConfig
 import com.jarves.mh.R
 import androidx.annotation.StringRes
@@ -112,6 +113,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Preview
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ScreenShare
@@ -263,6 +265,10 @@ import com.jarves.mh.ui.theme.PocketBlue
 import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketAccent
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -4125,6 +4131,15 @@ private fun WorkspaceScreen(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
         onResult = onAddAttachments,
     )
+    var pendingPhotoUri by rememberSaveable { mutableStateOf<String?>(null) }
+    val takePhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { saved ->
+            val uri = pendingPhotoUri?.let(Uri::parse)
+            pendingPhotoUri = null
+            if (saved && uri != null) onAddAttachments(listOf(uri))
+        },
+    )
     val unknownAppsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
         onResult = {
@@ -4347,6 +4362,16 @@ private fun WorkspaceScreen(
                     pendingAttachments = state.pendingAttachments,
                     onAttach = {
                         attachmentLauncher.launch(arrayOf("image/*", "text/*", "application/json", "application/xml"))
+                    },
+                    onTakePhoto = {
+                        runCatching {
+                            val uri = createCameraPhotoUri(context)
+                            pendingPhotoUri = uri.toString()
+                            takePhotoLauncher.launch(uri)
+                        }.onFailure {
+                            pendingPhotoUri = null
+                            Toast.makeText(context, context.getString(R.string.chat_camera_unavailable), Toast.LENGTH_LONG).show()
+                        }
                     },
                     onRemoveAttachment = onRemoveAttachment,
                     onOpenAttachment = onOpenAttachment,
@@ -5369,6 +5394,7 @@ private fun ChatTab(
     agentKind: AgentKind,
     pendingAttachments: List<ChatAttachment>,
     onAttach: () -> Unit,
+    onTakePhoto: () -> Unit = {},
     onRemoveAttachment: (String) -> Unit,
     onOpenAttachment: (ChatAttachment) -> Unit,
     onRunInTerminal: (String) -> Unit,
@@ -5777,17 +5803,32 @@ private fun ChatTab(
                             .padding(horizontal = 6.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.Bottom,
                     ) {
-                        IconButton(
-                            onClick = onAttach,
-                            enabled = !isRunning && pendingAttachments.size < 5,
-                            modifier = Modifier.size(40.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AttachFile,
-                                contentDescription = stringResource(R.string.chat_attach),
-                                modifier = Modifier.size(20.dp),
-                                tint = if (pendingAttachments.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                        var attachMenuOpen by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(
+                                onClick = { attachMenuOpen = true },
+                                enabled = !isRunning && pendingAttachments.size < 5,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AttachFile,
+                                    contentDescription = stringResource(R.string.chat_attach),
+                                    modifier = Modifier.size(20.dp),
+                                    tint = if (pendingAttachments.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            DropdownMenu(expanded = attachMenuOpen, onDismissRequest = { attachMenuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.chat_take_photo)) },
+                                    leadingIcon = { Icon(Icons.Default.PhotoCamera, null) },
+                                    onClick = { attachMenuOpen = false; onTakePhoto() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.chat_choose_files)) },
+                                    leadingIcon = { Icon(Icons.Default.AttachFile, null) },
+                                    onClick = { attachMenuOpen = false; onAttach() },
+                                )
+                            }
                         }
 
                         if (micEnabled) {
@@ -7443,3 +7484,13 @@ private fun shareEntries(context: android.content.Context, entries: List<com.jar
 
 /** Sharing ten thousand files is a way to hang the chooser, so it stops here. */
 private const val MAX_SHARED_ENTRIES = 50
+
+/** Creates an empty file in the app cache for the camera app to write into, shared via FileProvider. */
+private fun createCameraPhotoUri(context: Context): Uri {
+    val folder = File(context.cacheDir, "camera").apply { mkdirs() }
+    // Photos are copied into the project as attachments, so older captures are no longer needed.
+    val staleBefore = System.currentTimeMillis() - 60 * 60 * 1000L
+    folder.listFiles()?.filter { it.lastModified() < staleBefore }?.forEach { it.delete() }
+    val file = File(folder, "photo-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())}.jpg")
+    return FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+}

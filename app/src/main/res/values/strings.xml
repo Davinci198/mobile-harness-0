@@ -343,6 +343,9 @@
     <string name="ch_undo_task">Undo task</string>
     <string name="chat_allow_once">Allow once</string>
     <string name="chat_attach">Attach files</string>
+    <string name="chat_take_photo">Take photo</string>
+    <string name="chat_choose_files">Choose files</string>
+    <string name="chat_camera_unavailable">Camera is unavailable</string>
     <string name="chat_current">Current chat</string>
     <string name="chat_current_badge">Current</string>
     <string name="chat_finish_task">Finish the running task before switching chats.</string>
