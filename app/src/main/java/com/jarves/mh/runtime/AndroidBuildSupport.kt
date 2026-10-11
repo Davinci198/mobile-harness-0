@@ -83,7 +83,8 @@ data class AndroidBuildRecord(
 
 internal fun androidGradleCommand(root: File, task: String): String {
     val launcher = File(root, "gradlew").takeIf(File::isFile)?.let { "bash ./gradlew" } ?: "gradle"
-    return "$launcher -Dorg.gradle.jvmargs= --no-daemon --max-workers=2 " +
+    val env = "JAVA_HOME=/opt/jdk-17.0.20.1+1 ANDROID_HOME=/root/android-sdk ANDROID_SDK_ROOT=/root/android-sdk"
+    return "$env $launcher -Dorg.gradle.jvmargs= --no-daemon --max-workers=2 " +
         "--init-script /root/.gradle/init.d/pocketdev-android.gradle " +
         "-Pandroid.aapt2FromMavenOverride=/root/android-sdk/build-tools/35.0.0/aapt2 " +
         // Gradle daemons can remain attached to deleted PRoot paths after an

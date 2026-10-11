@@ -1344,12 +1344,17 @@ class RuntimeInstaller(private val context: Context) {
                 onProgress,
             )
             makeAndroidToolsExecutable(androidHome, gradleHome)
+            ensureCompileSdkPlatform(proot, androidHome, ANDROID_COMPILE_SDK_FALLBACK, onProgress)
             marker.parentFile?.mkdirs()
             marker.writeText(ANDROID_TOOLS_VERSION)
         }
         // Keep this outside the download/install branch so app updates repair
         // existing Android toolchains without downloading the bundles again.
         writeAndroidGradleConfiguration(rootfs)
+        val platform = File(androidHome, "platforms/$ANDROID_COMPILE_SDK_FALLBACK/android.jar")
+        if (!platform.isFile) {
+            ensureCompileSdkPlatform(proot, androidHome, ANDROID_COMPILE_SDK_FALLBACK, onProgress)
+        }
 
         verifyGuest(
             proot,
@@ -1544,6 +1549,91 @@ class RuntimeInstaller(private val context: Context) {
             .forEach { Os.chmod(it.absolutePath, 0b111101101) }
     }
 
+    /**
+     * Projects pin compileSdk (e.g. 34) while the offline Android bundle only ships
+     * android-36. Install the missing platform via sdkmanager inside the guest so
+     * AGP can resolve the target hash instead of failing with
+     * "Failed to find target with hash string 'android-34'".
+     */
+    private suspend fun ensureCompileSdkPlatform(
+        proot: File,
+        androidHome: File,
+        platform: String,
+        onProgress: suspend (RuntimeInstallProgress) -> Unit,
+    ) {
+        if (File(androidHome, "platforms/$platform/android.jar").isFile) return
+        val api = platform.removePrefix("android-")
+        val packageSpec = "platforms;$platform"
+        val sdkmanager = listOf(
+            "cmdline-tools/latest/bin/sdkmanager",
+            "cmdline-tools/bin/sdkmanager",
+            "tools/bin/sdkmanager",
+        ).map { File(androidHome, it) }.firstOrNull(File::isFile)
+        if (sdkmanager != null) {
+            onProgress(RuntimeInstallProgress("Installing $platform platform", 0.9f, indeterminate = true))
+            val installed = runCatching {
+                process(
+                    proot, rootfs, androidHome, emptyMap(),
+                    listOf(
+                        "/usr/bin/bash", "-lc",
+                        "yes | ANDROID_HOME=/root/android-sdk ANDROID_SDK_ROOT=/root/android-sdk " +
+                            "${sdkmanager.absolutePath} --sdk_root=/root/android-sdk $packageSpec",
+                    ),
+                ).waitFor() == 0
+            }.getOrDefault(false)
+            if (installed && File(androidHome, "platforms/$platform/android.jar").isFile) return
+        }
+        // Fallback: extract the official platform zip (licenses already accepted
+        // by the preinstalled SDK packages in the bundle). Google renamed the
+        // base API 34 archive to platform-34-ext7_r03.zip (still platforms;android-34).
+        val archiveName = when (platform) {
+            "android-34" -> "platform-34-ext7_r03.zip"
+            else -> "platform-${api}_r03.zip"
+        }
+        val url = "https://dl.google.com/android/repository/$archiveName"
+        onProgress(RuntimeInstallProgress("Downloading $platform platform", 0.85f, indeterminate = true))
+        val archive = File(downloads, "platform-${api}.zip")
+        downloadPlatformArchive(url, archive)
+        onProgress(RuntimeInstallProgress("Installing $platform platform", 0.95f, indeterminate = true))
+        val staging = File(androidHome, "platforms/.${platform}.installing")
+        staging.deleteRecursively()
+        staging.mkdirs()
+        extractZipArchive(archive, staging)
+        // Zip roots are either android-XX/ or the platform files directly.
+        val nested = staging.listFiles()?.singleOrNull { it.isDirectory && it.name.startsWith("android-") }
+        val platformRoot = nested ?: staging
+        val target = File(androidHome, "platforms/$platform")
+        target.deleteRecursively()
+        if (nested != null) {
+            check(platformRoot.renameTo(target)) { "Could not activate $platform platform" }
+        } else {
+            check(staging.renameTo(target)) { "Could not activate $platform platform" }
+        }
+        archive.delete()
+        require(File(target, "android.jar").isFile) { "$platform platform is missing android.jar" }
+    }
+
+    private suspend fun downloadPlatformArchive(url: String, destination: File) {
+        destination.parentFile?.mkdirs()
+        if (destination.isFile && destination.length() > 1_000_000L) return
+        val temporary = File(destination.parentFile, "${destination.name}.part")
+        temporary.delete()
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.connectTimeout = 20_000
+        connection.readTimeout = 120_000
+        connection.instanceFollowRedirects = true
+        check(connection.responseCode in 200..299) { "Platform download failed with HTTP ${connection.responseCode}" }
+        connection.inputStream.use { input ->
+            FileOutputStream(temporary).use { output ->
+                input.copyTo(output)
+            }
+        }
+        connection.disconnect()
+        require(temporary.length() > 1_000_000L) { "Downloaded platform archive is too small" }
+        destination.delete()
+        check(temporary.renameTo(destination)) { "Could not finish platform download" }
+    }
+
     private fun writeAndroidGradleInitScript(runtimeRootfs: File) {
         val script = File(runtimeRootfs, "root/.gradle/init.d/pocketdev-android.gradle")
         script.parentFile?.mkdirs()
@@ -1591,6 +1681,10 @@ class RuntimeInstaller(private val context: Context) {
             "$GRADLE_WORKERS_PROPERTY=2",
             "$GRADLE_PARALLEL_PROPERTY=false",
             "$KOTLIN_EXECUTION_PROPERTY=in-process",
+            // Gradle toolchain auto-detection does not see the guest JDK under
+            // PRoot; without this path every jvmToolchain(17) build fails with
+            // ToolchainDownloadFailedException.
+            "$GRADLE_JAVA_INSTALLATIONS_PROPERTY=$ANDROID_JDK_GUEST_PATH",
         )
         val updatedLines = existingLines.filterNot(::isManagedAndroidGradleProperty) + managedLines
         if (existingLines == updatedLines) return
@@ -2662,12 +2756,16 @@ fi
         private const val GRADLE_WORKERS_PROPERTY = "org.gradle.workers.max"
         private const val GRADLE_PARALLEL_PROPERTY = "org.gradle.parallel"
         private const val KOTLIN_EXECUTION_PROPERTY = "kotlin.compiler.execution.strategy"
+        private const val GRADLE_JAVA_INSTALLATIONS_PROPERTY = "org.gradle.java.installations.paths"
+        private const val ANDROID_JDK_GUEST_PATH = "/opt/jdk-17.0.20.1+1"
+        private const val ANDROID_COMPILE_SDK_FALLBACK = "android-34"
         private val MANAGED_ANDROID_GRADLE_PROPERTIES = setOf(
             ANDROID_AAPT2_PROPERTY,
             GRADLE_JVMARGS_PROPERTY,
             GRADLE_WORKERS_PROPERTY,
             GRADLE_PARALLEL_PROPERTY,
             KOTLIN_EXECUTION_PROPERTY,
+            GRADLE_JAVA_INSTALLATIONS_PROPERTY,
         )
         private const val ANDROID_AAPT2_GUEST_PATH = "/root/android-sdk/build-tools/35.0.0/aapt2"
         private const val ANDROID_AAPT2_HOST_PATH = "root/android-sdk/build-tools/35.0.0/aapt2"

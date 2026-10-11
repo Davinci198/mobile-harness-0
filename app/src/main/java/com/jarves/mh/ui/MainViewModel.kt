@@ -1369,7 +1369,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 val process = installer.process(
-                    installed.proot, installed.rootfs, workspace, emptyMap(),
+                    installed.proot, installed.rootfs, workspace,
+                    mapOf(
+                        "JAVA_HOME" to "/opt/jdk-17.0.20.1+1",
+                        "ANDROID_HOME" to "/root/android-sdk",
+                        "ANDROID_SDK_ROOT" to "/root/android-sdk",
+                    ),
                     listOf("/usr/bin/bash", "-lc", command),
                     projectGuestRoot(project),
                 )
