@@ -47,12 +47,27 @@ jobs:
       - name: Build debug APK
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'release' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
         run: ./gradlew assembleOnlineDebug
+      # Tag each APK as mh-<versionName>-<shortsha>.apk so users can tell
+      # which commit produced which binary without unpacking it.
+      - name: Name APK with version and commit
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'release' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
+        run: |
+          VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          SHORT_SHA="${GITHUB_SHA::7}"
+          mkdir -p app/build/outputs/apk/online/debug-named
+          for apk in app/build/outputs/apk/online/debug/*.apk; do
+            base="$(basename "$apk" .apk)"
+            named="mh-${VERSION}-${SHORT_SHA}-${base}.apk"
+            cp "$apk" "app/build/outputs/apk/online/debug-named/$named"
+            echo "Named artifact: $named"
+          done
+          ls -la app/build/outputs/apk/online/debug-named/
       - name: Upload APK artifact
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
         uses: actions/upload-artifact@v4
         with:
           name: mh-dany-debug
-          path: app/build/outputs/apk/online/debug/*.apk
+          path: app/build/outputs/apk/online/debug-named/*.apk
           retention-days: 7
       # The debug-main rolling release is manual now: run this workflow from
       # main (workflow_dispatch) to replace it with a fresh online debug APK.
@@ -70,11 +85,11 @@ jobs:
           name: Mobile Harness (latest main)
           make_latest: true
           files: |
-            app/build/outputs/apk/online/debug/*.apk
+            app/build/outputs/apk/online/debug-named/*.apk
           fail_on_unmatched_files: true
       - name: Attach APKs to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            app/build/outputs/apk/online/debug/*.apk
+            app/build/outputs/apk/online/debug-named/*.apk
