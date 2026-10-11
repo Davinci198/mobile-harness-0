@@ -261,6 +261,9 @@ import com.jarves.mh.network.EndpointModelCatalog
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.network.ProviderApiClient
 import com.jarves.mh.network.GitHubRepository
+import com.jarves.mh.runtime.AndroidBuildPhase
+import com.jarves.mh.runtime.AndroidBuildStage
+import com.jarves.mh.runtime.AndroidIssueSeverity
 import com.jarves.mh.ui.theme.PocketBlue
 import com.jarves.mh.ui.theme.PocketGreen
 import com.jarves.mh.ui.theme.PocketAccent
@@ -434,6 +437,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onRemoveAttachment = viewModel::removePendingAttachment,
             onOpenAttachment = viewModel::openChatAttachment,
             onBuildAndRunAndroid = viewModel::buildAndRunAndroidApp,
+            onCancelAndroidBuild = viewModel::cancelAndroidBuild,
             onConsumeAskPrefill = viewModel::consumeAskPrefill,
             onToggleScreenShare = viewModel::toggleScreenShare,
             onSteerFollowUp = viewModel::steerQueuedFollowUp,
@@ -4102,6 +4106,7 @@ private fun WorkspaceScreen(
     onRemoveAttachment: (String) -> Unit,
     onOpenAttachment: (ChatAttachment) -> Unit,
     onBuildAndRunAndroid: () -> Unit,
+    onCancelAndroidBuild: () -> Unit,
     onConsumeAskPrefill: () -> Unit,
     onToggleScreenShare: () -> Unit,
     onSteerFollowUp: (String) -> Unit,
@@ -4111,6 +4116,19 @@ private fun WorkspaceScreen(
     val context = LocalContext.current
     val isAndroidProject = state.androidProjectDetected
     var showModelsPicker by remember { mutableStateOf(false) }
+    var buildPanelDismissed by remember { mutableStateOf(false) }
+    LaunchedEffect(state.androidBuildRunning) {
+        if (state.androidBuildRunning) buildPanelDismissed = false
+    }
+    val showBuildPanel = !buildPanelDismissed && state.androidBuildMessage != null &&
+        (state.androidBuildRunning || state.androidBuildPhase != AndroidBuildPhase.IDLE)
+    if (showBuildPanel) {
+        AndroidBuildPanelDialog(
+            state = state,
+            onCancel = onCancelAndroidBuild,
+            onDismiss = { buildPanelDismissed = true },
+        )
+    }
     if (showModelsPicker) {
         ModelsPickerDialog(
             state = state,
@@ -4316,6 +4334,7 @@ private fun WorkspaceScreen(
                                         ),
                                     )
                                 } else {
+                                    buildPanelDismissed = false
                                     onBuildAndRunAndroid()
                                 }
                             },
@@ -7519,4 +7538,106 @@ private fun createCameraPhotoUri(context: Context): Uri {
     folder.listFiles()?.filter { it.lastModified() < staleBefore }?.forEach { it.delete() }
     val file = File(folder, "photo-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())}.jpg")
     return FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+}
+
+@Composable
+private fun AndroidBuildPanelDialog(
+    state: AppUiState,
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val running = state.androidBuildRunning
+    AlertDialog(
+        onDismissRequest = { if (!running) onDismiss() },
+        title = {
+            Text(
+                state.androidBuildMessage ?: stringResource(R.string.build_building),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
+            )
+        },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (running) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(
+                        state.androidBuildStage.name.lowercase().replace('_', ' '),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (state.androidBuildIssues.isNotEmpty()) {
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = 120.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        state.androidBuildIssues.forEach { issue ->
+                            val tint = when (issue.severity) {
+                                AndroidIssueSeverity.ERROR -> MaterialTheme.colorScheme.error
+                                AndroidIssueSeverity.WARNING -> PocketAccent
+                                AndroidIssueSeverity.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                            Column {
+                                Text(issue.title, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = tint)
+                                Text(issue.detail, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                issue.suggestion?.let {
+                                    Text(it, fontSize = 11.sp, color = PocketBlue)
+                                }
+                            }
+                        }
+                    }
+                }
+                state.androidBuildApkPath?.let { path ->
+                    val size = state.androidBuildApkSizeBytes?.let { b ->
+                        if (b != null && b > 0) " (${b / (1024 * 1024)} MB)" else ""
+                    }.orEmpty()
+                    Text(
+                        stringResource(R.string.build_sent) + size,
+                        fontSize = 12.sp,
+                        color = PocketGreen,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(path, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (state.androidBuildLog.isNotBlank()) {
+                    val logLines = state.androidBuildLog.lineSequence().toList()
+                    Text(
+                        stringResource(R.string.diag_build_log),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 180.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            logLines.takeLast(80).joinToString("\n"),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (running) {
+                TextButton(onClick = onCancel) {
+                    Text(stringResource(R.string.diag_stop))
+                }
+            } else {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.common_close))
+                }
+            }
+        },
+    )
 }
