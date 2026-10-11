@@ -305,8 +305,26 @@ class WorkspaceCheckpoints(
     fun buildChangeDetails(projectId: String, workspace: File, paths: List<String>): List<ChangeItem> {
         val backup = File(checkpointDir(projectId), "project")
         return paths.map { path ->
-            val before = safeWorkspaceFile(backup, path).takeIf(File::isFile)?.readBytes() ?: ByteArray(0)
-            val after = safeWorkspaceFile(workspace, path).takeIf(File::isFile)?.readBytes() ?: ByteArray(0)
+            val beforeFile = safeWorkspaceFile(backup, path).takeIf(File::isFile)
+            val afterFile = safeWorkspaceFile(workspace, path).takeIf(File::isFile)
+            val beforeSize = beforeFile?.length() ?: 0L
+            val afterSize = afterFile?.length() ?: 0L
+            if (beforeSize > MAX_CHECKPOINT_READ_BYTES || afterSize > MAX_CHECKPOINT_READ_BYTES) {
+                return@map ChangeItem(
+                    path = path,
+                    additions = 0,
+                    deletions = 0,
+                    diffLines = listOf(
+                        DiffLine(
+                            DiffLineType.INFO,
+                            "File too large to preview (${maxOf(beforeSize, afterSize)} bytes). Undo and Keep still work.",
+                        ),
+                    ),
+                    binary = true,
+                )
+            }
+            val before = beforeFile?.readBytes() ?: ByteArray(0)
+            val after = afterFile?.readBytes() ?: ByteArray(0)
             val binary = before.any { it == 0.toByte() } || after.any { it == 0.toByte() }
             val (additions, deletions) = lineChanges(before, after)
             ChangeItem(
@@ -442,7 +460,11 @@ class WorkspaceCheckpoints(
 
     fun isInternalRuntimePath(path: String): Boolean {
         val normalized = path.replace('\\', '/')
-        return normalized == ".claude" || normalized == ".claude.json" || normalized.startsWith(".claude/")
+        return normalized == ".claude" ||
+            normalized == ".claude.json" ||
+            normalized.startsWith(".claude/") ||
+            normalized == ".git" ||
+            normalized.startsWith(".git/")
     }
 
     private fun digest(file: File): String {
@@ -465,5 +487,6 @@ class WorkspaceCheckpoints(
         private const val MAX_DIFF_LINES = 2_000
         private const val MAX_RENDERED_DIFF_LINES = 600
         private const val DIFF_CONTEXT_LINES = 3
+        private const val MAX_CHECKPOINT_READ_BYTES = 2L * 1024L * 1024L
     }
 }
