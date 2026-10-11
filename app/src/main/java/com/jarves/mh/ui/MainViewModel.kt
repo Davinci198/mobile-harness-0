@@ -82,6 +82,11 @@ import com.jarves.mh.runtime.AndroidBuildIssue
 import com.jarves.mh.runtime.AndroidHealthCheck
 import com.jarves.mh.runtime.AndroidHealthFix
 import com.jarves.mh.runtime.AndroidHealthStatus
+import com.jarves.mh.runtime.AndroidApkInfo
+import com.jarves.mh.runtime.AndroidLogcatState
+import com.jarves.mh.runtime.AndroidLogLevel
+import com.jarves.mh.runtime.AndroidLogLine
+import com.jarves.mh.runtime.AndroidInstallEvent
 import com.jarves.mh.runtime.androidGradleCommand
 import com.jarves.mh.runtime.findAndroidProjectRoot
 import com.jarves.mh.runtime.findDebugApk
@@ -455,6 +460,8 @@ data class AppUiState(
     val androidBuildApkSizeBytes: Long? = null,
     val androidBuildRecentDurationsMillis: List<Long> = emptyList(),
     val androidBuildMessage: String? = null,
+    val androidApkInfo: AndroidApkInfo? = null,
+    val androidLogcat: AndroidLogcatState = AndroidLogcatState(),
     val androidHealthLoading: Boolean = false,
     val androidHealthChecks: List<AndroidHealthCheck> = emptyList(),
     val androidHealthFixing: String? = null,
@@ -526,6 +533,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val failedApiKeyIds = mutableSetOf<String>()
     @Volatile private var androidBuildProcess: Process? = null
     @Volatile private var androidBuildStopRequested: Boolean = false
+    @Volatile private var pendingAndroidInstallId: String? = null
+    @Volatile private var pendingAndroidInstallLaunch: Boolean = false
+    @Volatile private var androidLogcatProcess: Process? = null
+    private var androidLogcatJob: kotlinx.coroutines.Job? = null
     private val pendingFollowUps = java.util.ArrayDeque<QueuedFollowUp>()
     @Volatile private var steeringToFollowUp: Boolean = false
     private var diagnosticsJob: kotlinx.coroutines.Job? = null
@@ -599,6 +610,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ScreenShareService.running.collect { on ->
                 _state.update { it.copy(screenShareActive = on) }
             }
+        }
+        viewModelScope.launch {
+            AndroidAppInstaller.events.collect { event -> onAndroidInstallEvent(event) }
         }
         viewModelScope.launch { refreshGitHubConnection() }
         RuntimeSetupController.restore(application)
@@ -1482,8 +1496,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (!completeFromReusableApk(action, launch = false)) startAndroidGradleTask("assembleDebug", action)
             }
             AndroidAction.FORCE_BUILD -> startAndroidGradleTask("assembleDebug", action)
-            AndroidAction.INSTALL -> startAndroidGradleTask("assembleDebug", action)
-            AndroidAction.RUN -> startAndroidGradleTask("assembleDebug", action)
+            AndroidAction.INSTALL -> installLatestAndroidApk(launch = false, action = action)
+            AndroidAction.RUN -> runLatestAndroidApk()
             AndroidAction.BUILD_AND_RUN -> {
                 if (!completeFromReusableApk(action, launch = true)) startAndroidGradleTask("assembleDebug", action)
             }
@@ -1502,8 +1516,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val workspace = findAndroidProjectRoot(projectWorkspaceRoot(project)) ?: return false
         val apk = findReusableDebugApk(workspace) ?: return false
+        if (launch) {
+            if (AndroidAppInstaller.openIfAlreadyInstalled(getApplication(), apk)) {
+                val now = System.currentTimeMillis()
+                _state.update {
+                    it.copy(
+                        androidBuildRunning = false,
+                        androidBuildPhase = AndroidBuildPhase.SUCCEEDED,
+                        androidBuildAction = action,
+                        androidBuildStage = AndroidBuildStage.COMPLETE,
+                        androidBuildIssues = emptyList(),
+                        androidBuildMessage = s(R.string.an_no_changes_opened_app),
+                        androidBuildLog = "Gradle skipped: project files have not changed since the last successful build.\n",
+                        androidBuildStartedAtMillis = now,
+                        androidBuildFinishedAtMillis = now,
+                        androidBuildApkPath = apk.absolutePath,
+                        androidBuildApkSizeBytes = apk.length(),
+                        toastMessage = s(R.string.an_no_changes_opened_app),
+                    )
+                }
+                refreshAndroidApkInfo()
+                return true
+            }
+            beginAndroidInstall(apk, launch = true, action = action)
+            return true
+        }
         val now = System.currentTimeMillis()
-        val message = if (launch) s(R.string.build_sent) else s(R.string.build_sent)
+        val message = s(R.string.an_apk_already_current)
         _state.update {
             it.copy(
                 androidBuildRunning = false,
@@ -1520,8 +1559,87 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 toastMessage = message,
             )
         }
-        viewModelScope.launch { AndroidAppInstaller.install(getApplication(), apk) }
+        saveAndroidBuildRecord(project.id)
+        refreshAndroidApkInfo()
         return true
+    }
+
+    private fun runLatestAndroidApk() {
+        val project = _state.value.activeProject ?: return
+        val root = findAndroidProjectRoot(projectWorkspaceRoot(project))
+        val apk = root?.let(::findDebugApk)
+        if (apk == null) {
+            _state.update { it.copy(toastMessage = s(R.string.an_build_apk_before_run)) }
+            return
+        }
+        if (AndroidAppInstaller.openIfAlreadyInstalled(getApplication(), apk)) {
+            val now = System.currentTimeMillis()
+            _state.update {
+                it.copy(
+                    androidBuildAction = AndroidAction.RUN,
+                    androidBuildStage = AndroidBuildStage.COMPLETE,
+                    androidBuildPhase = AndroidBuildPhase.SUCCEEDED,
+                    androidBuildMessage = s(R.string.an_app_launched_without_rebuild),
+                    androidBuildStartedAtMillis = now,
+                    androidBuildFinishedAtMillis = now,
+                    toastMessage = s(R.string.an_app_launched),
+                )
+            }
+        } else {
+            beginAndroidInstall(apk, launch = true, action = AndroidAction.RUN)
+        }
+    }
+
+    private fun installLatestAndroidApk(launch: Boolean, action: AndroidAction) {
+        val project = _state.value.activeProject ?: return
+        val root = findAndroidProjectRoot(projectWorkspaceRoot(project))
+        val apk = root?.let(::findDebugApk)
+        if (apk == null) {
+            _state.update { it.copy(toastMessage = s(R.string.an_build_apk_before_install)) }
+            return
+        }
+        beginAndroidInstall(apk, launch, action)
+    }
+
+    private fun beginAndroidInstall(apk: File, launch: Boolean, action: AndroidAction) {
+        if (_state.value.androidBuildRunning && pendingAndroidInstallId != null) return
+        val operationId = java.util.UUID.randomUUID().toString()
+        pendingAndroidInstallId = operationId
+        pendingAndroidInstallLaunch = launch
+        val now = System.currentTimeMillis()
+        _state.update {
+            it.copy(
+                androidBuildRunning = true,
+                androidBuildAction = action,
+                androidBuildStage = AndroidBuildStage.INSTALLING,
+                androidBuildPhase = AndroidBuildPhase.BUILDING,
+                androidBuildMessage = if (launch) s(R.string.an_installing_apk_before_launch) else s(R.string.an_installing_apk),
+                androidBuildIssues = emptyList(),
+                androidBuildStartedAtMillis = it.androidBuildStartedAtMillis ?: now,
+                androidBuildFinishedAtMillis = null,
+                androidBuildApkPath = apk.absolutePath,
+                androidBuildApkSizeBytes = apk.length(),
+            )
+        }
+        viewModelScope.launch {
+            runCatching {
+                AndroidAppInstaller.install(getApplication(), apk, launchAfterInstall = launch, operationId = operationId)
+            }.onFailure { error ->
+                pendingAndroidInstallId = null
+                pendingAndroidInstallLaunch = false
+                _state.update {
+                    it.copy(
+                        androidBuildRunning = false,
+                        androidBuildPhase = AndroidBuildPhase.FAILED,
+                        androidBuildStage = AndroidBuildStage.FAILED,
+                        androidBuildMessage = error.message ?: s(R.string.an_could_not_start_install),
+                        androidBuildIssues = listOf(
+                            AndroidBuildIssue(title = s(R.string.an_apk_install_failed), detail = error.message ?: s(R.string.an_could_not_start_installer)),
+                        ),
+                    )
+                }
+            }
+        }
     }
 
     fun cancelAndroidBuild() {
@@ -1531,7 +1649,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 androidBuildPhase = AndroidBuildPhase.CANCELLING,
                 androidBuildStage = AndroidBuildStage.CANCELLING,
-                androidBuildMessage = s(R.string.build_building),
+                androidBuildMessage = s(R.string.an_stopping_gradle),
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -1539,6 +1657,320 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             delay(500)
             if (androidBuildProcess?.isAlive == true) androidBuildProcess?.destroyForcibly()
         }
+    }
+
+    private fun loadAndroidBuildRecord(projectId: String) {
+        val file = androidBuildRecordFile(projectId)
+        if (!file.isFile) return
+        runCatching {
+            val json = org.json.JSONObject(file.readText())
+            val phase = runCatching { AndroidBuildPhase.valueOf(json.optString("phase")) }
+                .getOrDefault(AndroidBuildPhase.IDLE)
+                .let { if (it in setOf(AndroidBuildPhase.PREPARING, AndroidBuildPhase.BUILDING, AndroidBuildPhase.CANCELLING)) AndroidBuildPhase.CANCELLED else it }
+            _state.update {
+                it.copy(
+                    androidBuildPhase = phase,
+                    androidBuildMessage = if (phase == AndroidBuildPhase.CANCELLED) s(R.string.an_previous_build_interrupted) else json.optString("message").takeIf(String::isNotBlank),
+                    androidBuildLog = json.optString("log"),
+                    androidBuildStartedAtMillis = json.optLong("startedAtMillis").takeIf { v -> v > 0L },
+                    androidBuildFinishedAtMillis = json.optLong("finishedAtMillis").takeIf { v -> v > 0L },
+                    androidBuildApkPath = json.optString("apkPath").takeIf(String::isNotBlank),
+                    androidBuildApkSizeBytes = json.optLong("apkSizeBytes").takeIf { v -> v > 0L },
+                    androidBuildAction = runCatching { AndroidAction.valueOf(json.optString("action")) }.getOrDefault(AndroidAction.NONE),
+                    androidBuildStage = runCatching { AndroidBuildStage.valueOf(json.optString("stage")) }.getOrDefault(AndroidBuildStage.IDLE),
+                    androidBuildRecentDurationsMillis = json.optJSONArray("recentDurationsMillis")?.let { array ->
+                        (0 until array.length()).mapNotNull { index -> array.optLong(index).takeIf { v -> v > 0L } }
+                    }.orEmpty(),
+                    androidBuildIssues = json.optJSONArray("issues")?.let { array ->
+                        (0 until array.length()).mapNotNull { index ->
+                            array.optJSONObject(index)?.let { item ->
+                                AndroidBuildIssue(
+                                    severity = runCatching { com.jarves.mh.runtime.AndroidIssueSeverity.valueOf(item.optString("severity")) }
+                                        .getOrDefault(com.jarves.mh.runtime.AndroidIssueSeverity.ERROR),
+                                    title = item.optString("title"),
+                                    detail = item.optString("detail"),
+                                    suggestion = item.optString("suggestion").takeIf(String::isNotBlank),
+                                    filePath = item.optString("filePath").takeIf(String::isNotBlank),
+                                    line = item.optInt("line").takeIf { v -> v > 0 },
+                                    column = item.optInt("column").takeIf { v -> v > 0 },
+                                )
+                            }
+                        }
+                    }.orEmpty(),
+                )
+            }
+        }
+    }
+
+    fun refreshAndroidApkInfo() {
+        val project = _state.value.activeProject ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val info = runCatching {
+                val projectRoot = findAndroidProjectRoot(projectWorkspaceRoot(project)) ?: return@runCatching null
+                val apk = findDebugApk(projectRoot) ?: return@runCatching null
+                val app = getApplication<Application>()
+                @Suppress("DEPRECATION")
+                val archive = app.packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
+                val packageName = archive?.packageName ?: AndroidAppInstaller.packageName(app, apk)
+                AndroidApkInfo(
+                    path = apk.absolutePath,
+                    fileName = apk.name,
+                    sizeBytes = apk.length(),
+                    builtAtMillis = apk.lastModified(),
+                    packageName = packageName,
+                    versionName = archive?.versionName,
+                    versionCode = archive?.let {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode else @Suppress("DEPRECATION") it.versionCode.toLong()
+                    },
+                    minSdk = archive?.applicationInfo?.minSdkVersion,
+                    targetSdk = archive?.applicationInfo?.targetSdkVersion,
+                    stale = isDebugApkStale(projectRoot, apk),
+                    installed = packageName?.let { AndroidAppInstaller.isInstalled(app, it) } == true,
+                    installedMatches = AndroidAppInstaller.installedMatches(app, apk),
+                )
+            }.getOrNull()
+            _state.update { it.copy(androidApkInfo = info) }
+        }
+    }
+
+    fun shareAndroidApk() {
+        val info = _state.value.androidApkInfo ?: return
+        val file = File(info.path).takeIf(File::isFile) ?: return
+        runCatching {
+            val app = getApplication<Application>()
+            val uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
+            app.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = "application/vnd.android.package-archive"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }, s(R.string.an_share_apk)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { error -> _state.update { it.copy(toastMessage = error.message ?: s(R.string.an_could_not_share_apk)) } }
+    }
+
+    fun saveAndroidApk(uri: Uri) {
+        val info = _state.value.androidApkInfo ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val source = File(info.path).takeIf(File::isFile) ?: error(s(R.string.an_apk_unavailable))
+                getApplication<Application>().contentResolver.openOutputStream(uri)?.use { output ->
+                    source.inputStream().buffered().use { it.copyTo(output) }
+                } ?: error(s(R.string.an_location_unavailable))
+            }
+            _state.update { it.copy(toastMessage = if (result.isSuccess) s(R.string.an_apk_saved) else result.exceptionOrNull()?.message ?: s(R.string.an_could_not_save_apk)) }
+        }
+    }
+
+    fun openInstalledAndroidAppDetails() {
+        val packageName = _state.value.androidApkInfo?.packageName ?: return
+        getApplication<Application>().startActivity(
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+
+    fun uninstallAndroidApp() {
+        val packageName = _state.value.androidApkInfo?.packageName ?: return
+        getApplication<Application>().startActivity(
+            Intent(Intent.ACTION_DELETE, Uri.parse("package:$packageName")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+
+    fun startAndroidLogcat() {
+        if (androidLogcatJob?.isActive == true) return
+        val info = _state.value.androidApkInfo
+        val packageName = info?.packageName
+        if (packageName.isNullOrBlank() || info.installed.not()) {
+            _state.update { it.copy(androidLogcat = it.androidLogcat.copy(available = false, message = s(R.string.an_install_apk_before_logcat))) }
+            return
+        }
+        if (!hasLogcatAccess()) {
+            _state.update { it.copy(androidLogcat = it.androidLogcat.copy(available = false, message = LOGCAT_GRANT_COMMAND, packageName = packageName)) }
+            return
+        }
+        val app = getApplication<Application>()
+        val uid = runCatching { app.packageManager.getApplicationInfo(packageName, 0).uid }.getOrNull()
+        if (uid == null) {
+            _state.update { it.copy(androidLogcat = it.androidLogcat.copy(available = false, message = s(R.string.an_installed_app_not_found))) }
+            return
+        }
+        androidLogcatJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val root = androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_LOGS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                val since = "1"
+                val logCommand = "/system/bin/logcat --uid=$uid -v threadtime -T '$since'"
+                val process = if (root) ProcessBuilder("su", "-c", logCommand).redirectErrorStream(true).start()
+                    else ProcessBuilder("/system/bin/logcat", "--uid=$uid", "-v", "threadtime", "-T", since).redirectErrorStream(true).start()
+                androidLogcatProcess = process
+                _state.update { it.copy(androidLogcat = it.androidLogcat.copy(available = true, running = true, paused = false, message = null, packageName = packageName)) }
+                process.inputStream.bufferedReader().useLines { lines ->
+                    lines.forEach { raw ->
+                        if (!_state.value.androidLogcat.paused) appendAndroidLogLine(raw)
+                    }
+                }
+            }.onFailure { error ->
+                _state.update { it.copy(androidLogcat = it.androidLogcat.copy(running = false, message = error.message ?: s(R.string.an_logcat_stopped))) }
+            }
+            androidLogcatProcess = null
+            _state.update { it.copy(androidLogcat = it.androidLogcat.copy(running = false)) }
+        }
+    }
+
+    private fun hasLogcatAccess(): Boolean {
+        val app = getApplication<Application>()
+        if (androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_LOGS) == android.content.pm.PackageManager.PERMISSION_GRANTED) return true
+        return runCatching {
+            val process = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
+            val finished = process.waitFor(800, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (!finished) process.destroyForcibly()
+            finished && process.exitValue() == 0
+        }.getOrDefault(false)
+    }
+
+    private fun appendAndroidLogLine(raw: String) {
+        val levelChar = Regex("\\s([VDIWEF])\\s").find(raw)?.groupValues?.getOrNull(1)
+        val level = when (levelChar) {
+            "D" -> AndroidLogLevel.DEBUG; "I" -> AndroidLogLevel.INFO; "W" -> AndroidLogLevel.WARNING
+            "E" -> AndroidLogLevel.ERROR; "F" -> AndroidLogLevel.FATAL; else -> AndroidLogLevel.VERBOSE
+        }
+        val location = Regex("([A-Za-z0-9_]+\\.(?:kt|java)):(\\d+)").find(raw)
+        _state.update { current ->
+            val line = AndroidLogLine(
+                id = System.nanoTime(), text = raw, level = level,
+                filePath = location?.groupValues?.getOrNull(1), line = location?.groupValues?.getOrNull(2)?.toIntOrNull(),
+            )
+            current.copy(androidLogcat = current.androidLogcat.copy(lines = (current.androidLogcat.lines + line).takeLast(MAX_LOGCAT_LINES)))
+        }
+    }
+
+    fun stopAndroidLogcat() {
+        androidLogcatProcess?.destroy()
+        androidLogcatJob?.cancel()
+        androidLogcatProcess = null
+        androidLogcatJob = null
+        _state.update { it.copy(androidLogcat = it.androidLogcat.copy(running = false)) }
+    }
+
+    fun toggleAndroidLogcatPause() = _state.update { it.copy(androidLogcat = it.androidLogcat.copy(paused = !it.androidLogcat.paused)) }
+    fun clearAndroidLogcat() = _state.update { it.copy(androidLogcat = it.androidLogcat.copy(lines = emptyList())) }
+    fun setAndroidLogcatQuery(value: String) = _state.update { it.copy(androidLogcat = it.androidLogcat.copy(query = value)) }
+    fun setAndroidLogcatLevel(value: AndroidLogLevel) = _state.update { it.copy(androidLogcat = it.androidLogcat.copy(minimumLevel = value)) }
+
+    private fun androidBuildRecordFile(projectId: String): File =
+        File(getApplication<Application>().filesDir, "android-builds/$projectId.json")
+
+    private fun saveAndroidBuildRecord(projectId: String) {
+        val state = _state.value
+        runCatching {
+            androidBuildRecordFile(projectId).apply {
+                parentFile?.mkdirs()
+                writeText(
+                    org.json.JSONObject()
+                        .put("phase", state.androidBuildPhase.name)
+                        .put("message", state.androidBuildMessage)
+                        .put("log", state.androidBuildLog.takeLast(MAX_ANDROID_BUILD_LOG))
+                        .put("startedAtMillis", state.androidBuildStartedAtMillis)
+                        .put("finishedAtMillis", state.androidBuildFinishedAtMillis)
+                        .put("apkPath", state.androidBuildApkPath)
+                        .put("apkSizeBytes", state.androidBuildApkSizeBytes)
+                        .put("action", state.androidBuildAction.name)
+                        .put("stage", state.androidBuildStage.name)
+                        .put("recentDurationsMillis", org.json.JSONArray(state.androidBuildRecentDurationsMillis))
+                        .put("issues", org.json.JSONArray().apply {
+                            state.androidBuildIssues.forEach { issue ->
+                                put(org.json.JSONObject()
+                                    .put("severity", issue.severity.name)
+                                    .put("title", issue.title)
+                                    .put("detail", issue.detail)
+                                    .put("suggestion", issue.suggestion)
+                                    .put("filePath", issue.filePath)
+                                    .put("line", issue.line)
+                                    .put("column", issue.column))
+                            }
+                        })
+                        .toString(),
+                )
+            }
+        }
+    }
+
+    private fun startAndroidBuildForegroundService(project: Project, task: String) {
+        ContextCompat.startForegroundService(
+            getApplication(),
+            Intent(getApplication(), com.jarves.mh.runtime.RuntimeExecutionService::class.java)
+                .setAction(com.jarves.mh.runtime.RuntimeExecutionService.ACTION_START)
+                .putExtra(com.jarves.mh.runtime.RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
+                .putExtra(com.jarves.mh.runtime.RuntimeExecutionService.EXTRA_TITLE, if (task == "clean") s(R.string.an_notif_cleaning_title) else s(R.string.an_notif_building_title))
+                .putExtra(com.jarves.mh.runtime.RuntimeExecutionService.EXTRA_DETAIL, if (task == "clean") s(R.string.an_notif_cleaning_detail) else s(R.string.an_notif_building_detail))
+                .putExtra(com.jarves.mh.runtime.RuntimeExecutionService.EXTRA_CAN_STOP, true),
+        )
+    }
+
+    private fun finishAndroidBuildForegroundService(
+        project: Project,
+        detail: String,
+        failed: Boolean,
+        cancelled: Boolean = false,
+    ) {
+        runCatching {
+            getApplication<Application>().startService(
+                Intent(getApplication(), com.jarves.mh.runtime.RuntimeExecutionService::class.java)
+                    .setAction(
+                        when {
+                            cancelled -> com.jarves.mh.runtime.RuntimeExecutionService.ACTION_CANCELLED
+                            failed -> com.jarves.mh.runtime.RuntimeExecutionService.ACTION_FAILED
+                            else -> com.jarves.mh.runtime.RuntimeExecutionService.ACTION_COMPLETE
+                        },
+                    )
+                    .putExtra(com.jarves.mh.runtime.RuntimeExecutionService.EXTRA_PROJECT_NAME, project.name)
+                    .putExtra(com.jarves.mh.runtime.RuntimeExecutionService.EXTRA_DETAIL, detail),
+            )
+        }
+    }
+
+    fun openAndroidIssue(issue: AndroidBuildIssue) {
+        val project = _state.value.activeProject ?: return
+        val path = issue.filePath ?: return
+        val root = projectWorkspaceRoot(project)
+        val candidate = File(root, path)
+        val resolved = when {
+            candidate.isFile -> candidate
+            else -> root.walkTopDown().firstOrNull { it.isFile && it.name == File(path).name }
+        } ?: return
+        val relative = resolved.relativeTo(root).invariantSeparatorsPath
+        openFile(WorkspaceEntry(relative, resolved.name, false, 0))
+    }
+
+    private fun onAndroidInstallEvent(event: AndroidInstallEvent) {
+        if (pendingAndroidInstallId != null && event.operationId != pendingAndroidInstallId) return
+        pendingAndroidInstallId = null
+        val launch = pendingAndroidInstallLaunch
+        pendingAndroidInstallLaunch = false
+        if (event.success) {
+            val message = if (launch && event.launched) s(R.string.an_app_installed_launched)
+                else if (launch && !event.launched) s(R.string.an_app_installed_no_launcher)
+                else s(R.string.an_apk_installed)
+            _state.update {
+                it.copy(
+                    androidBuildRunning = false,
+                    androidBuildPhase = AndroidBuildPhase.SUCCEEDED,
+                    androidBuildStage = AndroidBuildStage.COMPLETE,
+                    androidBuildMessage = message,
+                    toastMessage = message,
+                )
+            }
+        } else if (event.message != null) {
+            _state.update {
+                it.copy(
+                    androidBuildRunning = false,
+                    androidBuildPhase = AndroidBuildPhase.FAILED,
+                    androidBuildStage = AndroidBuildStage.FAILED,
+                    androidBuildMessage = event.message,
+                    androidBuildIssues = listOf(AndroidBuildIssue(title = s(R.string.an_apk_install_failed), detail = event.message)),
+                    toastMessage = event.message,
+                )
+            }
+        }
+        refreshAndroidApkInfo()
     }
 
     private fun startAndroidGradleTask(task: String, action: AndroidAction) {
@@ -1565,7 +1997,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 androidBuildAction = action,
                 androidBuildStage = AndroidBuildStage.PREPARING,
                 androidBuildIssues = emptyList(),
-                androidBuildMessage = s(R.string.build_building),
+                androidBuildMessage = if (task == "clean") s(R.string.an_preparing_clean) else s(R.string.an_preparing_build),
                 androidBuildLog = "",
                 androidBuildStartedAtMillis = startedAt,
                 androidBuildFinishedAtMillis = null,
@@ -1574,6 +2006,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 toastMessage = null,
             )
         }
+        saveAndroidBuildRecord(project.id)
+        startAndroidBuildForegroundService(project, task)
         viewModelScope.launch(Dispatchers.IO) {
             var buildWorkspace: File? = null
             var finalOutput = ""
@@ -1588,7 +2022,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         androidBuildPhase = AndroidBuildPhase.BUILDING,
                         androidBuildStage = AndroidBuildStage.RESOLVING,
-                        androidBuildMessage = s(R.string.build_building),
+                        androidBuildMessage = if (task == "clean") s(R.string.an_cleaning_project) else s(R.string.an_running_assemble),
                         androidBuildLog = "$ $command\n",
                     )
                 }
@@ -1636,11 +2070,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (androidBuildStopRequested) throw java.util.concurrent.CancellationException("Build cancelled")
                 check(exitCode == 0) { diagnoseAndroidBuildFailure(buildOutput, exitCode) }
                 if (task == "clean") null else {
-                    _state.update { it.copy(androidBuildStage = AndroidBuildStage.FINDING_APK, androidBuildMessage = s(R.string.build_no_apk)) }
-                    findDebugApk(workspace) ?: error(s(R.string.build_no_apk))
+                    _state.update { it.copy(androidBuildStage = AndroidBuildStage.FINDING_APK, androidBuildMessage = s(R.string.an_finding_apk)) }
+                    findDebugApk(workspace) ?: error(s(R.string.an_no_debug_apk_found))
                 }
             }.onSuccess { apk ->
-                val message = if (apk == null) s(R.string.build_sent) else s(R.string.build_sent)
+                val shouldInstallAndRun = apk != null && action == AndroidAction.BUILD_AND_RUN
+                val message = if (apk == null) s(R.string.an_project_cleaned) else s(R.string.an_debug_apk_built)
                 val buildCompletedAt = System.currentTimeMillis()
                 withContext(Dispatchers.Main) {
                     _state.update { current ->
@@ -1649,9 +2084,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             (current.androidBuildRecentDurationsMillis + duration).takeLast(5)
                         } else current.androidBuildRecentDurationsMillis
                         current.copy(
-                            androidBuildRunning = false,
+                            androidBuildRunning = shouldInstallAndRun,
                             androidBuildPhase = AndroidBuildPhase.SUCCEEDED,
-                            androidBuildStage = AndroidBuildStage.COMPLETE,
+                            androidBuildStage = if (shouldInstallAndRun) AndroidBuildStage.INSTALLING else AndroidBuildStage.COMPLETE,
                             androidBuildMessage = message,
                             androidBuildIssues = emptyList(),
                             androidBuildFinishedAtMillis = buildCompletedAt,
@@ -1661,14 +2096,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             toastMessage = message,
                         )
                     }
+                    saveAndroidBuildRecord(project.id)
+                    refreshAndroidApkInfo()
                 }
-                apk?.let { launch { AndroidAppInstaller.install(getApplication(), it) } }
+                finishAndroidBuildForegroundService(project, message, failed = false)
+                if (shouldInstallAndRun) beginAndroidInstall(apk!!, launch = true, action = action)
             }.onFailure { error ->
                 val cancelled = error is java.util.concurrent.CancellationException || androidBuildStopRequested
-                val message = error.message ?: s(R.string.build_could)
+                val message = if (cancelled) s(R.string.an_build_cancelled) else error.message ?: s(R.string.an_could_not_build_apk)
                 val issues = if (cancelled) emptyList() else buildWorkspace?.let {
                     parseAndroidBuildIssues(finalOutput.ifBlank { message }, it, finalExitCode)
-                }.orEmpty().ifEmpty { listOf(AndroidBuildIssue(title = s(R.string.build_could), detail = message)) }
+                }.orEmpty().ifEmpty { listOf(AndroidBuildIssue(title = s(R.string.an_could_not_build_apk), detail = message)) }
                 withContext(Dispatchers.Main) {
                     _state.update {
                         it.copy(
@@ -1681,7 +2119,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             toastMessage = message,
                         )
                     }
+                    saveAndroidBuildRecord(project.id)
                 }
+                finishAndroidBuildForegroundService(project, message, failed = !cancelled, cancelled = cancelled)
             }.also {
                 androidBuildProcess = null
                 androidBuildStopRequested = false
@@ -1690,19 +2130,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun androidStageMessage(stage: AndroidBuildStage): String = when (stage) {
-        AndroidBuildStage.PREPARING -> s(R.string.build_building)
-        AndroidBuildStage.RESOLVING -> s(R.string.build_building)
-        AndroidBuildStage.COMPILING -> s(R.string.build_building)
-        AndroidBuildStage.RESOURCES -> s(R.string.build_building)
-        AndroidBuildStage.PACKAGING -> s(R.string.build_building)
-        AndroidBuildStage.FINDING_APK -> s(R.string.build_no_apk)
-        AndroidBuildStage.INSTALLING -> s(R.string.build_sent)
-        AndroidBuildStage.LAUNCHING -> s(R.string.build_prompt)
-        AndroidBuildStage.COMPLETE -> s(R.string.build_sent)
-        AndroidBuildStage.FAILED -> s(R.string.build_could)
-        AndroidBuildStage.CANCELLING -> s(R.string.build_building)
-        AndroidBuildStage.CANCELLED -> s(R.string.build_could)
-        AndroidBuildStage.IDLE -> s(R.string.build_building)
+        AndroidBuildStage.PREPARING -> s(R.string.an_preparing_build)
+        AndroidBuildStage.RESOLVING -> s(R.string.an_resolving_dependencies)
+        AndroidBuildStage.COMPILING -> s(R.string.an_compiling_source)
+        AndroidBuildStage.RESOURCES -> s(R.string.an_processing_resources)
+        AndroidBuildStage.PACKAGING -> s(R.string.an_packaging_apk)
+        AndroidBuildStage.FINDING_APK -> s(R.string.an_finding_apk)
+        AndroidBuildStage.INSTALLING -> s(R.string.an_installing_apk)
+        AndroidBuildStage.LAUNCHING -> s(R.string.an_launching_app)
+        AndroidBuildStage.COMPLETE -> s(R.string.android_stage_complete)
+        AndroidBuildStage.CANCELLING -> s(R.string.an_stopping_gradle)
+        AndroidBuildStage.CANCELLED -> s(R.string.an_build_cancelled)
+        AndroidBuildStage.FAILED -> s(R.string.an_operation_failed)
+        AndroidBuildStage.IDLE -> s(R.string.android_stage_idle)
     }
 
     private fun findAndroidGradleProjectRoot(workspace: File): File? = findAndroidProjectRoot(workspace)
@@ -3212,7 +3652,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }.onSuccess { apk ->
                 _state.update { it.copy(appUpdateStatus = AppUpdateStatus.INSTALLING) }
-                runCatching { AndroidAppInstaller.install(getApplication(), apk) }.onFailure { error ->
+                runCatching { AndroidAppInstaller.install(getApplication(), apk, launchAfterInstall = false) }.onFailure { error ->
                     _state.update { it.copy(appUpdateStatus = AppUpdateStatus.ERROR, appUpdateError = error.message ?: s(R.string.update_installer_fail)) }
                 }
             }.onFailure { error ->
@@ -4314,6 +4754,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         refreshProjectFiles()
+        refreshAndroidApkInfo()
+        loadAndroidBuildRecord(project.id)
         val projectAgent = ProjectAgent(project.id, _state.value.agentKind)
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
@@ -6458,6 +6900,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val MEMORY_PRESSURE_TERMINAL_LINES = 20
         private const val MEMORY_PRESSURE_TEXT_CHARS = 64 * 1024
         private const val MAX_ANDROID_BUILD_LOG = 400_000
+        private const val MAX_LOGCAT_LINES = 5_000
+        const val LOGCAT_GRANT_COMMAND = "adb shell pm grant com.jarves.mh android.permission.READ_LOGS"
         private const val DIAGNOSTICS_REFRESH_COOLDOWN_MS = 3_000L
         private const val RECENT_EXIT_CACHE_MS = 30_000L
         private const val LEGACY_GITHUB_TOKEN_KEY = "GITHUB_APP"
