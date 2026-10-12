@@ -11,7 +11,26 @@ class ToolPermissionGate(
     private val store: ToolPermissionStore,
     private val hooks: List<AIToolHook> = emptyList(),
 ) {
+    private val temporaryAllow = java.util.concurrent.atomic.AtomicReference<String?>(null)
+
     fun resolve(toolName: String): ToolPermissionLevel = store.resolve(toolName)
+
+    /**
+     * Grant a single ASK → ALLOW pass for [toolName], consumed by the next
+     * [evaluate] of that tool. Used by workflow replay after the user taps
+     * "Allow once" on the approval card: the executor pre-evaluates, asks,
+     * then hands the grant to the tool's own internal gate check.
+     *
+     * Never bypasses FORBID or a hook veto — only the ASK branch consumes it.
+     */
+    fun allowOnce(toolName: String) {
+        temporaryAllow.set(toolName)
+    }
+
+    /** Drop an unconsumed [allowOnce] grant (e.g. after a failed dispatch). */
+    fun clearAllowOnce(toolName: String) {
+        temporaryAllow.compareAndSet(toolName, null)
+    }
 
     /**
      * Effective level after the risk rule (FoneClaw-style): a blanket global
@@ -63,11 +82,19 @@ class ToolPermissionGate(
                 ToolPermissionGateDecision.Allowed
             }
             ToolPermissionLevel.FORBID -> {
+                temporaryAllow.compareAndSet(toolName, null)
                 val reason = "Tool '$toolName' is forbidden by permission policy"
                 hooks.forEach { it.onToolPermissionChecked(toolName, false, reason) }
                 ToolPermissionGateDecision.Blocked(reason)
             }
-            ToolPermissionLevel.ASK -> ToolPermissionGateDecision.NeedsApproval(level)
+            ToolPermissionLevel.ASK -> {
+                if (temporaryAllow.compareAndSet(toolName, null)) {
+                    hooks.forEach { it.onToolPermissionChecked(toolName, true) }
+                    ToolPermissionGateDecision.Allowed
+                } else {
+                    ToolPermissionGateDecision.NeedsApproval(level)
+                }
+            }
         }
     }
 }

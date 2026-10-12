@@ -45,6 +45,9 @@ class TerminalToolsTest {
         hooks: List<AIToolHook> = emptyList(),
     ): TerminalTools {
         store.globalDefault = ToolPermissionLevel.ALLOW
+        // Risk rule: Bash is EXTERNAL_EFFECT, so a blanket global ALLOW no
+        // longer auto-runs it — tests opt in with an explicit override.
+        store.setOverride("Bash", ToolPermissionLevel.ALLOW)
         return TerminalTools(runner, ToolPermissionGate(store), hooks)
     }
 
@@ -138,6 +141,7 @@ class TerminalToolsTest {
             ): TerminalCommandRun = throw IllegalStateException("spawn failed")
         }
         store.globalDefault = ToolPermissionLevel.ALLOW
+        store.setOverride("Bash", ToolPermissionLevel.ALLOW)
         val result = TerminalTools(runner, ToolPermissionGate(store)).execute("project", "pwd")
         assertTrue(result is TerminalToolResult.Error)
         assertTrue((result as TerminalToolResult.Error).message.contains("spawn failed"))
