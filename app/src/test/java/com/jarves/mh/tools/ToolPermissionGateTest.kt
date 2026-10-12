@@ -152,4 +152,103 @@ class ToolPermissionGateTest {
         assertEquals(ToolPermissionLevel.ALLOW, ToolPermissionLevel.fromString("ALLOW"))
         assertEquals(ToolPermissionLevel.FORBID, ToolPermissionLevel.fromString("FORBID"))
     }
+
+    // --- Risk rule: only LOW auto-runs under a global ALLOW ---
+
+    @Test
+    fun globalAllowStillAutoRunsLowRiskTool() {
+        val store = store()
+        store.globalDefault = ToolPermissionLevel.ALLOW
+        val gate = ToolPermissionGate(store)
+        assertTrue(gate.evaluate("Read", "read file") is ToolPermissionGateDecision.Allowed)
+        assertTrue(gate.evaluate("Calculate", "2+2") is ToolPermissionGateDecision.Allowed)
+    }
+
+    @Test
+    fun globalAllowDowngradesNonLowToolToAsk() {
+        val store = store()
+        store.globalDefault = ToolPermissionLevel.ALLOW
+        val gate = ToolPermissionGate(store)
+        val decision = gate.evaluate("Bash", "run ls")
+        assertTrue(decision is ToolPermissionGateDecision.NeedsApproval)
+        assertEquals(
+            ToolPermissionLevel.ASK,
+            (decision as ToolPermissionGateDecision.NeedsApproval).level,
+        )
+        assertTrue(gate.evaluate("Write", "write file") is ToolPermissionGateDecision.NeedsApproval)
+        assertTrue(gate.evaluate("HttpRequest", "GET https://example.com") is ToolPermissionGateDecision.NeedsApproval)
+    }
+
+    @Test
+    fun explicitOverrideAllowOnNonLowToolStillAllows() {
+        val store = store()
+        store.globalDefault = ToolPermissionLevel.ALLOW
+        store.setOverride("Bash", ToolPermissionLevel.ALLOW)
+        val gate = ToolPermissionGate(store)
+        assertTrue(gate.evaluate("Bash", "run ls") is ToolPermissionGateDecision.Allowed)
+        // Untouched tools keep the risk downgrade.
+        assertTrue(gate.evaluate("Write", "write file") is ToolPermissionGateDecision.NeedsApproval)
+    }
+
+    @Test
+    fun effectiveLevelExposesRiskRule() {
+        val store = store()
+        store.globalDefault = ToolPermissionLevel.ALLOW
+        val gate = ToolPermissionGate(store)
+        assertEquals(ToolPermissionLevel.ALLOW, gate.effectiveLevel("Read"))
+        assertEquals(ToolPermissionLevel.ASK, gate.effectiveLevel("Bash"))
+        store.setOverride("Bash", ToolPermissionLevel.ALLOW)
+        assertEquals(ToolPermissionLevel.ALLOW, gate.effectiveLevel("Bash"))
+    }
+
+    @Test
+    fun forbidAndAskAreUnaffectedByRiskRule() {
+        val store = store()
+        store.globalDefault = ToolPermissionLevel.FORBID
+        val gate = ToolPermissionGate(store)
+        assertTrue(gate.evaluate("Read", "read file") is ToolPermissionGateDecision.Blocked)
+        store.globalDefault = ToolPermissionLevel.ASK
+        assertTrue(gate.evaluate("Read", "read file") is ToolPermissionGateDecision.NeedsApproval)
+    }
+
+    // --- allowOnce (workflow replay handoff after approval) ---
+
+    @Test
+    fun allowOnceGrantsSingleAskPass() {
+        val gate = ToolPermissionGate(store())
+        assertTrue(gate.evaluate("Bash", "run") is ToolPermissionGateDecision.NeedsApproval)
+        gate.allowOnce("Bash")
+        assertTrue(gate.evaluate("Bash", "run") is ToolPermissionGateDecision.Allowed)
+        // One-shot: the next evaluation asks again.
+        assertTrue(gate.evaluate("Bash", "run") is ToolPermissionGateDecision.NeedsApproval)
+    }
+
+    @Test
+    fun allowOnceDoesNotBypassForbid() {
+        val store = store()
+        store.setOverride("Bash", ToolPermissionLevel.FORBID)
+        val gate = ToolPermissionGate(store)
+        gate.allowOnce("Bash")
+        val decision = gate.evaluate("Bash", "run")
+        assertTrue(decision is ToolPermissionGateDecision.Blocked)
+        // The stale grant was dropped, not left behind.
+        gate.setOverride("Bash", ToolPermissionLevel.ASK)
+        assertTrue(gate.evaluate("Bash", "run") is ToolPermissionGateDecision.NeedsApproval)
+    }
+
+    @Test
+    fun allowOnceIsScopedToItsTool() {
+        val gate = ToolPermissionGate(store())
+        gate.allowOnce("Bash")
+        assertTrue(gate.evaluate("Write", "write") is ToolPermissionGateDecision.NeedsApproval)
+        assertTrue(gate.evaluate("Bash", "run") is ToolPermissionGateDecision.Allowed)
+    }
+
+    @Test
+    fun clearAllowOnceDropsUnconsumedGrant() {
+        val gate = ToolPermissionGate(store())
+        gate.allowOnce("Bash")
+        gate.clearAllowOnce("Bash")
+        assertTrue(gate.evaluate("Bash", "run") is ToolPermissionGateDecision.NeedsApproval)
+    }
 }

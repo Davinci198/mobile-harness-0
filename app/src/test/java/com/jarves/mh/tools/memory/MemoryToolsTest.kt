@@ -23,6 +23,17 @@ private class MemoryMemoryStore : MemoryStore {
 }
 
 class MemoryToolsTest {
+    private val memoryTools = listOf(
+        "MemoryCreate",
+        "MemoryRead",
+        "MemoryUpdate",
+        "MemoryDelete",
+        "MemorySearch",
+        "MemoryList",
+        "MemoryLink",
+        "MemoryUnlink",
+        "MemoryLinkList",
+    )
     private lateinit var memoryStore: MemoryMemoryStore
     private lateinit var permissionStore: ToolPermissionStore
     private lateinit var ids: ArrayDeque<String>
@@ -40,6 +51,8 @@ class MemoryToolsTest {
             }
         })
         permissionStore.globalDefault = ToolPermissionLevel.ALLOW
+        // Risk rule: memory writes/reads are non-LOW, explicit override to auto-run.
+        memoryTools.forEach { permissionStore.setOverride(it, ToolPermissionLevel.ALLOW) }
         ids = ArrayDeque(
             listOf(
                 "00000000-0000-0000-0000-000000000001",
@@ -200,6 +213,7 @@ class MemoryToolsTest {
 
     @Test
     fun askAndForbidDoNotMutateStore() {
+        memoryTools.forEach { permissionStore.setOverride(it, null) }
         permissionStore.globalDefault = ToolPermissionLevel.ASK
         assertError(tools.create("Title", "body"), MemoryErrorCode.PERMISSION_REQUIRED)
         permissionStore.globalDefault = ToolPermissionLevel.FORBID

@@ -61,6 +61,13 @@ private class FakeLinks : HttpsLinkAdapter {
 }
 
 class DeviceToolsTest {
+    private val deviceTools = listOf(
+        "ClipboardCopy",
+        "ClipboardRead",
+        "DeviceToast",
+        "DeviceNotification",
+        "DeviceOpenHttpsLink",
+    )
     private lateinit var store: ToolPermissionStore
     private lateinit var clipboard: FakeClipboard
     private lateinit var toast: FakeToast
@@ -78,6 +85,8 @@ class DeviceToolsTest {
             }
         })
         store.globalDefault = ToolPermissionLevel.ALLOW
+        // Risk rule: non-LOW device tools need an explicit per-tool ALLOW.
+        deviceTools.forEach { store.setOverride(it, ToolPermissionLevel.ALLOW) }
         clipboard = FakeClipboard()
         toast = FakeToast()
         notifications = FakeNotifications()
@@ -164,6 +173,7 @@ class DeviceToolsTest {
 
     @Test
     fun askAndForbidBlockEverySideEffect() {
+        deviceTools.forEach { store.setOverride(it, null) }
         store.globalDefault = ToolPermissionLevel.ASK
         assertError(tools.copyToClipboard("x"), DeviceErrorCode.APPROVAL_REQUIRED)
         assertError(tools.readClipboard(), DeviceErrorCode.APPROVAL_REQUIRED)

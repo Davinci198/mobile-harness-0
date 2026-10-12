@@ -94,6 +94,10 @@ class FileToolGateTest {
     @Test
     fun allowPolicyLetsAllToolsThrough() {
         store.globalDefault = ToolPermissionLevel.ALLOW
+        // Risk rule: non-LOW tools auto-run only with an explicit override.
+        listOf("Read", "Grep", "Glob", "Write", "Edit").forEach {
+            store.setOverride(it, ToolPermissionLevel.ALLOW)
+        }
         tmp.newFile("a.txt").writeText("hello world")
         assertTrue(tools.read("a.txt") is FileToolResult.FileContent)
         assertTrue(tools.grep(".", "hello") is FileToolResult.GrepMatches)

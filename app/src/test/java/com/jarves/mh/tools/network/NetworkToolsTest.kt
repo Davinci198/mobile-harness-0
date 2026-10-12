@@ -42,6 +42,8 @@ private class FakeDownload(var result: DownloadResult) : DownloadAdapter {
 }
 
 class NetworkToolsTest {
+    private val networkTools = listOf("VisitWeb", "HttpRequest", "DownloadFile")
+
     @get:Rule
     val temporaryFolder = TemporaryFolder()
 
@@ -61,6 +63,8 @@ class NetworkToolsTest {
             }
         })
         store.globalDefault = ToolPermissionLevel.ALLOW
+        // Risk rule: network tools are EXTERNAL_EFFECT, explicit override to auto-run.
+        networkTools.forEach { store.setOverride(it, ToolPermissionLevel.ALLOW) }
         http = FakeHttp(response())
         web = FakeWeb(WebPageResult("https://example.com", "https://example.com/", "Example", "text", emptyList(), false, "text/html"))
         download = FakeDownload(DownloadResult("/tmp/file", 3, "text/plain", "hash"))
@@ -108,6 +112,7 @@ class NetworkToolsTest {
 
     @Test
     fun askAndForbidBlockAllNetworkAdapters() = runBlocking {
+        networkTools.forEach { store.setOverride(it, null) }
         store.globalDefault = ToolPermissionLevel.ASK
         assertError(tools.visitWeb(WebPageRequest("https://example.com")), NetworkErrorCode.PERMISSION_REQUIRED)
         assertError(tools.httpRequest(HttpRequestSpec("https://example.com")), NetworkErrorCode.PERMISSION_REQUIRED)

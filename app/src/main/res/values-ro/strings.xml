@@ -360,6 +360,11 @@
     <string name="chat_reject">Respinge</string>
     <string name="chat_remove_att">Elimină atașamentul</string>
     <string name="chat_review_action">Verifică această acțiune</string>
+    <string name="risk_label_low">Risc: doar citire</string>
+    <string name="risk_label_sensitive">Risc: citește date private</string>
+    <string name="risk_label_device">Risc: schimbă starea dispozitivului</string>
+    <string name="risk_label_external">Risc: afectează exteriorul</string>
+    <string name="risk_label_destructive">Risc: destructiv</string>
     <string name="chat_reviewing">Se analizează solicitarea și se planifică următoarea acțiune.</string>
     <string name="chat_saved">Conversație salvată</string>
     <string name="chat_send">Trimite</string>

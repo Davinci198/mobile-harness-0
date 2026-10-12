@@ -32,6 +32,10 @@ class FileToolsTest {
     fun setUp() {
         store = ToolPermissionStore(MemStore())
         store.globalDefault = ToolPermissionLevel.ALLOW
+        // Risk rule: non-LOW tools need an explicit per-tool ALLOW to auto-run.
+        listOf("Read", "Write", "Edit", "Grep", "Glob").forEach {
+            store.setOverride(it, ToolPermissionLevel.ALLOW)
+        }
         gate = ToolPermissionGate(store)
         tools = FileTools(tmp.root, gate)
     }
@@ -174,6 +178,7 @@ class FileToolsTest {
 
     @Test
     fun forbidBlocksWrite() {
+        store.setOverride("Write", null)
         store.globalDefault = ToolPermissionLevel.FORBID
         val r = tools.write("x.txt", "data")
         assertTrue(r is FileToolResult.FileToolError)
@@ -183,6 +188,7 @@ class FileToolsTest {
 
     @Test
     fun askWriteNeedsApproval() {
+        store.setOverride("Write", null)
         store.globalDefault = ToolPermissionLevel.ASK
         val r = tools.write("x.txt", "data")
         assertTrue(r is FileToolResult.FileToolError)

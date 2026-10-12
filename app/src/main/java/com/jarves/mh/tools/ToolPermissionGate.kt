@@ -11,7 +11,43 @@ class ToolPermissionGate(
     private val store: ToolPermissionStore,
     private val hooks: List<AIToolHook> = emptyList(),
 ) {
+    private val temporaryAllow = java.util.concurrent.atomic.AtomicReference<String?>(null)
+
     fun resolve(toolName: String): ToolPermissionLevel = store.resolve(toolName)
+
+    /**
+     * Grant a single ASK → ALLOW pass for [toolName], consumed by the next
+     * [evaluate] of that tool. Used by workflow replay after the user taps
+     * "Allow once" on the approval card: the executor pre-evaluates, asks,
+     * then hands the grant to the tool's own internal gate check.
+     *
+     * Never bypasses FORBID or a hook veto — only the ASK branch consumes it.
+     */
+    fun allowOnce(toolName: String) {
+        temporaryAllow.set(toolName)
+    }
+
+    /** Drop an unconsumed [allowOnce] grant (e.g. after a failed dispatch). */
+    fun clearAllowOnce(toolName: String) {
+        temporaryAllow.compareAndSet(toolName, null)
+    }
+
+    /**
+     * Effective level after the risk rule: a blanket global
+     * ALLOW only auto-runs [ToolRiskLevel.LOW] tools. A non-LOW tool runs
+     * without prompting only when the user set an explicit per-tool ALLOW
+     * override — a deliberate decision, not a default.
+     */
+    fun effectiveLevel(toolName: String): ToolPermissionLevel {
+        val resolved = store.resolve(toolName)
+        if (resolved != ToolPermissionLevel.ALLOW) return resolved
+        if (ToolRiskCatalog.riskFor(toolName).isAutoEligible) return ToolPermissionLevel.ALLOW
+        return if (store.overrideFor(toolName) == ToolPermissionLevel.ALLOW) {
+            ToolPermissionLevel.ALLOW
+        } else {
+            ToolPermissionLevel.ASK
+        }
+    }
 
     fun setGlobalDefault(level: ToolPermissionLevel) {
         store.globalDefault = level
@@ -39,18 +75,26 @@ class ToolPermissionGate(
                 return ToolPermissionGateDecision.Blocked(decision.reason)
             }
         }
-        val level = resolve(toolName)
+        val level = effectiveLevel(toolName)
         return when (level) {
             ToolPermissionLevel.ALLOW -> {
                 hooks.forEach { it.onToolPermissionChecked(toolName, true) }
                 ToolPermissionGateDecision.Allowed
             }
             ToolPermissionLevel.FORBID -> {
+                temporaryAllow.compareAndSet(toolName, null)
                 val reason = "Tool '$toolName' is forbidden by permission policy"
                 hooks.forEach { it.onToolPermissionChecked(toolName, false, reason) }
                 ToolPermissionGateDecision.Blocked(reason)
             }
-            ToolPermissionLevel.ASK -> ToolPermissionGateDecision.NeedsApproval(level)
+            ToolPermissionLevel.ASK -> {
+                if (temporaryAllow.compareAndSet(toolName, null)) {
+                    hooks.forEach { it.onToolPermissionChecked(toolName, true) }
+                    ToolPermissionGateDecision.Allowed
+                } else {
+                    ToolPermissionGateDecision.NeedsApproval(level)
+                }
+            }
         }
     }
 }

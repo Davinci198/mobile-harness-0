@@ -480,6 +480,9 @@ private const val MAX_COUNTED_FOLDERS = 40
 /** How deep an archive follows a folder, so a whole disk cannot be pulled in. */
 private const val MAX_ARCHIVE_DEPTH = 6
 
+/** How long a workflow replay waits for the approval card answer. */
+private const val WORKFLOW_APPROVAL_TIMEOUT_MS = 10 * 60_000L
+
 /** A single file may not be bigger than this inside an archive. */
 private val perFileCap: Long = com.jarves.mh.storage.FsLimits.MAX_ARCHIVE_BYTES / 2
 
@@ -490,6 +493,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = AppPreferences(application)
     private val toolPermissionStore = com.jarves.mh.tools.ToolPermissionStore.fromContext(application)
     private val toolPermissionGate = com.jarves.mh.tools.ToolPermissionGate(toolPermissionStore)
+    private val workflowStore = com.jarves.mh.workflows.WorkflowStore(java.io.File(application.filesDir, "workflows"))
+    private val workflowGate = com.jarves.mh.tools.ToolPermissionGate(toolPermissionStore)
+    private val workflowApprovals = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<Boolean>>()
+    @Volatile private var workflowReplayJob: kotlinx.coroutines.Job? = null
     private val claudeRuntime = ClaudeRuntimeBridge(
         application,
         secretFor = { profile -> vault.get(profile.kind.name) },
@@ -6296,6 +6303,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         touchProject(project.id)
         persistMessages()
+        if (attachments.isEmpty() && tryStartWorkflowReplay(project, requestText)) return
         val history = state.value.messages // includes all messages up to now
         val runtimePrompt = if (attachments.isEmpty()) requestText else buildString {
             appendLine(requestText)
@@ -6329,9 +6337,128 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Fast path: match the prompt against saved workflows and, on a hit,
+     * replay the recorded tool calls directly — no LLM turn is started.
+     * Returns false when nothing matches so the normal Agent Execution runs.
+     */
+    private fun tryStartWorkflowReplay(project: Project, prompt: String): Boolean {
+        val workflows = workflowStore.load().filter { com.jarves.mh.workflows.WorkflowCatalog.isExecutable(it) }
+        if (workflows.isEmpty()) return false
+        val workflow = com.jarves.mh.workflows.WorkflowMatcher.match(prompt, workflows) ?: return false
+        val sessionId = "wf-${java.util.UUID.randomUUID()}"
+        _state.update {
+            it.copy(
+                liveProcess = listOf(ActivityItem("Workflow", "${workflow.name} · ${workflow.steps.size} steps", false)),
+                liveThinking = false,
+                activeThinkingBlockId = null,
+            )
+        }
+        workflowReplayJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            executeWorkflowReplay(project, sessionId, workflow)
+        }
+        return true
+    }
+
+    private suspend fun executeWorkflowReplay(
+        project: Project,
+        sessionId: String,
+        workflow: com.jarves.mh.workflows.AgentWorkflow,
+    ) {
+        val emit: (RuntimeEvent) -> Unit = { onRuntimeEvent(it) }
+        emit(RuntimeEvent.SessionStarted(sessionId))
+        val outcome = try {
+            val runner = buildWorkflowStepRunner(project)
+            val executor = com.jarves.mh.workflows.WorkflowReplayExecutor(
+                gate = workflowGate,
+                sessionId = sessionId,
+                emit = emit,
+                requestApproval = { request -> awaitWorkflowApproval(request) },
+                runStep = { step -> runner.run(step) },
+            )
+            executor.run(workflow)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            emit(RuntimeEvent.SessionFailed(sessionId, "Workflow stopped"))
+            throw cancelled
+        } catch (error: Throwable) {
+            emit(RuntimeEvent.SessionFailed(sessionId, "Workflow failed: ${error.message ?: error.javaClass.simpleName}"))
+            return
+        }
+        when (outcome) {
+            is com.jarves.mh.workflows.ReplayOutcome.Completed -> {
+                val lines = outcome.stepSummaries.mapIndexed { index, summary -> "${index + 1}. $summary" }
+                emit(
+                    RuntimeEvent.AssistantDelta(
+                        sessionId,
+                        "Workflow '${workflow.name}' completed (${workflow.steps.size} steps):\n" + lines.joinToString("\n"),
+                    ),
+                )
+                emit(RuntimeEvent.SessionCompleted(sessionId))
+            }
+            is com.jarves.mh.workflows.ReplayOutcome.Rejected ->
+                emit(RuntimeEvent.SessionFailed(sessionId, "Workflow stopped: approval rejected for step ${outcome.stepIndex + 1} (${outcome.toolName})"))
+            is com.jarves.mh.workflows.ReplayOutcome.Failed ->
+                emit(RuntimeEvent.SessionFailed(sessionId, "Workflow failed at step ${outcome.stepIndex + 1} (${outcome.toolName}): ${outcome.reason}"))
+        }
+        workflowApprovals.clear()
+    }
+
+    private suspend fun awaitWorkflowApproval(request: com.jarves.mh.model.ToolRequest): Boolean {
+        val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        workflowApprovals[request.approvalId] = deferred
+        onRuntimeEvent(RuntimeEvent.ToolRequested(request.sessionId, request))
+        return try {
+            kotlinx.coroutines.withTimeoutOrNull(WORKFLOW_APPROVAL_TIMEOUT_MS) { deferred.await() } ?: false
+        } finally {
+            workflowApprovals.remove(request.approvalId)
+            _state.update { current ->
+                if (current.pendingApproval?.approvalId == request.approvalId) current.copy(pendingApproval = null)
+                else current
+            }
+        }
+    }
+
+    private fun buildWorkflowStepRunner(project: Project): com.jarves.mh.workflows.WorkflowStepRunner {
+        val app = getApplication<Application>()
+        val root = projectWorkspaceRoot(project)
+        val gate = workflowGate
+        val http = com.jarves.mh.tools.network.HttpURLConnectionAdapter()
+        return com.jarves.mh.workflows.WorkflowStepRunner(
+            projectSlug = project.slug,
+            fileTools = com.jarves.mh.tools.file.FileTools(root, gate),
+            terminalTools = com.jarves.mh.tools.terminal.TerminalTools(
+                com.jarves.mh.tools.terminal.RuntimeTerminalCommandRunner(installer),
+                gate,
+            ),
+            networkTools = com.jarves.mh.tools.network.NetworkTools(
+                com.jarves.mh.tools.network.HttpWebPageExtractor(http),
+                http,
+                com.jarves.mh.tools.network.SandboxedDownloadAdapter(root, http),
+                gate,
+            ),
+            deviceTools = com.jarves.mh.tools.device.DeviceTools(
+                com.jarves.mh.tools.device.AndroidClipboardAdapter(app),
+                com.jarves.mh.tools.device.AndroidToastAdapter(app),
+                com.jarves.mh.tools.device.AndroidNotificationAdapter(app),
+                com.jarves.mh.tools.device.AndroidHttpsLinkAdapter(app),
+                gate,
+            ),
+            memoryTools = com.jarves.mh.tools.memory.MemoryTools(
+                com.jarves.mh.tools.memory.MemoryJsonStore(java.io.File(app.filesDir, "agent-memory.json")),
+                gate,
+            ),
+            calculateTool = com.jarves.mh.tools.calc.CalculateTool(gate),
+            sleepTool = com.jarves.mh.tools.calc.SleepTool(gate),
+        )
+    }
+
     fun answerApproval(approved: Boolean) {
         val request = state.value.pendingApproval ?: return
-        viewModelScope.launch { agentWork.handleFor(request.sessionId)?.respondToApproval(request, approved) }
+        viewModelScope.launch {
+            val handle = agentWork.handleFor(request.sessionId)
+            if (handle != null) handle.respondToApproval(request, approved)
+            else workflowApprovals[request.approvalId]?.complete(approved)
+        }
     }
 
     fun answerQuestion(answers: List<com.jarves.mh.model.QuestionAnswer>) {
@@ -6347,6 +6474,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pendingFollowUps.clear()
         _state.update { it.copy(isSending = false, queuedFollowUps = emptyList()) }
         viewModelScope.launch { agentWork.handleFor(sessionId)?.stop() }
+        if (sessionId.startsWith("wf-")) workflowReplayJob?.cancel()
     }
 
     private fun startNextFollowUp() {
