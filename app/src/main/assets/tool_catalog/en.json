@@ -1,0 +1,9 @@
+{
+  "risk_levels": {
+    "low": "Risk: read-only",
+    "sensitive_read": "Risk: reads private data",
+    "device_control": "Risk: changes device state",
+    "external_effect": "Risk: affects outside world",
+    "destructive": "Risk: destructive"
+  }
+}

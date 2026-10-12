@@ -1,0 +1,9 @@
+{
+  "risk_levels": {
+    "low": "Risc: doar citire",
+    "sensitive_read": "Risc: citește date private",
+    "device_control": "Risc: schimbă starea dispozitivului",
+    "external_effect": "Risc: afectează exteriorul",
+    "destructive": "Risc: destructiv"
+  }
+}

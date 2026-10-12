@@ -19,6 +19,8 @@ data class SkillPackage(
     val skillFile: File,
     val guestDirectoryPath: String,
     val guestSkillFilePath: String,
+    val completionCriteria: List<String> = emptyList(),
+    val failureConditions: List<String> = emptyList(),
 )
 
 enum class SkillErrorCode {

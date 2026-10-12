@@ -88,6 +88,8 @@ class SkillLoader(
                 skillFile = manifest,
                 guestDirectoryPath = guestDirectory,
                 guestSkillFilePath = "$guestDirectory/${manifest.name}",
+                completionCriteria = metadata.completionCriteria,
+                failureConditions = metadata.failureConditions,
             )
         }
         return SkillCatalog(skills, issues)
@@ -125,10 +127,15 @@ class SkillLoader(
             }
             val content = readManifest(canonicalManifest)
                 ?: throw SkillLoadException(SkillErrorCode.MANIFEST_TOO_LARGE, "SKILL.md is too large")
+            val metadata = SkillMetadataParser.parse(content)
+            val loadedPackage = packageInfo.copy(
+                completionCriteria = metadata.completionCriteria,
+                failureConditions = metadata.failureConditions,
+            )
             val tree = buildDirectoryTree(canonicalDirectory, canonicalDirectory, mutableSetOf(), TreeBudget())
-            val prompt = buildPrompt(packageInfo, content, tree)
+            val prompt = buildPrompt(loadedPackage, content, tree)
             hooks.forEach { it.onToolExecutionResult(tool, true, packageInfo.name) }
-            SkillToolResult.Activated(packageInfo, prompt)
+            SkillToolResult.Activated(loadedPackage, prompt)
         } catch (error: SkillLoadException) {
             val message = error.message ?: "Skill could not be loaded"
             hooks.forEach { it.onToolExecutionResult(tool, false, message) }
@@ -177,6 +184,14 @@ class SkillLoader(
         appendLine("Skill directory: ${packageInfo.guestDirectoryPath}")
         appendLine("Directory tree:")
         appendLine(tree)
+        if (packageInfo.completionCriteria.isNotEmpty()) {
+            appendLine("Completion Criteria:")
+            packageInfo.completionCriteria.forEach { appendLine("- $it") }
+        }
+        if (packageInfo.failureConditions.isNotEmpty()) {
+            appendLine("Failure Conditions:")
+            packageInfo.failureConditions.forEach { appendLine("- $it") }
+        }
         appendLine("SKILL.md content:")
         append(content)
     }
