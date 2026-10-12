@@ -153,7 +153,7 @@ class ToolPermissionGateTest {
         assertEquals(ToolPermissionLevel.FORBID, ToolPermissionLevel.fromString("FORBID"))
     }
 
-    // --- Risk rule (FoneClaw-style): only LOW auto-runs under a global ALLOW ---
+    // --- Risk rule: only LOW auto-runs under a global ALLOW ---
 
     @Test
     fun globalAllowStillAutoRunsLowRiskTool() {

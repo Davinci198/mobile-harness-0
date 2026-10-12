@@ -3,7 +3,7 @@ package com.jarves.mh.tools
 /**
  * Default [ToolRiskLevel] for every tool MH knows about.
  *
- * Static policy like FoneClaw's compile-time tool index: unknown or
+ * Static compile-time tool policy: unknown or
  * agent-defined tools fall back to [ToolRiskLevel.DEVICE_CONTROL] so a
  * blanket global ALLOW can never silently auto-run something unclassified.
  */

@@ -4,7 +4,7 @@ import java.io.File
 
 /**
  * Workflow files on disk: one JSON document per file inside the directory
- * (`filesDir/workflows/`, same layout as FoneClaw). Corrupt or non-workflow
+ * (`filesDir/workflows/`). Corrupt or non-workflow
  * files are skipped so one bad document never blocks the rest.
  */
 class WorkflowStore(private val directory: File) {

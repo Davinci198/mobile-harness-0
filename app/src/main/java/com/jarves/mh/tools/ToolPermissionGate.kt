@@ -33,7 +33,7 @@ class ToolPermissionGate(
     }
 
     /**
-     * Effective level after the risk rule (FoneClaw-style): a blanket global
+     * Effective level after the risk rule: a blanket global
      * ALLOW only auto-runs [ToolRiskLevel.LOW] tools. A non-LOW tool runs
      * without prompting only when the user set an explicit per-tool ALLOW
      * override — a deliberate decision, not a default.

@@ -3,14 +3,14 @@ package com.jarves.mh.workflows
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** One recorded tool call inside a workflow. All values stay strings (FoneClaw-compatible). */
+/** One recorded tool call inside a workflow. All values stay strings (file-format stability). */
 data class WorkflowStep(
     val toolName: String,
     val arguments: Map<String, String> = emptyMap(),
 )
 
 /**
- * A recorded sequence of tool calls replayed without the LLM — the FoneClaw
+ * A recorded sequence of tool calls replayed without the LLM —
  * workflow format: user phrase → matched workflow → steps run through the
  * same [com.jarves.mh.tools.ToolPermissionGate] as any other tool call.
  */

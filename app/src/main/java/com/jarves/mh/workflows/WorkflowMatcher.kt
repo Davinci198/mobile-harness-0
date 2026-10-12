@@ -1,7 +1,7 @@
 package com.jarves.mh.workflows
 
 /**
- * Phrase-similarity matcher (FoneClaw scoring):
+ * Phrase-similarity matcher scoring:
  * 100 exact, 80 input contains phrase, 60 phrase contains input,
  * otherwise keyword overlap `(hits × 40) / phraseTokens`. The best-scoring
  * workflow wins; an ambiguous tie is rejected so the input falls through

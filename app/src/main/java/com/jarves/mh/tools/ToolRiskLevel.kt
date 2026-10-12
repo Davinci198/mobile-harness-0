@@ -1,7 +1,7 @@
 package com.jarves.mh.tools
 
 /**
- * Semantic risk of a tool, modeled after FoneClaw's risk-graded approval system.
+ * Semantic risk of a tool in the risk-graded approval policy.
  *
  * The only level eligible for auto-execution is [LOW]. Anything that reads
  * private data, changes device/app state, affects the outside world, or

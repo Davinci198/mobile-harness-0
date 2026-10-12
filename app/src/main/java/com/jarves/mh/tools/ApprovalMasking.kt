@@ -1,8 +1,8 @@
 package com.jarves.mh.tools
 
 /**
- * Masks secrets in text shown on approval cards (FoneClaw-style
- * "sanitized parameters"): keys, tokens, passwords and long opaque blobs
+ * Masks secrets in text shown on approval cards (sanitized parameters):
+ * keys, tokens, passwords and long opaque blobs
  * never reach the confirmation UI in the clear.
  */
 object ApprovalMasking {
