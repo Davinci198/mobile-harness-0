@@ -6759,14 +6759,37 @@ private fun QuestionCard(request: QuestionRequest, onAnswer: (List<QuestionAnswe
 
 @Composable
 private fun ApprovalCard(request: ToolRequest, onApproval: (Boolean) -> Unit) {
+    val risk = com.jarves.mh.tools.ToolRiskCatalog.riskFor(request.toolName)
+    val riskLabel = when (risk) {
+        com.jarves.mh.tools.ToolRiskLevel.LOW -> stringResource(R.string.risk_label_low)
+        com.jarves.mh.tools.ToolRiskLevel.SENSITIVE_READ -> stringResource(R.string.risk_label_sensitive)
+        com.jarves.mh.tools.ToolRiskLevel.DEVICE_CONTROL -> stringResource(R.string.risk_label_device)
+        com.jarves.mh.tools.ToolRiskLevel.EXTERNAL_EFFECT -> stringResource(R.string.risk_label_external)
+        com.jarves.mh.tools.ToolRiskLevel.DESTRUCTIVE -> stringResource(R.string.risk_label_destructive)
+    }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Warning, null, tint = PocketAccent)
                 Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.chat_review_action), fontWeight = FontWeight.Bold)
             }
-            Text(request.explanation)
-            request.affectedPaths.forEach { Text("• $it", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Text(
+                riskLabel,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (risk.isAutoEligible) MaterialTheme.colorScheme.onSurfaceVariant else PocketAccent,
+            )
+            Text(com.jarves.mh.tools.ApprovalMasking.mask(request.explanation))
+            com.jarves.mh.tools.ApprovalMasking.maskAll(request.affectedPaths).forEach {
+                Text("• $it", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            request.commandPreview?.let { preview ->
+                Text(
+                    com.jarves.mh.tools.ApprovalMasking.mask(preview),
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { onApproval(false) }, Modifier.weight(1f)) { Text(stringResource(R.string.chat_reject)) }
                 Button(onClick = { onApproval(true) }, Modifier.weight(1f)) { Text(stringResource(R.string.chat_allow_once)) }

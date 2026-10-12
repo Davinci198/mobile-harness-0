@@ -360,6 +360,11 @@
     <string name="chat_reject">Reject</string>
     <string name="chat_remove_att">Remove attachment</string>
     <string name="chat_review_action">Review this action</string>
+    <string name="risk_label_low">Risk: read-only</string>
+    <string name="risk_label_sensitive">Risk: reads private data</string>
+    <string name="risk_label_device">Risk: changes device state</string>
+    <string name="risk_label_external">Risk: affects outside world</string>
+    <string name="risk_label_destructive">Risk: destructive</string>
     <string name="chat_reviewing">Reviewing the request and planning the next action.</string>
     <string name="chat_saved">Saved conversation</string>
     <string name="chat_send">Send</string>

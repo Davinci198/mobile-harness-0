@@ -13,6 +13,23 @@ class ToolPermissionGate(
 ) {
     fun resolve(toolName: String): ToolPermissionLevel = store.resolve(toolName)
 
+    /**
+     * Effective level after the risk rule (FoneClaw-style): a blanket global
+     * ALLOW only auto-runs [ToolRiskLevel.LOW] tools. A non-LOW tool runs
+     * without prompting only when the user set an explicit per-tool ALLOW
+     * override — a deliberate decision, not a default.
+     */
+    fun effectiveLevel(toolName: String): ToolPermissionLevel {
+        val resolved = store.resolve(toolName)
+        if (resolved != ToolPermissionLevel.ALLOW) return resolved
+        if (ToolRiskCatalog.riskFor(toolName).isAutoEligible) return ToolPermissionLevel.ALLOW
+        return if (store.overrideFor(toolName) == ToolPermissionLevel.ALLOW) {
+            ToolPermissionLevel.ALLOW
+        } else {
+            ToolPermissionLevel.ASK
+        }
+    }
+
     fun setGlobalDefault(level: ToolPermissionLevel) {
         store.globalDefault = level
     }
@@ -39,7 +56,7 @@ class ToolPermissionGate(
                 return ToolPermissionGateDecision.Blocked(decision.reason)
             }
         }
-        val level = resolve(toolName)
+        val level = effectiveLevel(toolName)
         return when (level) {
             ToolPermissionLevel.ALLOW -> {
                 hooks.forEach { it.onToolPermissionChecked(toolName, true) }
