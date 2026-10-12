@@ -2463,13 +2463,14 @@ fi
     private fun writeAndroidSdkProfileConfig() {
         val androidHome = File(rootfs, "root/android-sdk")
         if (!androidHome.isDirectory) return
+        // Shell identifiers cannot contain dots, so the aapt2 override lives
+        // in ~/.gradle/gradle.properties / process() env, not here.
         File(rootfs, "etc/profile.d/10-android-sdk.sh").writeText(
             """
             export ANDROID_HOME=/root/android-sdk
             export ANDROID_SDK_ROOT=/root/android-sdk
             export GRADLE_HOME=/opt/gradle/gradle-8.14.3
             export GRADLE_USER_HOME=/root/.gradle
-            export ORG_GRADLE_PROJECT_android.aapt2FromMavenOverride=/root/android-sdk/build-tools/35.0.0/aapt2
             export PATH=/opt/gradle/gradle-8.14.3/bin:/root/android-sdk/build-tools/35.0.0:/root/android-sdk/cmdline-tools/latest/bin:${'$'}PATH
             """.trimIndent() + "\n",
         )
