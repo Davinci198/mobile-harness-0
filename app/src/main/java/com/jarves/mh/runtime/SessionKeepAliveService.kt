@@ -1,12 +1,17 @@
 package com.jarves.mh.runtime
 
+import android.app.Activity
+import android.app.Application
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
@@ -40,10 +45,42 @@ object KeepAliveTracker {
     @Volatile var enabled: Boolean = true
         private set
 
+    private var startedActivities = 0
+    @Volatile private var backgroundHookInstalled = false
+
     fun init(context: Context, keepAliveEnabled: Boolean) {
         appContext = context.applicationContext
         enabled = keepAliveEnabled
+        installBackgroundReassert(context)
         evaluate()
+    }
+
+    /**
+     * Re-assert the keep-alive FGS every time the app leaves the foreground.
+     * Guards against the service having been stopped while the UI was still
+     * visible (refused startForeground, OEM task cleanup) — without this the
+     * process would silently drop into the cached freezer after swipe-away.
+     */
+    private fun installBackgroundReassert(context: Context) {
+        if (backgroundHookInstalled) return
+        synchronized(this) {
+            if (backgroundHookInstalled) return
+            backgroundHookInstalled = true
+        }
+        (context as? Activity)?.application?.registerActivityLifecycleCallbacks(
+            object : Application.ActivityLifecycleCallbacks {
+                override fun onActivityStarted(activity: Activity) { startedActivities++ }
+                override fun onActivityStopped(activity: Activity) {
+                    startedActivities--
+                    if (startedActivities <= 0) evaluate()
+                }
+                override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+                override fun onActivityResumed(activity: Activity) {}
+                override fun onActivityPaused(activity: Activity) {}
+                override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+                override fun onActivityDestroyed(activity: Activity) {}
+            },
+        )
     }
 
     fun setEnabled(context: Context, value: Boolean) {
@@ -79,6 +116,9 @@ object KeepAliveTracker {
  * Restart after swipe-away is handled in [onTaskRemoved].
  */
 class SessionKeepAliveService : Service() {
+    private val retryHandler = Handler(Looper.getMainLooper())
+    private var promoteRetries = 0
+
     override fun onCreate() {
         super.onCreate()
         RuntimeExecutionService.ensureNotificationChannels(this)
@@ -113,12 +153,27 @@ class SessionKeepAliveService : Service() {
             } else {
                 startForeground(KEEP_ALIVE_NOTIFICATION_ID, notification)
             }
+        }.onSuccess {
+            promoteRetries = 0
         }.onFailure {
-            // Foreground start can be refused (app in background restricted
-            // state); never crash the service, just stop trying to protect.
-            Log.w(TAG, "startForeground refused: $it")
-            stopSelf()
+            // Foreground start can be transiently refused (background-start
+            // restriction before the onTaskRemoved exemption window applies).
+            // Retry with backoff instead of dropping protection on first miss;
+            // give up only after the window had time to open.
+            Log.w(TAG, "startForeground refused (attempt ${promoteRetries + 1}): $it")
+            if (promoteRetries < PROMOTE_RETRY_DELAYS_MS.size) {
+                val delay = PROMOTE_RETRY_DELAYS_MS[promoteRetries]
+                promoteRetries++
+                retryHandler.postDelayed({ runCatching { promote() } }, delay)
+            } else {
+                stopSelf()
+            }
         }
+    }
+
+    override fun onDestroy() {
+        retryHandler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 
     /**
@@ -183,6 +238,7 @@ class SessionKeepAliveService : Service() {
 
     companion object {
         private const val KEEP_ALIVE_NOTIFICATION_ID = 43
+        private val PROMOTE_RETRY_DELAYS_MS = longArrayOf(1_000L, 3_000L, 10_000L)
 
         fun start(context: Context) {
             runCatching {
