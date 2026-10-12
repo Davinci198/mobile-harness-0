@@ -3,9 +3,15 @@ package com.jarves.mh.tools.skill
 internal data class SkillMetadata(
     val name: String?,
     val description: String,
+    val completionCriteria: List<String>,
+    val failureConditions: List<String>,
 )
 
 internal object SkillMetadataParser {
+    private val heading = Regex("#{1,6}(?:\\s.*)?")
+    private val bullet = Regex("[-*+]\\s+(.+)")
+    private val fence = Regex("(`{3,}|~{3,})(.*)")
+
     fun parse(content: String): SkillMetadata {
         val lines = content.lines()
         var name: String? = null
@@ -40,7 +46,39 @@ internal object SkillMetadataParser {
             }
         }
 
-        return SkillMetadata(name?.trim()?.takeIf { it.isNotEmpty() }, description.trim())
+        return SkillMetadata(
+            name = name?.trim()?.takeIf { it.isNotEmpty() },
+            description = description.trim(),
+            completionCriteria = bulletSection(lines, "## Completion Criteria"),
+            failureConditions = bulletSection(lines, "## Failure Conditions"),
+        )
+    }
+
+    private fun bulletSection(lines: List<String>, title: String): List<String> = buildList {
+        var inSection = false
+        var openFence = ""
+        for (line in lines) {
+            val trimmed = line.trim()
+            val fenceMatch = fence.matchEntire(trimmed)
+            if (fenceMatch != null) {
+                val marker = fenceMatch.groupValues[1]
+                if (openFence.isEmpty()) {
+                    openFence = marker
+                } else if (marker.first() == openFence.first() && marker.length >= openFence.length &&
+                    fenceMatch.groupValues[2].isBlank()
+                ) {
+                    openFence = ""
+                }
+                continue
+            }
+            if (openFence.isNotEmpty()) continue
+            if (heading.matches(trimmed)) {
+                inSection = trimmed == title
+            } else if (inSection) {
+                val item = bullet.matchEntire(trimmed)?.groupValues?.get(1)?.trim()
+                if (!item.isNullOrEmpty()) add(item)
+            }
+        }
     }
 
     private fun parseMetadataLine(

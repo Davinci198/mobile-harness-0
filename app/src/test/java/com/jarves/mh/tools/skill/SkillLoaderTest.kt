@@ -7,6 +7,7 @@ import com.jarves.mh.tools.ToolPermissionLevel
 import com.jarves.mh.tools.ToolPermissionStorage
 import com.jarves.mh.tools.ToolPermissionStore
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -66,6 +67,115 @@ class SkillLoaderTest {
         assertTrue(result.prompt.contains("Using skill: Documentation"))
         assertTrue(result.prompt.contains("/workspace/demo/.mobilharness/skills/docs/SKILL.md"))
         assertTrue(result.prompt.contains("Use files carefully."))
+    }
+
+    @Test
+    fun parsesCompletionAndFailureBulletsAndIncludesThemInPrompt() {
+        val content = """
+            # Review
+            ## Completion Criteria
+            - All checks pass.
+            * Changes are documented.
+            + Results are reported.
+
+            ## Failure Conditions
+            - A check fails.
+            * Required input is missing.
+        """.trimIndent()
+        skill("review", content)
+
+        val scanned = loader.scan().skills.single()
+        val result = activated("review")
+
+        assertEquals(listOf("All checks pass.", "Changes are documented.", "Results are reported."), scanned.completionCriteria)
+        assertEquals(listOf("A check fails.", "Required input is missing."), scanned.failureConditions)
+        assertEquals(scanned.completionCriteria, result.packageInfo.completionCriteria)
+        assertEquals(scanned.failureConditions, result.packageInfo.failureConditions)
+        val context = result.prompt.substringBefore("SKILL.md content:")
+        assertTrue(context.contains("Completion Criteria:\n- All checks pass.\n- Changes are documented.\n- Results are reported."))
+        assertTrue(context.contains("Failure Conditions:\n- A check fails.\n- Required input is missing."))
+        assertTrue(result.prompt.endsWith("SKILL.md content:\n$content"))
+    }
+
+    @Test
+    fun missingSectionsProduceEmptyLists() {
+        skill("plain", "# Instructions\n- Read the files.")
+
+        val result = activated("plain")
+
+        assertTrue(result.packageInfo.completionCriteria.isEmpty())
+        assertTrue(result.packageInfo.failureConditions.isEmpty())
+        assertFalse(result.prompt.contains("Completion Criteria:"))
+        assertFalse(result.prompt.contains("Failure Conditions:"))
+        assertTrue(loader.scan().issues.isEmpty())
+    }
+
+    @Test
+    fun emptySectionsAreSkippedSilently() {
+        skill("empty", "## Completion Criteria\n\n## Failure Conditions\n- \n*\n+\nJust prose.")
+
+        val result = activated("empty")
+
+        assertTrue(result.packageInfo.completionCriteria.isEmpty())
+        assertTrue(result.packageInfo.failureConditions.isEmpty())
+        val context = result.prompt.substringBefore("SKILL.md content:")
+        assertFalse(context.contains("Completion Criteria:"))
+        assertFalse(context.contains("Failure Conditions:"))
+        assertTrue(loader.scan().issues.isEmpty())
+    }
+
+    @Test
+    fun unrelatedHeadingsAndNonBulletLinesAreIgnored() {
+        skill("sections", """
+            ## Notes
+            - Unrelated before.
+            ### Completion Criteria
+            - Wrong heading level.
+            ## completion criteria
+            - Wrong case.
+            ## Completion Criteria Extra
+            - Wrong title.
+            ## Completion Criteria
+            Plain prose.
+            1. Numbered instruction.
+            - Expected completion.
+            ## Notes
+            - Unrelated after.
+            ## Failure Conditions
+            + Expected failure.
+            # Appendix
+            - Unrelated appendix.
+        """.trimIndent())
+
+        val result = activated("sections")
+
+        assertEquals(listOf("Expected completion."), result.packageInfo.completionCriteria)
+        assertEquals(listOf("Expected failure."), result.packageInfo.failureConditions)
+    }
+
+    @Test
+    fun sectionParsingIgnoresFencedExamplesAndReadsPastMetadataLimit() {
+        val prefix = (1..45).joinToString("\n") { "line$it" }
+        skill("examples", prefix + "\n" + """
+            ~~~markdown
+            ## Completion Criteria
+            - Example only.
+            ~~~
+            ## Failure Conditions
+            - Expected failure.
+            ```text
+            - Example bullet.
+            ## Completion Criteria
+            ```
+            * Another failure.
+            ## Completion Criteria
+            - Expected completion.
+        """.trimIndent())
+
+        val result = activated("examples")
+
+        assertEquals(listOf("Expected completion."), result.packageInfo.completionCriteria)
+        assertEquals(listOf("Expected failure.", "Another failure."), result.packageInfo.failureConditions)
     }
 
     @Test
