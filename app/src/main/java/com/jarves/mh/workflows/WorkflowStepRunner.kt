@@ -138,6 +138,10 @@ class WorkflowStepRunner(
         is DeviceToolResult.ToastDispatched -> StepOutcome(true, "toast shown")
         is DeviceToolResult.NotificationDispatched -> StepOutcome(true, "notification ${result.notificationId} sent")
         is DeviceToolResult.LinkOpened -> StepOutcome(true, "opened ${result.url}")
+        is DeviceToolResult.UiTreeRead -> StepOutcome(true, "read ${result.nodes} UI nodes")
+        is DeviceToolResult.UiNodeClicked -> StepOutcome(true, "clicked UI node ${result.nodeId}")
+        is DeviceToolResult.UiStatus ->
+            StepOutcome(true, if (result.enabled) "accessibility enabled" else "accessibility disabled")
     }
 
     private fun memory(result: MemoryToolResult): StepOutcome = when (result) {

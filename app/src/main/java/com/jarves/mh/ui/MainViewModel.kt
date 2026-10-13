@@ -6444,6 +6444,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 com.jarves.mh.tools.device.AndroidToastAdapter(app),
                 com.jarves.mh.tools.device.AndroidNotificationAdapter(app),
                 com.jarves.mh.tools.device.AndroidHttpsLinkAdapter(app),
+                com.jarves.mh.tools.device.AndroidAccessibilityAdapter(app),
                 gate,
             ),
             memoryTools = com.jarves.mh.tools.memory.MemoryTools(

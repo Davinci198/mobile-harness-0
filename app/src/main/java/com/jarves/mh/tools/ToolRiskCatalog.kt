@@ -18,7 +18,7 @@ object ToolRiskCatalog {
 
         // Reads private/user data
         listOf(
-            "ClipboardRead", "MemoryRead",
+            "ClipboardRead", "MemoryRead", "UiReadTree", "UiStatus",
         ).forEach { put(it, ToolRiskLevel.SENSITIVE_READ) }
 
         // Changes device/app state
@@ -26,6 +26,7 @@ object ToolRiskCatalog {
             "Write", "Edit", "NotebookEdit",
             "MemoryCreate", "MemoryUpdate", "MemoryDelete", "MemoryLink", "MemoryUnlink",
             "ClipboardCopy", "DeviceToast", "DeviceNotification", "DeviceOpenHttpsLink",
+            "UiClick",
             "VisitWeb",
         ).forEach { put(it, ToolRiskLevel.DEVICE_CONTROL) }
 

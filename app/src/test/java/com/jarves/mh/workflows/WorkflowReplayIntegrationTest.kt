@@ -5,12 +5,14 @@ import com.jarves.mh.tools.ToolPermissionLevel
 import com.jarves.mh.tools.ToolPermissionStore
 import com.jarves.mh.tools.ToolPermissionStorage
 import com.jarves.mh.tools.calc.CalculateTool
+import com.jarves.mh.tools.device.AccessibilityAdapter
 import com.jarves.mh.tools.device.ClipboardAdapter
 import com.jarves.mh.tools.device.DeviceToolResult
 import com.jarves.mh.tools.device.DeviceTools
 import com.jarves.mh.tools.device.HttpsLinkAdapter
 import com.jarves.mh.tools.device.NotificationAdapter
 import com.jarves.mh.tools.device.ToastAdapter
+import com.jarves.mh.tools.device.UiNodeSnapshot
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,6 +49,11 @@ class WorkflowReplayIntegrationTest {
             },
             links = object : HttpsLinkAdapter {
                 override fun open(url: String) {}
+            },
+            accessibility = object : AccessibilityAdapter {
+                override fun isServiceEnabled(): Boolean = false
+                override fun readTree(maxNodes: Int): List<UiNodeSnapshot>? = null
+                override fun clickNode(nodeId: String): Boolean = false
             },
             gate = gate,
         )

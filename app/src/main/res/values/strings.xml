@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">Mobile Harness</string>
+    <string name="accessibility_service_label">Mobile Harness UI access</string>
+    <string name="accessibility_service_description">Lets Mobile Harness read the on-screen UI tree and tap elements so the agent can operate apps you ask it to. No text is sent off the device.</string>
     <string name="settings_language_title">Language</string>
     <string name="settings_language_system">Follow system</string>
     <string name="settings_language_english">English</string>
