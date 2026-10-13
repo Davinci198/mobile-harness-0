@@ -6,6 +6,8 @@ object DeviceToolLimits {
     const val MAX_NOTIFICATION_TITLE_CHARS = 80
     const val MAX_NOTIFICATION_TEXT_CHARS = 1_000
     const val MAX_HTTPS_URL_CHARS = 2_048
+    const val MAX_UI_TREE_NODES = 400
+    const val MAX_UI_NODE_ID_CHARS = 128
     const val NOTIFICATION_CHANNEL_ID = "device-tools"
     const val NOTIFICATION_ID = 43
 }
@@ -42,6 +44,9 @@ sealed interface DeviceToolResult {
         val notificationId: Int,
     ) : DeviceToolResult
     data class LinkOpened(val url: String) : DeviceToolResult
+    data class UiTreeRead(val nodes: Int) : DeviceToolResult
+    data class UiNodeClicked(val nodeId: String) : DeviceToolResult
+    data class UiStatus(val enabled: Boolean) : DeviceToolResult
     data class Error(
         val tool: String,
         val code: DeviceErrorCode,

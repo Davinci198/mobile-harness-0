@@ -10,6 +10,7 @@ class DeviceTools(
     private val toast: ToastAdapter,
     private val notifications: NotificationAdapter,
     private val links: HttpsLinkAdapter,
+    private val accessibility: AccessibilityAdapter,
     private val gate: ToolPermissionGate,
     private val hooks: List<AIToolHook> = emptyList(),
 ) {
@@ -73,6 +74,46 @@ class DeviceTools(
         }
     }
 
+    fun readUiTree(): DeviceToolResult {
+        val tool = "UiReadTree"
+        return execute(tool, "read on-screen UI tree") {
+            if (!accessibility.isServiceEnabled()) {
+                throw DeviceOperationException(
+                    DeviceErrorCode.PERMISSION_REQUIRED,
+                    "Accessibility service is not enabled",
+                )
+            }
+            val nodes = accessibility.readTree(DeviceToolLimits.MAX_UI_TREE_NODES)
+                ?: throw DeviceOperationException(DeviceErrorCode.ADAPTER_ERROR, "UI tree is unavailable")
+            DeviceToolResult.UiTreeRead(nodes.size)
+        }
+    }
+
+    fun clickUiNode(nodeId: String): DeviceToolResult {
+        val tool = "UiClick"
+        val normalized = nodeId.trim()
+        if (normalized.isEmpty()) return error(tool, DeviceErrorCode.INVALID_INPUT, "Node id is empty")
+        if (normalized.length > DeviceToolLimits.MAX_UI_NODE_ID_CHARS) {
+            return error(tool, DeviceErrorCode.INVALID_INPUT, "Node id is too long")
+        }
+        return execute(tool, "click UI node $normalized") {
+            if (!accessibility.isServiceEnabled()) {
+                throw DeviceOperationException(
+                    DeviceErrorCode.PERMISSION_REQUIRED,
+                    "Accessibility service is not enabled",
+                )
+            }
+            if (!accessibility.clickNode(normalized)) {
+                throw DeviceOperationException(DeviceErrorCode.ADAPTER_ERROR, "Node could not be clicked")
+            }
+            DeviceToolResult.UiNodeClicked(normalized)
+        }
+    }
+
+    fun accessibilityStatus(): DeviceToolResult = execute("UiStatus", "check accessibility status") {
+        DeviceToolResult.UiStatus(accessibility.isServiceEnabled())
+    }
+
     private fun execute(tool: String, explanation: String, block: () -> DeviceToolResult): DeviceToolResult {
         when (val decision = gate.evaluate(tool, explanation.take(240))) {
             is ToolPermissionGateDecision.Allowed -> Unit
@@ -124,6 +165,9 @@ class DeviceTools(
         is DeviceToolResult.ToastDispatched -> "toast dispatched"
         is DeviceToolResult.NotificationDispatched -> "notification $notificationId dispatched"
         is DeviceToolResult.LinkOpened -> "opened HTTPS link"
+        is DeviceToolResult.UiTreeRead -> "read $nodes UI nodes"
+        is DeviceToolResult.UiNodeClicked -> "clicked UI node $nodeId"
+        is DeviceToolResult.UiStatus -> if (enabled) "accessibility enabled" else "accessibility disabled"
         is DeviceToolResult.Error -> message
     }
 

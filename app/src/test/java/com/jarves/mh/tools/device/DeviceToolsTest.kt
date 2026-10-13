@@ -60,6 +60,24 @@ private class FakeLinks : HttpsLinkAdapter {
     }
 }
 
+private class FakeAccessibility(
+    var enabled: Boolean = true,
+    var tree: List<UiNodeSnapshot> = emptyList(),
+    var clickResult: Boolean = true,
+) : AccessibilityAdapter {
+    var treeReads = 0
+    var clicks = mutableListOf<String>()
+    override fun isServiceEnabled(): Boolean = enabled
+    override fun readTree(maxNodes: Int): List<UiNodeSnapshot>? {
+        treeReads++
+        return tree.take(maxNodes)
+    }
+    override fun clickNode(nodeId: String): Boolean {
+        clicks += nodeId
+        return clickResult
+    }
+}
+
 class DeviceToolsTest {
     private val deviceTools = listOf(
         "ClipboardCopy",
@@ -67,12 +85,16 @@ class DeviceToolsTest {
         "DeviceToast",
         "DeviceNotification",
         "DeviceOpenHttpsLink",
+        "UiReadTree",
+        "UiClick",
+        "UiStatus",
     )
     private lateinit var store: ToolPermissionStore
     private lateinit var clipboard: FakeClipboard
     private lateinit var toast: FakeToast
     private lateinit var notifications: FakeNotifications
     private lateinit var links: FakeLinks
+    private lateinit var accessibility: FakeAccessibility
     private lateinit var tools: DeviceTools
 
     @Before
@@ -91,7 +113,8 @@ class DeviceToolsTest {
         toast = FakeToast()
         notifications = FakeNotifications()
         links = FakeLinks()
-        tools = DeviceTools(clipboard, toast, notifications, links, ToolPermissionGate(store))
+        accessibility = FakeAccessibility()
+        tools = DeviceTools(clipboard, toast, notifications, links, accessibility, ToolPermissionGate(store))
     }
 
     @Test
@@ -201,6 +224,7 @@ class DeviceToolsTest {
             toast,
             notifications,
             links,
+            accessibility,
             ToolPermissionGate(store, listOf(object : AIToolHook {
                 override fun onToolCallIntercept(toolName: String, explanation: String) =
                     AIToolHookDecision.Block("blocked")
@@ -218,6 +242,7 @@ class DeviceToolsTest {
             toast,
             notifications,
             links,
+            accessibility,
             ToolPermissionGate(store),
             listOf(object : AIToolHook {
                 override fun onToolExecutionStarted(toolName: String) { events += "start:$toolName" }
@@ -238,6 +263,7 @@ class DeviceToolsTest {
             toast,
             notifications,
             links,
+            accessibility,
             ToolPermissionGate(store),
             listOf(object : AIToolHook {
                 override fun onToolExecutionStarted(toolName: String) = throw IllegalStateException("hook")
@@ -256,8 +282,61 @@ class DeviceToolsTest {
             "DeviceToast",
             "DeviceNotification",
             "DeviceOpenHttpsLink",
+            "UiReadTree",
+            "UiClick",
+            "UiStatus",
         )
         assertTrue(ToolPermissionStore.knownTools.containsAll(expected))
+    }
+
+    @Test
+    fun uiReadTreeRequiresEnabledServiceAndBoundsNodes() {
+        accessibility.enabled = false
+        assertError(tools.readUiTree(), DeviceErrorCode.PERMISSION_REQUIRED)
+
+        accessibility.enabled = true
+        accessibility.tree = List(DeviceToolLimits.MAX_UI_TREE_NODES + 50) {
+            UiNodeSnapshot("id$it", "android.widget.TextView", "t", "", false, true, 0, 0, 0, 0)
+        }
+        val result = tools.readUiTree() as DeviceToolResult.UiTreeRead
+        assertEquals(DeviceToolLimits.MAX_UI_TREE_NODES, result.nodes)
+    }
+
+    @Test
+    fun uiClickValidatesIdAndReportsFailures() {
+        assertError(tools.clickUiNode(" "), DeviceErrorCode.INVALID_INPUT)
+        assertError(tools.clickUiNode("x".repeat(DeviceToolLimits.MAX_UI_NODE_ID_CHARS + 1)), DeviceErrorCode.INVALID_INPUT)
+        assertEquals(0, accessibility.clicks.size)
+
+        accessibility.clickResult = false
+        assertError(tools.clickUiNode("node-1"), DeviceErrorCode.ADAPTER_ERROR)
+        assertEquals(listOf("node-1"), accessibility.clicks)
+
+        accessibility.clickResult = true
+        val result = tools.clickUiNode(" node-2 ") as DeviceToolResult.UiNodeClicked
+        assertEquals("node-2", result.nodeId)
+        assertEquals(listOf("node-1", "node-2"), accessibility.clicks)
+    }
+
+    @Test
+    fun uiStatusReportsServiceState() {
+        accessibility.enabled = true
+        assertTrue((tools.accessibilityStatus() as DeviceToolResult.UiStatus).enabled)
+        accessibility.enabled = false
+        assertTrue(!(tools.accessibilityStatus() as DeviceToolResult.UiStatus).enabled)
+    }
+
+    @Test
+    fun accessibilityToolsRespectAskAndForbid() {
+        deviceTools.forEach { store.setOverride(it, null) }
+        store.globalDefault = ToolPermissionLevel.ASK
+        assertError(tools.readUiTree(), DeviceErrorCode.APPROVAL_REQUIRED)
+        assertError(tools.clickUiNode("n"), DeviceErrorCode.APPROVAL_REQUIRED)
+        assertError(tools.accessibilityStatus(), DeviceErrorCode.APPROVAL_REQUIRED)
+        assertEquals(0, accessibility.treeReads + accessibility.clicks.size)
+
+        store.globalDefault = ToolPermissionLevel.FORBID
+        assertError(tools.clickUiNode("n"), DeviceErrorCode.PERMISSION_DENIED)
     }
 
     private fun assertError(result: DeviceToolResult, code: DeviceErrorCode) {
