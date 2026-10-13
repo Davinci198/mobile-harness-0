@@ -79,6 +79,9 @@ class WorkflowStepRunner(
             "DeviceToast" -> device(deviceTools.showToast(arg("text")))
             "DeviceNotification" -> device(deviceTools.sendNotification(arg("title"), arg("text")))
             "DeviceOpenHttpsLink" -> device(deviceTools.openHttpsLink(arg("url")))
+            "UiReadTree" -> device(deviceTools.readUiTree())
+            "UiStatus" -> device(deviceTools.accessibilityStatus())
+            "UiClick" -> device(deviceTools.clickUiNode(arg("nodeId")))
             "MemoryCreate" -> memory(
                 memoryTools.create(
                     title = arg("title"),

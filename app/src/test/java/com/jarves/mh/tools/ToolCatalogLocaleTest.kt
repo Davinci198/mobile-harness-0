@@ -21,12 +21,64 @@ class ToolCatalogLocaleTest {
     }
 
     @Test
+    fun toolsSectionParsesToFlattenedNameAndDescriptionKeys() {
+        val labels = ToolCatalogLocale.parse(
+            """
+            {"risk_levels":{"low":"Read only"},
+             "tools":{"Bash":{"name":"Bash","description":"Run shell commands"}}}
+            """.trimIndent(),
+        )
+
+        assertEquals("Bash", labels["tool_Bash_name"])
+        assertEquals("Run shell commands", labels["tool_Bash_description"])
+        assertEquals("Read only", labels["low"])
+    }
+
+    @Test
+    fun blankToolEntriesAreDropped() {
+        val labels = ToolCatalogLocale.parse(
+            """
+            {"risk_levels":{"low":"Read only"},
+             "tools":{"Bash":{"name":"Bash","description":" "},"Read":{"name":null,"description":"Reads files"}}}
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            mapOf(
+                "low" to "Read only",
+                "tool_Bash_name" to "Bash",
+                "tool_Read_description" to "Reads files",
+            ),
+            labels,
+        )
+    }
+
+    @Test
     fun bundledCatalogsHaveIdenticalCompleteKeySets() {
         val english = ToolCatalogLocale.parse(asset("tool_catalog/en.json"))
         val romanian = ToolCatalogLocale.parse(asset("tool_catalog/ro.json"))
 
-        assertEquals(setOf("low", "sensitive_read", "device_control", "external_effect", "destructive"), english.keys)
+        val riskKeys = setOf("low", "sensitive_read", "device_control", "external_effect", "destructive")
+        val toolKeys = ToolPermissionStore.knownTools
+            .flatMap { tool -> listOf("tool_${tool}_name", "tool_${tool}_description") }
+            .toSet()
+
+        assertEquals(riskKeys + toolKeys, english.keys)
         assertEquals(english.keys, romanian.keys)
+    }
+
+    @Test
+    fun bundledToolDescriptionsAreLocalized() {
+        val english = ToolCatalogLocale.parse(asset("tool_catalog/en.json"))
+        val romanian = ToolCatalogLocale.parse(asset("tool_catalog/ro.json"))
+
+        assertEquals("Rulează comenzi shell", romanian["tool_Bash_description"])
+        assertEquals("Run shell commands", english["tool_Bash_description"])
+        for (tool in ToolPermissionStore.knownTools) {
+            assertEquals("$tool en description", true, !english["tool_${tool}_description"].isNullOrBlank())
+            assertEquals("$tool ro description", true, !romanian["tool_${tool}_description"].isNullOrBlank())
+            assertEquals("$tool names match", english["tool_${tool}_name"], romanian["tool_${tool}_name"])
+        }
     }
 
     @Test

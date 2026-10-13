@@ -2,6 +2,8 @@ package com.jarves.mh.runtime
 
 import com.jarves.mh.tools.device.DeviceToolResult
 import com.jarves.mh.tools.device.DeviceTools
+import com.jarves.mh.tools.skill.SkillLoader
+import com.jarves.mh.tools.skill.SkillToolResult
 import java.io.BufferedInputStream
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -34,11 +36,26 @@ import org.json.JSONObject
  *   [DeviceTools]'s permission gate. `UiReadTree`/`UiStatus` are
  *   SENSITIVE_READ, `UiClick` is DEVICE_CONTROL, so the same risk-graded
  *   approval cards the workflow path uses also guard the chat agent.
+ * - `POST /skills` — the guest skills bridge
+ *   (`$DSH_HOME/plugins/mh-skills/index.js`) posts
+ *   `{tool:"SkillList"}` or `{tool:"UseSkill", name}` and receives a
+ *   `{success, …}` result from [SkillLoader]: `SkillList` returns the
+ *   scanned catalog, `UseSkill` returns the activation prompt (or a
+ *   permission error when the gate holds `UseSkill` at ASK/FORBID).
  */
 internal class DshApprovalServer(
     private val decide: suspend (callId: String, toolName: String, reason: String?) -> String,
     private val answer: suspend (callId: String?, questions: JSONArray) -> String,
     private val deviceTools: DeviceTools? = null,
+    /**
+     * Host-side skill catalog behind the guest `mh_skills` helper. `SkillList`
+     * scans it; `UseSkill` activates one skill through the same [deviceGate]
+     * the bridge passes into [SkillLoader], so a UseSkill ASK policy resolves
+     * through the ApprovalCard path instead of silently injecting the prompt.
+     * Supplied as a provider because the guest skill root carries the active
+     * project slug, which changes across warm sessions.
+     */
+    private val skillLoader: () -> SkillLoader? = { null },
     /**
      * Raises the ApprovalCard for a UI tool the gate held at ASK and returns
      * the user's decision (`allowed-once` / `rejected`). Lets the chat agent's
@@ -106,6 +123,9 @@ internal class DshApprovalServer(
         }
         if (path == "/device") {
             return respond(socket, runDevice(payload))
+        }
+        if (path == "/skills") {
+            return respond(socket, runSkills(payload))
         }
         val outcome = runCatching {
             val callId = payload.stringOrNull("callId") ?: UUID.randomUUID().toString()
@@ -185,6 +205,62 @@ internal class DshApprovalServer(
         JSONObject().put("success", true).put("data", data).toString()
 
     private fun deviceError(message: String): String =
+        JSONObject().put("success", false).put("error", message).toString()
+
+    /**
+     * Runs one skill tool through [SkillLoader] and maps the result onto the
+     * same `{success, …}` body the device route uses. `SkillList` returns the
+     * catalog (names + descriptions + guest paths); `UseSkill` returns the
+     * activation prompt or the gate/scan error so the model sees a clean
+     * failure instead of a silently dropped activation.
+     */
+    private fun runSkills(payload: JSONObject): String {
+        val loader = skillLoader() ?: return skillError("Skill tools are unavailable in this runtime")
+        val tool = payload.stringOrNull("tool") ?: return skillError("Missing tool name")
+        return when (tool) {
+            "SkillList" -> {
+                val catalog = loader.scan()
+                val skills = JSONArray()
+                catalog.skills.forEach { pkg ->
+                    skills.put(
+                        JSONObject()
+                            .put("name", pkg.name)
+                            .put("description", pkg.description)
+                            .put("path", pkg.guestSkillFilePath),
+                    )
+                }
+                val issues = JSONArray()
+                catalog.issues.forEach { issue ->
+                    issues.put(
+                        JSONObject()
+                            .put("directory", issue.directoryName)
+                            .put("code", issue.code.name)
+                            .put("message", issue.message),
+                    )
+                }
+                skillOk(JSONObject().put("skills", skills).put("issues", issues))
+            }
+            "UseSkill" -> {
+                val name = payload.stringOrNull("name") ?: return skillError("Missing skill name")
+                when (val result = loader.activate(name)) {
+                    is SkillToolResult.Activated -> skillOk(
+                        JSONObject()
+                            .put("name", result.packageInfo.name)
+                            .put("description", result.packageInfo.description)
+                            .put("path", result.packageInfo.guestSkillFilePath)
+                            .put("prompt", result.prompt),
+                    )
+                    is SkillToolResult.Error -> skillError(result.message)
+                }
+            }
+            else -> skillError("Unknown skill tool: $tool")
+        }
+    }
+
+    private fun skillOk(data: JSONObject): String =
+        JSONObject().put("success", true).put("data", data).toString()
+
+    private fun skillError(message: String): String =
         JSONObject().put("success", false).put("error", message).toString()
 
     private fun respond(socket: Socket, body: String) {

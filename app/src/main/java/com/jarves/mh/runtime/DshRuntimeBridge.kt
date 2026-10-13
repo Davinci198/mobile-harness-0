@@ -74,6 +74,21 @@ class DshRuntimeBridge(
         deviceGate,
     )
     @Volatile private var approvalServer: DshApprovalServer? = null
+    /**
+     * Host-side skill catalog for the guest `mh_skills` helper. Built on
+     * demand because the guest root carries the active project slug
+     * (`/workspace/<slug>/.mobilharness/skills`), which changes across warm
+     * sessions; [deviceGate] is the same store the UI tools use, so a UseSkill
+     * ASK policy raises the ApprovalCard instead of injecting silently.
+     */
+    private fun skillLoader(): com.jarves.mh.tools.skill.SkillLoader? {
+        val slug = activeProjectSlug ?: return null
+        return com.jarves.mh.tools.skill.SkillLoader(
+            root = File(context.filesDir, "skills"),
+            guestRoot = "/workspace/$slug/.mobilharness/skills",
+            gate = deviceGate,
+        )
+    }
     @Volatile private var activeProcess: Process? = null
     /**
      * The SDK process kept alive between Agent Executions. Reusing it skips the
@@ -620,6 +635,9 @@ class DshRuntimeBridge(
             // The UI-tools bridge rides the same loopback server; the guest
             // plugin reads this port to run UiReadTree/UiClick/UiStatus.
             "MH_UI_PORT" to ensureApprovalServer().port.toString(),
+            // The skills bridge also rides the same loopback server; the guest
+            // plugin reads this port to run SkillList/UseSkill.
+            "MH_SKILLS_PORT" to ensureApprovalServer().port.toString(),
             // dsh asks for approval only when the sandbox denies an action and
             // the model escalates. danger-full-access never denies, so it can
             // never raise the ApprovalCard; workspace-write is dsh's interactive
@@ -752,6 +770,7 @@ class DshRuntimeBridge(
                     requestQuestionDecision(callId, questions)
                 },
                 deviceTools = deviceTools,
+                skillLoader = { skillLoader() },
                 decideDeviceAsk = { tool, nodeId ->
                     requestApprovalDecision(
                         callId = UUID.randomUUID().toString(),
@@ -853,6 +872,8 @@ class DshRuntimeBridge(
             File(question, "index.js").writeText(QUESTION_ANSWERER_JS)
             val ui = File(home, "plugins/mh-ui-tools").apply { mkdirs() }
             File(ui, "index.js").writeText(UI_TOOLS_JS)
+            val skills = File(home, "plugins/mh-skills").apply { mkdirs() }
+            File(skills, "index.js").writeText(SKILLS_TOOLS_JS)
         }.onFailure { Log.w("DshBridge", "Answerer deploy failed", it) }
     }
 
@@ -1205,6 +1226,41 @@ export default function mhUiTools(ctx) {
 """
 
         /**
+         * Guest-side skills bridge: on `session/start`, drops an executable
+         * `mh_skills` helper into the workspace so the chat agent can list and
+         * activate host-side skills without raw filesystem poking. The helper
+         * POSTs to the loopback `/skills` route on [DshApprovalServer], which
+         * runs the call through [com.jarves.mh.tools.skill.SkillLoader]
+         * (SkillList = catalog scan, UseSkill = gate-checked activation that
+         * returns the skill prompt or a clean error).
+         *
+         * Usage (one JSON line of `{success, …}` is printed back to the model):
+         *   echo '{"tool":"SkillList"}' | ./mh_skills
+         *   echo '{"tool":"UseSkill","name":"<skill>"}' | ./mh_skills
+         */
+        private const val SKILLS_TOOLS_JS = """
+export default function mhSkillsTools(ctx) {
+  ctx.on("session/start", async (event) => {
+    const port = process.env.MH_SKILLS_PORT || process.env.MH_APPROVAL_PORT;
+    if (!port) return;
+    const workspace = event?.cwd || ".";
+    const base = "http://127.0.0.1:" + port + "/skills";
+    // The helper reads the JSON body off stdin, so the bash contains no "$"
+    // (Kotlin's raw string would interpolate it). Usage:
+    //   echo '{"tool":"SkillList"}' | ./mh_skills
+    //   echo '{"tool":"UseSkill","name":"docs"}' | ./mh_skills
+    const script = [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      "curl -sS -X POST " + base + " -H 'content-type: application/json' --data-binary @-",
+      "",
+    ].join("\n");
+    await (await import("node:fs/promises")).writeFile(workspace + "/mh_skills", script, { mode: 0o755 });
+  });
+}
+"""
+
+        /**
          * Silence the reused process must keep after a turn ends before the
          * turn is considered over. The SDK stops emitting as soon as the session
          * goes idle, so a few quiet hundred milliseconds only catch the trailing
@@ -1264,6 +1320,8 @@ internal fun dshHomePatch(route: DshRoute, model: String): String = buildString 
     appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-question-answerer/index.js")
     appendLine("    - id: mh-ui-tools")
     appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-ui-tools/index.js")
+    appendLine("    - id: mh-skills")
+    appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-skills/index.js")
     // The sdk profile stacks only dsh-base + dsh-sdk-app, and neither ships the
     // model-facing question tool (only the web/tui presets do) even though
     // dsh-base registers the user-questions seam and its plan prompt tells the

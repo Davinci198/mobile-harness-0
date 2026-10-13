@@ -31,6 +31,9 @@ object WorkflowCatalog {
         "DeviceToast" to listOf("text"),
         "DeviceNotification" to listOf("title", "text"),
         "DeviceOpenHttpsLink" to listOf("url"),
+        "UiReadTree" to emptyList(),
+        "UiStatus" to emptyList(),
+        "UiClick" to listOf("nodeId"),
         // memory
         "MemoryCreate" to listOf("title", "content"),
         "MemoryRead" to listOf("id"),

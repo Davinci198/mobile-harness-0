@@ -15,6 +15,7 @@ class WorkflowCatalogTest {
         listOf("Read", "Write", "Edit", "Grep", "Glob", "Bash", "Calculate", "Sleep",
             "VisitWeb", "HttpRequest", "DownloadFile", "ClipboardCopy", "ClipboardRead",
             "DeviceToast", "DeviceNotification", "DeviceOpenHttpsLink",
+            "UiReadTree", "UiStatus", "UiClick",
             "MemoryCreate", "MemoryRead", "MemorySearch", "MemoryList").forEach {
             assertTrue("$it should be supported", WorkflowCatalog.supports(it))
         }
@@ -57,5 +58,25 @@ class WorkflowCatalogTest {
     @Test
     fun emptyWorkflowIsNotExecutable() {
         assertFalse(WorkflowCatalog.isExecutable(workflow(emptyList())))
+    }
+
+    @Test
+    fun uiToolsWithoutRequiredArgumentsAreExecutable() {
+        val w = workflow(
+            listOf(
+                WorkflowStep("UiReadTree", emptyMap()),
+                WorkflowStep("UiStatus", emptyMap()),
+                WorkflowStep("UiClick", mapOf("nodeId" to "node-1")),
+            ),
+        )
+        assertTrue(WorkflowCatalog.isExecutable(w))
+        assertNull(WorkflowCatalog.rejectionReason(w))
+    }
+
+    @Test
+    fun uiClickMissingNodeIdIsRejected() {
+        val w = workflow(listOf(WorkflowStep("UiClick", emptyMap())))
+        assertFalse(WorkflowCatalog.isExecutable(w))
+        assertTrue(WorkflowCatalog.rejectionReason(w)!!.contains("nodeId"))
     }
 }

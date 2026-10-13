@@ -12,7 +12,7 @@ object ToolRiskCatalog {
     private val defaults: Map<String, ToolRiskLevel> = buildMap {
         // Read-only / no side effects
         listOf(
-            "Read", "Glob", "Grep", "Calculate", "Sleep", "UseSkill",
+            "Read", "Glob", "Grep", "Calculate", "Sleep", "UseSkill", "SkillList",
             "MemorySearch", "MemoryList", "MemoryLinkList",
         ).forEach { put(it, ToolRiskLevel.LOW) }
 
