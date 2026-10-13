@@ -771,8 +771,14 @@ class RuntimeInstaller(private val context: Context) {
                 "python3 python3-pip python3-venv curl git build-essential python3-dev libffi-dev; " +
                 "if [ -d /usr/local/lib/hermes-agent ] && [ ! -d /usr/local/lib/hermes-agent/.git ]; then rm -rf /usr/local/lib/hermes-agent; fi; " +
                 "if [ -d \"\$HOME/.hermes/hermes-agent\" ] && [ ! -d \"\$HOME/.hermes/hermes-agent/.git\" ]; then rm -rf \"\$HOME/.hermes/hermes-agent\"; fi; " +
+                // A partially-extracted uv cache entry (missing WHEEL/dist-info)
+                // makes pm.cli install fail permanently. Clear it before the
+                // install so a retry starts from a clean slate.
+                "rm -rf \"\$HOME/.hermes/cache/uv/archive-v0\" " +
+                "\"\$HOME/.hermes/cache/uv/sdists-v9\" " +
+                "\"\$HOME/.hermes/cache/uv/wheels-v\"* 2>/dev/null || true; " +
                 "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | " +
-                "bash -s -- --skip-setup --non-interactive --skip-browser --skip-computer-use || true; " +
+                "bash -s -- --skip-setup --non-interactive --skip-browser --skip-computer-use; " +
                 "sed -i 's/\"--compile-bytecode\"\\]/\"--compile-bytecode\", \"--link-mode\", \"copy\"]/' " +
                 "\"\$HOME/.hermes/hermes-agent/pm/environment.py\"; " +
                 "if [ -x \"\$HOME/.local/bin/hermes\" ]; then " +
