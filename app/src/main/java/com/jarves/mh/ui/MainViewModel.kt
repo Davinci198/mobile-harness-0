@@ -6229,6 +6229,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (prompt.isBlank() && attachments.isEmpty()) return false
         if (state.value.isRunning || state.value.androidBuildRunning) {
+            val sessionId = _state.value.activeSessionId
+            val handle = sessionId?.let { agentWork.handleFor(it) }
+            if (handle != null && handle.supportsMidTurnInjection && attachments.isEmpty()) {
+                // Mid-turn injection: the message lands in the running session
+                // immediately instead of waiting for the current task to finish.
+                val requestText = prompt.trim()
+                _state.update {
+                    it.copy(
+                        messages = it.messages + ChatMessage(fromUser = true, text = requestText),
+                        pendingAttachments = emptyList(),
+                    )
+                }
+                persistMessages()
+                viewModelScope.launch {
+                    val injected = handle.injectPrompt(requestText)
+                    if (!injected) {
+                        // Runtime rejected injection (session died, process gone):
+                        // put the message back into the follow-up queue.
+                        _state.update { state ->
+                            state.copy(
+                                messages = state.messages.dropLast(1),
+                                toastMessage = s(R.string.an_follow_up_queued),
+                            )
+                        }
+                        queueFollowUp(project, requestText, emptyList())
+                    }
+                }
+                return true
+            }
             queueFollowUp(project, prompt, attachments)
             return true
         }

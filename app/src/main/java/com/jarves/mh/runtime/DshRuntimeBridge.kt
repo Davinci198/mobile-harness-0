@@ -89,6 +89,46 @@ class DshRuntimeBridge(
     @Volatile private var foregroundResultPosted: Boolean = false
     @Volatile private var lastThinkingUpdateAt: Long = 0L
 
+    override val supportsMidTurnInjection: Boolean get() = true
+
+    /**
+     * Delivers [prompt] into the running session [sessionId] without stopping it.
+     *
+     * The SDK channel keeps stdin open for the life of the process, so a second
+     * `session/prompt` frame can land while the current turn is still streaming.
+     * The turn reader resets its end-of-turn timer once (via
+     * [DshSdkChannel.pendingInjectedPrompt]) so the queued turn's events are
+     * consumed instead of dropping out on the quiet timeout.
+     *
+     * Returns false when the session is gone, the process died, or the write
+     * failed — the caller falls back to the follow-up queue.
+     */
+    override suspend fun injectPrompt(sessionId: String, prompt: String): Boolean {
+        if (activeSessionId != sessionId) return false
+        val channel = warmChannel ?: return false
+        if (!channel.process.isAlive) return false
+        if (prompt.isBlank()) return false
+        return runCatching {
+            channel.pendingInjectedPrompt = true
+            channel.send(
+                method = "session/prompt",
+                id = SDK_PROMPT_ID,
+                params = JSONObject()
+                    .put("sessionId", sessionId)
+                    .put(
+                        "contentBlocks",
+                        JSONArray().put(JSONObject().put("type", "text").put("text", prompt)),
+                    ),
+            )
+            Log.d("DshBridge", "Injected mid-turn prompt (${prompt.length} chars)")
+            true
+        }.getOrElse { error ->
+            Log.w("DshBridge", "Mid-turn injection failed", error)
+            channel.pendingInjectedPrompt = false
+            false
+        }
+    }
+
     override suspend fun startSession(projectId: String, projectSlug: String, projectKind: ProjectKind, prompt: String, conversationHistory: List<ChatMessage>, provider: ProviderProfile): String = withContext(Dispatchers.IO + NonCancellable) {
         val sessionId = UUID.randomUUID().toString()
         finishedSessions.remove(sessionId)
@@ -367,6 +407,15 @@ class DshRuntimeBridge(
         while (true) {
             val outputFile = nativeProcess.outputFile
             if (!process.isAlive && outputFile.length() <= channel.outputOffset) break
+            if (channel.pendingInjectedPrompt) {
+                // A mid-turn prompt landed: reset the end-of-turn timer so the
+                // queued turn's events are consumed instead of dropping out on
+                // the quiet timeout. The flag is cleared once so the next real
+                // turn-end still closes the loop.
+                channel.pendingInjectedPrompt = false
+                turnEndedAt = 0L
+                completed = false
+            }
             if (turnEndedAt > 0L) {
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastByteAt >= WARM_TURN_QUIET_MS || now - turnEndedAt >= WARM_TURN_DRAIN_TIMEOUT_MS) {
@@ -1269,6 +1318,12 @@ internal class DshSdkChannel(val signature: String, val process: Process) {
     var initialized = false
     var turns = 0
     private var inputClosed = false
+    /**
+     * Set by [DshRuntimeBridge.injectPrompt] when a user message lands mid-turn.
+     * The turn reader resets its end-of-turn timer once so the queued turn's
+     * events are still consumed instead of dropping out on the quiet timeout.
+     */
+    @Volatile var pendingInjectedPrompt = false
 
     fun send(method: String, id: Int, params: JSONObject? = null) {
         val frame = JSONObject()
