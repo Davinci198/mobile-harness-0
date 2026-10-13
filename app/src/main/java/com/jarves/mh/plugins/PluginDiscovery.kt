@@ -113,9 +113,7 @@ class PluginDiscovery(
             label = pkg.label,
             versionName = pkg.versionName.orEmpty(),
             versionCode = pkg.versionCode,
-            declaredCapabilities = pkg.declaredCapabilities.mapNotNull { raw ->
-                PluginCapability.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
-            }.toSet(),
+            declaredCapabilities = PluginContract.parseCapabilities(pkg.declaredCapabilities),
             entryPointService = pkg.entryPointService,
         ),
         pkg.declaredServices,
