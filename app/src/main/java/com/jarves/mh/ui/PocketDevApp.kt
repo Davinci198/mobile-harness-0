@@ -4490,6 +4490,7 @@ private fun WorkspaceScreen(
                     queuedFollowUps = state.queuedFollowUps,
                     onSteerFollowUp = onSteerFollowUp,
                     onRemoveFollowUp = onRemoveFollowUp,
+                    supportsMidTurnInjection = state.agentKind == AgentKind.DEEPSEEK_HARNESS,
                 )
                 WorkspaceTab.DASHBOARD -> {
                     val dashContext = LocalContext.current
@@ -5565,6 +5566,7 @@ private fun ChatTab(
     onSteerFollowUp: (String) -> Unit = {},
     onRemoveFollowUp: (String) -> Unit = {},
     onShowModels: () -> Unit = {},
+    supportsMidTurnInjection: Boolean = false,
 ) {
     val view = LocalView.current
     // Keep the screen on while the selected agent is working in this chat. Released automatically
@@ -6034,22 +6036,52 @@ private fun ChatTab(
                         Spacer(Modifier.width(4.dp))
 
                         if (isRunning) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .background(
-                                        color = MaterialTheme.colorScheme.error,
-                                        shape = CircleShape,
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (supportsMidTurnInjection && canSend) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.primary,
+                                                shape = CircleShape,
+                                            )
+                                            .clickable(
+                                                enabled = canSend,
+                                                onClick = {
+                                                    if (canSend && onSend(prompt)) {
+                                                        prompt = ""
+                                                        selectedMessageId = null
+                                                    }
+                                                },
+                                            ),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowUpward,
+                                            contentDescription = stringResource(R.string.chat_send),
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(19.dp),
+                                        )
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.error,
+                                            shape = CircleShape,
+                                        )
+                                        .clickable(onClick = onStop),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Stop,
+                                        contentDescription = stringResource(R.string.chat_stop_task),
+                                        tint = MaterialTheme.colorScheme.onError,
+                                        modifier = Modifier.size(18.dp),
                                     )
-                                    .clickable(onClick = onStop),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Stop,
-                                    contentDescription = stringResource(R.string.chat_stop_task),
-                                    tint = MaterialTheme.colorScheme.onError,
-                                    modifier = Modifier.size(18.dp),
-                                )
+                                }
                             }
                         } else if (isSending) {
                             Box(
