@@ -76,4 +76,39 @@ class HermesHookConfigTest {
         val result = ensureHermesHooks(config, url)
         assertTrue(result.config.startsWith(config))
     }
+
+    @Test
+    fun appendsTelemetryOptOutWhenMissing() {
+        val result = ensureHermesTelemetryOptOut("model: kimi\n")
+        assertTrue(result.changed)
+        assertTrue(result.config.contains("telemetry:\n  shared_metrics:\n    enabled: false"))
+        assertTrue(result.config.contains("    send: false"))
+        assertTrue(result.config.contains("    offer_version: 2"))
+    }
+
+    @Test
+    fun telemetryOptOutIsIdempotent() {
+        val first = ensureHermesTelemetryOptOut("model: kimi\n")
+        val second = ensureHermesTelemetryOptOut(first.config)
+        assertFalse(second.changed)
+        assertEquals(first.config, second.config)
+    }
+
+    @Test
+    fun leavesExistingTelemetrySectionAlone() {
+        val config = "model: kimi\ntelemetry:\n  shared_metrics:\n    enabled: true\n    send: true\n"
+        val result = ensureHermesTelemetryOptOut(config)
+        assertFalse(result.changed)
+        assertEquals(config, result.config)
+    }
+
+    @Test
+    fun emptyConfigGetsBothHooksAndTelemetry() {
+        val withHooks = ensureHermesHooks("", url)
+        val final = ensureHermesTelemetryOptOut(withHooks.config)
+        assertTrue(withHooks.changed)
+        assertTrue(final.changed)
+        assertTrue(final.config.contains("hooks:\n  outbound:"))
+        assertTrue(final.config.contains("telemetry:\n  shared_metrics:\n    enabled: false"))
+    }
 }

@@ -23,6 +23,29 @@ internal data class HermesHookConfigResult(
  * Line-based on purpose: the guest config is written by Hermes and must keep its
  * formatting, comments and key order byte-for-byte everywhere else.
  */
+/**
+ * Ensures the guest Hermes config opts out of the shared-metrics offer so the
+ * TUI never blocks on the first-run telemetry dialog. That dialog holds the
+ * interactive prompt hostage until answered, which makes `awaitInteractivePrompt`
+ * time out and forces every turn onto the cold path.
+ */
+internal fun ensureHermesTelemetryOptOut(config: String): HermesHookConfigResult {
+    val lines = config.replace("\r\n", "\n").split('\n').toMutableList()
+    val telemetryIndex = lines.indexOfFirst { it == TELEMETRY_KEY }
+    if (telemetryIndex >= 0) {
+        // Section already present: leave it alone (user may have opted in).
+        return HermesHookConfigResult(config, false)
+    }
+    while (lines.isNotEmpty() && lines.last().isBlank()) lines.removeAt(lines.lastIndex)
+    if (lines.isNotEmpty()) lines.add("")
+    lines.add(TELEMETRY_KEY)
+    lines.add("  shared_metrics:")
+    lines.add("    enabled: false")
+    lines.add("    send: false")
+    lines.add("    offer_version: 2")
+    return HermesHookConfigResult(lines.joinToString("\n"), true)
+}
+
 internal fun ensureHermesHooks(config: String, url: String): HermesHookConfigResult {
     val lines = config.replace("\r\n", "\n").split('\n').toMutableList()
     val hooksIndex = lines.indexOfFirst { it == HOOKS_KEY }
@@ -68,6 +91,7 @@ internal fun ensureHermesHooks(config: String, url: String): HermesHookConfigRes
 }
 
 private const val HOOKS_KEY = "hooks:"
+private const val TELEMETRY_KEY = "telemetry:"
 private const val OUTBOUND_KEY = "  outbound:"
 private const val ENTRY_PREFIX = "    - name: "
 private const val URL_PREFIX = "      url: "
