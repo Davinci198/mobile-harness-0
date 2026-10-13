@@ -76,7 +76,8 @@ internal fun hermesProviderName(provider: ProviderProfile): String = when (provi
     ProviderKind.DEEPSEEK -> "deepseek"
     ProviderKind.ANTHROPIC, ProviderKind.KIMI -> "anthropic"
     ProviderKind.LLM_ROUTER -> "openrouter"
-    ProviderKind.OPENCODE_ZEN, ProviderKind.NVIDIA_NIM -> "openai"
+    ProviderKind.OPENCODE_ZEN -> "openai"
+    ProviderKind.NVIDIA_NIM -> "nvidia"
     ProviderKind.CUSTOM -> {
         val api = provider.dshApi.ifBlank { "anthropic-messages" }
         if (api == "openai-completions" || api == "openai-responses") "openai" else "anthropic"
@@ -147,6 +148,8 @@ internal fun hermesEnvironmentFor(
         ProviderKind.NVIDIA_NIM -> {
             environment["OPENAI_API_KEY"] = key
             environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
+            environment["NVIDIA_API_KEY"] = key
+            environment["NVIDIA_BASE_URL"] = provider.resolvedBaseUrl
         }
         ProviderKind.CUSTOM -> {
             val api = provider.dshApi.ifBlank { "anthropic-messages" }
