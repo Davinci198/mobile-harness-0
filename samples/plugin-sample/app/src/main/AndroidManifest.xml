@@ -15,6 +15,10 @@
             android:name="com.jarves.mh.plugin.capabilities"
             android:value="tools" />
 
+        <meta-data
+            android:name="com.jarves.mh.plugin.entry_point"
+            android:value="com.jarves.mh.sampleplugin.SampleToolHostService" />
+
         <service
             android:name="com.jarves.mh.sampleplugin.SampleToolHostService"
             android:exported="true">
