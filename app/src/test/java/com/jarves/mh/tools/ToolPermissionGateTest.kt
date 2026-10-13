@@ -214,12 +214,15 @@ class ToolPermissionGateTest {
     // --- allowOnce (workflow replay handoff after approval) ---
 
     @Test
-    fun allowOnceGrantsSingleAskPass() {
+    fun allowOnceGrantsAskPassUntilCleared() {
         val gate = ToolPermissionGate(store())
         assertTrue(gate.evaluate("Bash", "run") is ToolPermissionGateDecision.NeedsApproval)
         gate.allowOnce("Bash")
         assertTrue(gate.evaluate("Bash", "run") is ToolPermissionGateDecision.Allowed)
-        // One-shot: the next evaluation asks again.
+        // Sticky: an intervening evaluation does not consume the grant.
+        assertTrue(gate.evaluate("Bash", "run") is ToolPermissionGateDecision.Allowed)
+        gate.clearAllowOnce("Bash")
+        // Once cleared, the next evaluation asks again.
         assertTrue(gate.evaluate("Bash", "run") is ToolPermissionGateDecision.NeedsApproval)
     }
 

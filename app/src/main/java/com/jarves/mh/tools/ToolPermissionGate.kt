@@ -16,12 +16,18 @@ class ToolPermissionGate(
     fun resolve(toolName: String): ToolPermissionLevel = store.resolve(toolName)
 
     /**
-     * Grant a single ASK → ALLOW pass for [toolName], consumed by the next
-     * [evaluate] of that tool. Used by workflow replay after the user taps
+     * Grant a single ASK → ALLOW pass for [toolName], valid until
+     * [clearAllowOnce]. Used by workflow replay after the user taps
      * "Allow once" on the approval card: the executor pre-evaluates, asks,
      * then hands the grant to the tool's own internal gate check.
      *
-     * Never bypasses FORBID or a hook veto — only the ASK branch consumes it.
+     * The grant is sticky for the whole step — it is NOT consumed by the
+     * first matching [evaluate]. Any evaluation of [toolName] while the
+     * grant is armed returns Allowed; the executor disarms it in a finally
+     * block after the step dispatches. This keeps one approval = one step
+     * even when an intermediate check evaluates the same tool name.
+     *
+     * Never bypasses FORBID or a hook veto — only the ASK branch honors it.
      */
     fun allowOnce(toolName: String) {
         temporaryAllow.set(toolName)
@@ -88,7 +94,7 @@ class ToolPermissionGate(
                 ToolPermissionGateDecision.Blocked(reason)
             }
             ToolPermissionLevel.ASK -> {
-                if (temporaryAllow.compareAndSet(toolName, null)) {
+                if (temporaryAllow.get() == toolName) {
                     hooks.forEach { it.onToolPermissionChecked(toolName, true) }
                     ToolPermissionGateDecision.Allowed
                 } else {
