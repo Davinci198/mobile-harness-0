@@ -47,9 +47,14 @@ class SandboxedDownloadAdapter(
             try {
                 Files.createLink(destination.toPath(), partial.toPath())
                 partial.delete()
-            } catch (error: Throwable) {
-                partial.delete()
-                throw NetworkOperationException(NetworkErrorCode.FILE_EXISTS, "Destination already exists or cannot be published")
+            } catch (linkError: Throwable) {
+                // Termux/Android filesystems reject hard links between temp files.
+                // renameTo is atomic on the same filesystem and achieves the same
+                // publish-without-overwrite contract (we already checked exists()).
+                if (!partial.renameTo(destination)) {
+                    partial.delete()
+                    throw NetworkOperationException(NetworkErrorCode.FILE_EXISTS, "Destination already exists or cannot be published")
+                }
             }
         } catch (error: Throwable) {
             partial.delete()

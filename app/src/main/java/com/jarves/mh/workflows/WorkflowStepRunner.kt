@@ -29,6 +29,7 @@ class WorkflowStepRunner(
     private val memoryTools: MemoryTools,
     private val calculateTool: CalculateTool,
     private val sleepTool: SleepTool,
+    private val pluginRegistry: com.jarves.mh.plugins.PluginToolRegistry? = null,
 ) {
 
     suspend fun run(step: WorkflowStep): StepOutcome {
@@ -93,9 +94,22 @@ class WorkflowStepRunner(
             "MemoryRead" -> memory(memoryTools.read(arg("id")))
             "MemorySearch" -> memory(memoryTools.search(arg("query")))
             "MemoryList" -> memory(memoryTools.list())
-            else -> StepOutcome(false, "Unsupported tool: $tool")
+            else -> {
+                val registry = pluginRegistry
+                if (registry?.sourceFor(tool) != null) {
+                    plugin(registry.execute(tool, org.json.JSONObject(args.toMap())))
+                } else {
+                    StepOutcome(false, "Unsupported tool: $tool")
+                }
+            }
         }
     }
+
+    private fun plugin(result: com.jarves.mh.plugins.PluginToolResult): StepOutcome =
+        when (result) {
+            is com.jarves.mh.plugins.PluginToolResult.Success -> StepOutcome(true, result.output)
+            is com.jarves.mh.plugins.PluginToolResult.Error -> StepOutcome(false, result.reason)
+        }
 
     private fun calc(result: CalcToolResult): StepOutcome = when (result) {
         is CalcToolResult.Error -> StepOutcome(false, result.message)

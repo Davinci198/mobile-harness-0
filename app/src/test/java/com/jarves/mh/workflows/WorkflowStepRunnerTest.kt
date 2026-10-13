@@ -67,6 +67,7 @@ class WorkflowStepRunnerTest {
 
     private lateinit var store: ToolPermissionStore
     private lateinit var accessibility: FakeAccessibility
+    private lateinit var gate: ToolPermissionGate
     private lateinit var runner: WorkflowStepRunner
 
     @Before
@@ -78,9 +79,13 @@ class WorkflowStepRunnerTest {
         listOf("UiReadTree", "UiClick", "UiStatus").forEach {
             store.setOverride(it, ToolPermissionLevel.ALLOW)
         }
-        val gate = ToolPermissionGate(store)
+        gate = ToolPermissionGate(store)
         accessibility = FakeAccessibility()
-        runner = WorkflowStepRunner(
+        runner = buildRunner()
+    }
+
+    private fun buildRunner(pluginRegistry: com.jarves.mh.plugins.PluginToolRegistry? = null) =
+        WorkflowStepRunner(
             projectSlug = "wf-test",
             fileTools = FileTools(temporaryFolder.root, gate),
             terminalTools = TerminalTools(object : TerminalCommandRunner {
@@ -134,8 +139,8 @@ class WorkflowStepRunnerTest {
             }, gate),
             calculateTool = CalculateTool(gate),
             sleepTool = SleepTool(gate),
+            pluginRegistry = pluginRegistry,
         )
-    }
 
     private fun step(toolName: String, arguments: Map<String, String> = emptyMap()) =
         WorkflowStep(toolName, arguments)
@@ -188,5 +193,45 @@ class WorkflowStepRunnerTest {
         assertFalse(outcome.ok)
         assertTrue(outcome.summary, outcome.summary.contains("not enabled"))
         assertEquals(0, accessibility.treeReads)
+    }
+
+    @Test
+    fun pluginToolDispatchesToRegistry() = runBlocking {
+        val pluginStore = ToolPermissionStore(RunnerStorage()).apply {
+            globalDefault = ToolPermissionLevel.ALLOW
+            // Plugin tools are not in ToolRiskCatalog; unknown names fall back to
+            // DEVICE_CONTROL, so a blanket ALLOW alone would resolve to ASK.
+            setOverride("EchoPlugin", ToolPermissionLevel.ALLOW)
+        }
+        val registry = com.jarves.mh.plugins.PluginToolRegistry(ToolPermissionGate(pluginStore))
+        val candidate = com.jarves.mh.plugins.PluginCandidate(
+            packageName = "com.example.plugin",
+            label = "Test Plugin",
+            versionName = "1.0",
+            versionCode = 1,
+            declaredCapabilities = setOf(com.jarves.mh.plugins.PluginCapability.TOOLS),
+            entryPointService = "com.example.plugin.Host",
+        )
+        val host = object : com.jarves.mh.plugins.PluginToolHost {
+            override fun listTools() = listOf(
+                com.jarves.mh.plugins.PluginTool("EchoPlugin", "Echoes back"),
+            )
+
+            override suspend fun executeTool(name: String, arguments: org.json.JSONObject) =
+                com.jarves.mh.plugins.PluginToolResult.Success("echoed:${arguments.optString("text")}")
+        }
+        registry.register(com.jarves.mh.plugins.PluginToolBinding(candidate, host))
+
+        val withPlugin = buildRunner(registry)
+        val outcome = withPlugin.run(step("EchoPlugin", mapOf("text" to "hi")))
+        assertTrue(outcome.summary, outcome.ok)
+        assertEquals("echoed:hi", outcome.summary)
+    }
+
+    @Test
+    fun unknownPluginNameFailsWithoutRegistry() = runBlocking {
+        val outcome = runner.run(step("NoSuchTool"))
+        assertFalse(outcome.ok)
+        assertTrue(outcome.summary, outcome.summary.contains("Unsupported tool"))
     }
 }

@@ -4323,14 +4323,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun discoverPlugins() {
         val app = getApplication<Application>()
+        android.util.Log.i("MHPlugin", "discoverPlugins: inspecting installed packages")
         val installed = runCatching { com.jarves.mh.plugins.PluginPackageManager.inspect(app) }
-            .getOrElse { return }
+            .getOrElse { failure ->
+                android.util.Log.e("MHPlugin", "inspect failed", failure)
+                return
+            }
+        android.util.Log.i("MHPlugin", "inspect: ${installed.size} candidates with meta-data")
+        installed.forEach { pkg ->
+            android.util.Log.i(
+                "MHPlugin",
+                "  candidate=${pkg.packageName} caps=${pkg.declaredCapabilities} entry=${pkg.entryPointService} services=${pkg.declaredServices}",
+            )
+        }
         val discovery = com.jarves.mh.plugins.PluginDiscovery(app.packageName)
         val bindings = discovery.discover(installed).mapNotNull { candidate ->
-            val host = com.jarves.mh.plugins.PluginPackageManager.bind(app, candidate) ?: return@mapNotNull null
+            val host = com.jarves.mh.plugins.PluginPackageManager.bind(app, candidate)
+            if (host == null) {
+                android.util.Log.w("MHPlugin", "bind failed for ${candidate.packageName}")
+                return@mapNotNull null
+            }
+            android.util.Log.i("MHPlugin", "bound ${candidate.packageName} -> ${host.javaClass.name}")
             com.jarves.mh.plugins.PluginToolBinding(candidate, host)
         }
         pluginToolRegistry.registerAll(bindings)
+        android.util.Log.i("MHPlugin", "registered ${bindings.size} bindings, ${pluginToolRegistry.summaries().size} tools")
         _state.update { it.copy(pluginTools = pluginToolRegistry.summaries()) }
     }
 
@@ -6504,6 +6521,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ),
             calculateTool = com.jarves.mh.tools.calc.CalculateTool(gate),
             sleepTool = com.jarves.mh.tools.calc.SleepTool(gate),
+            pluginRegistry = pluginToolRegistry,
         )
     }
 
