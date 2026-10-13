@@ -26,6 +26,8 @@ class AgentExecutionHandle internal constructor(
     val sessionId: String,
     private val runtime: RuntimeBridge,
 ) {
+    val supportsMidTurnInjection: Boolean get() = runtime.supportsMidTurnInjection
+
     suspend fun respondToApproval(request: ToolRequest, approved: Boolean) {
         runtime.respondToApproval(request, approved)
     }
@@ -33,6 +35,14 @@ class AgentExecutionHandle internal constructor(
     suspend fun respondToQuestion(request: QuestionRequest, answers: List<QuestionAnswer>) {
         runtime.respondToQuestion(request, answers)
     }
+
+    /**
+     * Delivers [prompt] into the running Agent Execution without stopping it.
+     * Returns false when the runtime cannot inject mid-turn (one-shot CLI) or
+     * the session is gone — the caller falls back to the follow-up queue.
+     */
+    suspend fun injectPrompt(prompt: String): Boolean =
+        runtime.injectPrompt(sessionId, prompt)
 
     suspend fun stop() {
         runtime.stopSession(sessionId)

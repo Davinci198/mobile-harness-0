@@ -54,6 +54,22 @@ interface RuntimeBridge {
      * the turn itself.
      */
     suspend fun prewarmSession(provider: ProviderProfile, projectId: String, projectSlug: String) = Unit
+
+    /**
+     * True when [injectPrompt] can deliver a user message into a running
+     * Agent Execution without stopping it. One-shot CLI bridges (Claude,
+     * OpenCode, Hermes) keep the default false; the chat falls back to the
+     * follow-up queue.
+     */
+    val supportsMidTurnInjection: Boolean get() = false
+
+    /**
+     * Delivers [prompt] into the running session [sessionId] mid-turn.
+     * Returns true when the runtime accepted the message; false when the
+     * caller should fall back to the follow-up queue. Bridges without
+     * mid-turn support keep the default no-op.
+     */
+    suspend fun injectPrompt(sessionId: String, prompt: String): Boolean = false
 }
 
 object RuntimeLaunchConfigBuilder {
