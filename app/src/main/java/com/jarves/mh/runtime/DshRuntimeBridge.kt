@@ -63,6 +63,16 @@ class DshRuntimeBridge(
     private val pendingApprovals = ConcurrentHashMap<String, CompletableDeferred<String>>()
     /** Guest questions waiting for the QuestionCard, keyed by our call id. */
     private val pendingQuestions = ConcurrentHashMap<String, CompletableDeferred<String>>()
+    private val devicePermissionStore = com.jarves.mh.tools.ToolPermissionStore.fromContext(context)
+    private val deviceGate = com.jarves.mh.tools.ToolPermissionGate(devicePermissionStore)
+    private val deviceTools = com.jarves.mh.tools.device.DeviceTools(
+        com.jarves.mh.tools.device.AndroidClipboardAdapter(context),
+        com.jarves.mh.tools.device.AndroidToastAdapter(context),
+        com.jarves.mh.tools.device.AndroidNotificationAdapter(context),
+        com.jarves.mh.tools.device.AndroidHttpsLinkAdapter(context),
+        com.jarves.mh.tools.device.AndroidAccessibilityAdapter(context),
+        deviceGate,
+    )
     @Volatile private var approvalServer: DshApprovalServer? = null
     @Volatile private var activeProcess: Process? = null
     /**
@@ -558,6 +568,9 @@ class DshRuntimeBridge(
             // The guest answerer posts approval asks to this port; the value is
             // stable for the process, so warm reuse keeps the same signature.
             "MH_APPROVAL_PORT" to ensureApprovalServer().port.toString(),
+            // The UI-tools bridge rides the same loopback server; the guest
+            // plugin reads this port to run UiReadTree/UiClick/UiStatus.
+            "MH_UI_PORT" to ensureApprovalServer().port.toString(),
             // dsh asks for approval only when the sandbox denies an action and
             // the model escalates. danger-full-access never denies, so it can
             // never raise the ApprovalCard; workspace-write is dsh's interactive
@@ -689,6 +702,15 @@ class DshRuntimeBridge(
                 answer = { callId, questions ->
                     requestQuestionDecision(callId, questions)
                 },
+                deviceTools = deviceTools,
+                decideDeviceAsk = { tool, nodeId ->
+                    requestApprovalDecision(
+                        callId = UUID.randomUUID().toString(),
+                        toolName = tool,
+                        reason = nodeId?.takeIf(String::isNotBlank)
+                            ?.let { "$tool node $it" } ?: tool,
+                    )
+                },
             ).start().also { approvalServer = it }
         }
 
@@ -780,6 +802,8 @@ class DshRuntimeBridge(
             File(approval, "index.js").writeText(APPROVAL_ANSWERER_JS)
             val question = File(home, "plugins/mh-question-answerer").apply { mkdirs() }
             File(question, "index.js").writeText(QUESTION_ANSWERER_JS)
+            val ui = File(home, "plugins/mh-ui-tools").apply { mkdirs() }
+            File(ui, "index.js").writeText(UI_TOOLS_JS)
         }.onFailure { Log.w("DshBridge", "Answerer deploy failed", it) }
     }
 
@@ -1096,6 +1120,42 @@ export default function mhQuestionAnswerer(ctx) {
 """
 
         /**
+         * Guest-side UI-tools bridge: on `session/start`, drops an executable
+         * `mh_ui` helper into the workspace so the chat agent can read/tap the
+         * live screen without a raw `uiautomator dump`. The helper POSTs to the
+         * loopback `/device` route on [DshApprovalServer], which runs the call
+         * through [DeviceTools]'s permission gate (UiReadTree/UiStatus =
+         * SENSITIVE_READ, UiClick = DEVICE_CONTROL) — the same risk-graded
+         * approval cards the workflow path uses.
+         *
+         * Usage (one JSON line of `{success, …}` is printed back to the model):
+         *   echo '{"tool":"UiStatus"}' | ./mh_ui
+         *   echo '{"tool":"UiReadTree"}' | ./mh_ui
+         *   echo '{"tool":"UiClick","nodeId":"<id>"}' | ./mh_ui
+         */
+        private const val UI_TOOLS_JS = """
+export default function mhUiTools(ctx) {
+  ctx.on("session/start", async (event) => {
+    const port = process.env.MH_UI_PORT || process.env.MH_APPROVAL_PORT;
+    if (!port) return;
+    const workspace = event?.cwd || ".";
+    const base = "http://127.0.0.1:" + port + "/device";
+    // The helper reads the JSON body off stdin, so the bash contains no "$"
+    // (Kotlin's raw string would interpolate it). Usage:
+    //   echo '{"tool":"UiStatus"}' | ./mh_ui
+    //   echo '{"tool":"UiClick","nodeId":"#12"}' | ./mh_ui
+    const script = [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      "curl -sS -X POST " + base + " -H 'content-type: application/json' --data-binary @-",
+      "",
+    ].join("\n");
+    await (await import("node:fs/promises")).writeFile(workspace + "/mh_ui", script, { mode: 0o755 });
+  });
+}
+"""
+
+        /**
          * Silence the reused process must keep after a turn ends before the
          * turn is considered over. The SDK stops emitting as soon as the session
          * goes idle, so a few quiet hundred milliseconds only catch the trailing
@@ -1153,6 +1213,8 @@ internal fun dshHomePatch(route: DshRoute, model: String): String = buildString 
     appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-approval-answerer/index.js")
     appendLine("    - id: mh-question")
     appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-question-answerer/index.js")
+    appendLine("    - id: mh-ui-tools")
+    appendLine("      name: ${DshRuntimeBridge.DSH_HOME_GUEST_PATH}/plugins/mh-ui-tools/index.js")
     // The sdk profile stacks only dsh-base + dsh-sdk-app, and neither ships the
     // model-facing question tool (only the web/tui presets do) even though
     // dsh-base registers the user-questions seam and its plan prompt tells the

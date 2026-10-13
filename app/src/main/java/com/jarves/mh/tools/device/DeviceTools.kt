@@ -14,6 +14,14 @@ class DeviceTools(
     private val gate: ToolPermissionGate,
     private val hooks: List<AIToolHook> = emptyList(),
 ) {
+    /**
+     * The permission gate backing every tool here. Exposed so a host that
+     * pre-asks for approval out-of-band (the chat agent's `/device` loopback
+     * route) can arm a one-shot [ToolPermissionGate.allowOnce] grant before it
+     * re-dispatches the tool, mirroring [com.jarves.mh.workflows.WorkflowReplayExecutor].
+     */
+    val permissionGate: ToolPermissionGate get() = gate
+
     fun copyToClipboard(text: String): DeviceToolResult {
         val tool = "ClipboardCopy"
         if (text.isEmpty()) return error(tool, DeviceErrorCode.INVALID_INPUT, "Clipboard text is empty")
