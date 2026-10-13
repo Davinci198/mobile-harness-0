@@ -58,6 +58,10 @@
     <string name="settings_ask">Ask</string>
     <string name="settings_forbid">Forbid</string>
     <string name="settings_per_tool_overrides">Per-tool overrides</string>
+    <string name="settings_plugin_tools">Plugin tools</string>
+    <string name="settings_plugin_tools_desc">Tools contributed by installed plugin APKs. Each one follows the same permission policy as built-in tools.</string>
+    <string name="settings_plugin_tools_empty">No plugin tools discovered yet.</string>
+    <string name="settings_plugin_tools_source">from %1$s</string>
     <string name="settings_linux_runtime">Linux runtime</string>
     <string name="settings_architecture">Architecture</string>
     <string name="settings_environment">Environment</string>

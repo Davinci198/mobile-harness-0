@@ -58,6 +58,10 @@
     <string name="settings_ask">Întreabă</string>
     <string name="settings_forbid">Interzice</string>
     <string name="settings_per_tool_overrides">Excepții per instrument</string>
+    <string name="settings_plugin_tools">Instrumente plugin</string>
+    <string name="settings_plugin_tools_desc">Instrumente oferite de APK-urile plugin instalate. Fiecare urmează aceeași politică de permisiune ca instrumentele integrate.</string>
+    <string name="settings_plugin_tools_empty">Încă nu s-a descoperit niciun instrument plugin.</string>
+    <string name="settings_plugin_tools_source">din %1$s</string>
     <string name="settings_linux_runtime">Runtime Linux</string>
     <string name="settings_architecture">Arhitectură</string>
     <string name="settings_environment">Mediu</string>

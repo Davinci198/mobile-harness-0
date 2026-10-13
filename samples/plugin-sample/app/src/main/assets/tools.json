@@ -1,0 +1,16 @@
+{
+  "tools": [
+    {
+      "name": "Echo",
+      "description": "Returns its input (verifies the IPC round-trip).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

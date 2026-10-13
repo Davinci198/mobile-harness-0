@@ -631,77 +631,38 @@ fun SettingsScreen(
                     Spacer(Modifier.height(12.dp))
                     Text(stringResource(R.string.settings_per_tool_overrides), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     com.jarves.mh.tools.ToolPermissionStore.knownTools.forEach { tool ->
-                        val effective = state.toolPermissionOverrides[tool] ?: state.toolPermissionGlobal
-                        val toolDescription = toolCatalogLocale["tool_${tool}_description"]
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    toolCatalogLocale["tool_${tool}_name"] ?: tool,
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 14.sp,
-                                )
-                                if (!toolDescription.isNullOrBlank()) {
-                                    Text(
-                                        toolDescription,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                            PermissionLevelChoice(
-                                label = stringResource(R.string.settings_allow),
-                                selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ALLOW &&
-                                    state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.ALLOW,
-                                onClick = {
-                                    onSetToolPermissionOverride(
-                                        tool,
-                                        if (state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.ALLOW) {
-                                            null
-                                        } else {
-                                            com.jarves.mh.tools.ToolPermissionLevel.ALLOW
-                                        },
-                                    )
-                                },
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            PermissionLevelChoice(
-                                label = stringResource(R.string.settings_ask),
-                                selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ASK &&
-                                    state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.ASK,
-                                onClick = {
-                                    onSetToolPermissionOverride(
-                                        tool,
-                                        if (state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.ASK) {
-                                            null
-                                        } else {
-                                            com.jarves.mh.tools.ToolPermissionLevel.ASK
-                                        },
-                                    )
-                                },
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            PermissionLevelChoice(
-                                label = stringResource(R.string.settings_forbid),
-                                selected = effective == com.jarves.mh.tools.ToolPermissionLevel.FORBID &&
-                                    state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.FORBID,
-                                onClick = {
-                                    onSetToolPermissionOverride(
-                                        tool,
-                                        if (state.toolPermissionOverrides[tool] == com.jarves.mh.tools.ToolPermissionLevel.FORBID) {
-                                            null
-                                        } else {
-                                            com.jarves.mh.tools.ToolPermissionLevel.FORBID
-                                        },
-                                    )
-                                },
-                                modifier = Modifier.weight(1f),
+                        PermissionOverrideRow(
+                            title = toolCatalogLocale["tool_${tool}_name"] ?: tool,
+                            subtitle = toolCatalogLocale["tool_${tool}_description"],
+                            selectedOverride = state.toolPermissionOverrides[tool],
+                            effective = state.toolPermissionOverrides[tool] ?: state.toolPermissionGlobal,
+                            onSetOverride = { level -> onSetToolPermissionOverride(tool, level) },
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text(stringResource(R.string.settings_plugin_tools), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text(
+                        stringResource(R.string.settings_plugin_tools_desc),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (state.pluginTools.isEmpty()) {
+                        Text(
+                            stringResource(R.string.settings_plugin_tools_empty),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        state.pluginTools.forEach { pluginTool ->
+                            PermissionOverrideRow(
+                                title = pluginTool.name,
+                                subtitle = listOfNotNull(
+                                    pluginTool.description.takeIf(String::isNotBlank),
+                                    stringResource(R.string.settings_plugin_tools_source, pluginTool.sourceLabel),
+                                ).joinToString(" · "),
+                                selectedOverride = state.toolPermissionOverrides[pluginTool.name],
+                                effective = state.toolPermissionOverrides[pluginTool.name] ?: state.toolPermissionGlobal,
+                                onSetOverride = { level -> onSetToolPermissionOverride(pluginTool.name, level) },
                             )
                         }
                     }
@@ -1564,6 +1525,81 @@ private fun PermissionLevelChoice(
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             color = if (selected) PocketAccent else MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+    }
+}
+
+/** One tool's ALLOW/ASK/FORBID override row; shared by built-in and plugin tools. */
+@Composable
+private fun PermissionOverrideRow(
+    title: String,
+    subtitle: String?,
+    selectedOverride: com.jarves.mh.tools.ToolPermissionLevel?,
+    effective: com.jarves.mh.tools.ToolPermissionLevel,
+    onSetOverride: (com.jarves.mh.tools.ToolPermissionLevel?) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    subtitle,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        PermissionLevelChoice(
+            label = stringResource(R.string.settings_allow),
+            selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ALLOW &&
+                selectedOverride == com.jarves.mh.tools.ToolPermissionLevel.ALLOW,
+            onClick = {
+                onSetOverride(
+                    if (selectedOverride == com.jarves.mh.tools.ToolPermissionLevel.ALLOW) {
+                        null
+                    } else {
+                        com.jarves.mh.tools.ToolPermissionLevel.ALLOW
+                    },
+                )
+            },
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(4.dp))
+        PermissionLevelChoice(
+            label = stringResource(R.string.settings_ask),
+            selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ASK &&
+                selectedOverride == com.jarves.mh.tools.ToolPermissionLevel.ASK,
+            onClick = {
+                onSetOverride(
+                    if (selectedOverride == com.jarves.mh.tools.ToolPermissionLevel.ASK) {
+                        null
+                    } else {
+                        com.jarves.mh.tools.ToolPermissionLevel.ASK
+                    },
+                )
+            },
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(4.dp))
+        PermissionLevelChoice(
+            label = stringResource(R.string.settings_forbid),
+            selected = effective == com.jarves.mh.tools.ToolPermissionLevel.FORBID &&
+                selectedOverride == com.jarves.mh.tools.ToolPermissionLevel.FORBID,
+            onClick = {
+                onSetOverride(
+                    if (selectedOverride == com.jarves.mh.tools.ToolPermissionLevel.FORBID) {
+                        null
+                    } else {
+                        com.jarves.mh.tools.ToolPermissionLevel.FORBID
+                    },
+                )
+            },
+            modifier = Modifier.weight(1f),
         )
     }
 }

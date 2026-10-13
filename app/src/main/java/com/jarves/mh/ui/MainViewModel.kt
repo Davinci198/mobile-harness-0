@@ -438,6 +438,8 @@ data class AppUiState(
     val antigravityModels: List<String> = emptyList(),
     val toolPermissionGlobal: com.jarves.mh.tools.ToolPermissionLevel = com.jarves.mh.tools.ToolPermissionLevel.ASK,
     val toolPermissionOverrides: Map<String, com.jarves.mh.tools.ToolPermissionLevel> = emptyMap(),
+    /** Tools discovered from installed plugin APKs; gated like built-in tools. */
+    val pluginTools: List<com.jarves.mh.plugins.PluginToolSummary> = emptyList(),
     val antigravityModelsLoading: Boolean = false,
     val modelScanLines: List<String> = emptyList(),
     val isModelScanning: Boolean = false,
@@ -493,6 +495,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = AppPreferences(application)
     private val toolPermissionStore = com.jarves.mh.tools.ToolPermissionStore.fromContext(application)
     private val toolPermissionGate = com.jarves.mh.tools.ToolPermissionGate(toolPermissionStore)
+    private val pluginToolRegistry = com.jarves.mh.plugins.PluginToolRegistry(toolPermissionGate)
     private val workflowStore = com.jarves.mh.workflows.WorkflowStore(java.io.File(application.filesDir, "workflows"))
     private val workflowGate = com.jarves.mh.tools.ToolPermissionGate(toolPermissionStore)
     private val workflowApprovals = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<Boolean>>()
@@ -623,6 +626,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             AndroidAppInstaller.events.collect { event -> onAndroidInstallEvent(event) }
         }
         viewModelScope.launch { refreshGitHubConnection() }
+        viewModelScope.launch(Dispatchers.IO) { discoverPlugins() }
         RuntimeSetupController.restore(application)
         viewModelScope.launch(Dispatchers.IO) {
             for (write in transcriptWrites) {
@@ -4310,6 +4314,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 antigravityModel = matchingModel ?: it.antigravityModel,
             )
         }
+    }
+
+    /**
+     * Find installed plugin APKs, attach their entry-point hosts and publish
+     * the tools they contribute. Runs off the main thread on startup; a broken
+     * plugin is skipped, never surfaced as a crash.
+     */
+    private fun discoverPlugins() {
+        val app = getApplication<Application>()
+        val installed = runCatching { com.jarves.mh.plugins.PluginPackageManager.inspect(app) }
+            .getOrElse { return }
+        val discovery = com.jarves.mh.plugins.PluginDiscovery(app.packageName)
+        val bindings = discovery.discover(installed).mapNotNull { candidate ->
+            val host = com.jarves.mh.plugins.PluginPackageManager.bind(app, candidate) ?: return@mapNotNull null
+            com.jarves.mh.plugins.PluginToolBinding(candidate, host)
+        }
+        pluginToolRegistry.registerAll(bindings)
+        _state.update { it.copy(pluginTools = pluginToolRegistry.summaries()) }
     }
 
     fun setToolPermissionGlobal(level: com.jarves.mh.tools.ToolPermissionLevel) {
