@@ -6406,9 +6406,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun awaitWorkflowApproval(request: com.jarves.mh.model.ToolRequest): Boolean {
         val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
         workflowApprovals[request.approvalId] = deferred
+        Log.d("WorkflowReplay", "ask approval id=${request.approvalId} tool=${request.toolName}")
         onRuntimeEvent(RuntimeEvent.ToolRequested(request.sessionId, request))
         return try {
-            kotlinx.coroutines.withTimeoutOrNull(WORKFLOW_APPROVAL_TIMEOUT_MS) { deferred.await() } ?: false
+            kotlinx.coroutines.withTimeoutOrNull(WORKFLOW_APPROVAL_TIMEOUT_MS) { deferred.await() }
+                ?.also { approved -> Log.d("WorkflowReplay", "approval id=${request.approvalId} approved=$approved") }
+                ?: false
         } finally {
             workflowApprovals.remove(request.approvalId)
             _state.update { current ->

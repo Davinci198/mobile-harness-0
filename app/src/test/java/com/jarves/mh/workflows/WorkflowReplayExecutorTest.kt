@@ -172,6 +172,29 @@ class WorkflowReplayExecutorTest {
     }
 
     @Test
+    fun interveningEvaluateDoesNotStealAllowOnceGrant() = runBlocking {
+        val gate = gateWith(ToolPermissionLevel.ALLOW)
+        var toolPassed = false
+        val executor = WorkflowReplayExecutor(
+            gate = gate,
+            sessionId = "wf-test",
+            emit = {},
+            requestApproval = { true },
+            runStep = {
+                // An intermediate check of the same tool must not consume
+                // the step's one-shot grant before the tool's own gate check.
+                gate.evaluate("Bash", "mid-step unrelated check")
+                toolPassed = gate.evaluate("Bash", "tool internal check") is ToolPermissionGateDecision.Allowed
+                StepOutcome(true, "ran")
+            },
+        )
+        val outcome = executor.run(workflow(WorkflowStep("Bash", mapOf("command" to "ls"))))
+        assertTrue(outcome is ReplayOutcome.Completed)
+        assertTrue("tool-internal gate should still pass after an intervening evaluate", toolPassed)
+        assertTrue(gate.evaluate("Bash", "after step") is ToolPermissionGateDecision.NeedsApproval)
+    }
+
+    @Test
     fun approvalRequestCarriesToolContext() = runBlocking {
         val gate = gateWith(ToolPermissionLevel.ALLOW)
         val approvals = mutableListOf<ToolRequest>()
