@@ -196,6 +196,12 @@ fun SettingsScreen(
     var voiceMicEnabled by remember { mutableStateOf(voicePrefs.voiceMicEnabled) }
     var voiceSpeakEnabled by remember { mutableStateOf(voicePrefs.voiceSpeakEnabled) }
     var chatSectionsMode by remember { mutableStateOf(voicePrefs.chatSectionsMode) }
+    val toolCatalogLocale = remember(context.resources.configuration.locales[0].toLanguageTag()) {
+        runCatching {
+            com.jarves.mh.tools.ToolCatalogLocale(context.assets)
+                .load(context.resources.configuration.locales[0].toLanguageTag())
+        }.getOrDefault(emptyMap())
+    }
     val backgroundSettingsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) {
@@ -626,11 +632,27 @@ fun SettingsScreen(
                     Text(stringResource(R.string.settings_per_tool_overrides), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     com.jarves.mh.tools.ToolPermissionStore.knownTools.forEach { tool ->
                         val effective = state.toolPermissionOverrides[tool] ?: state.toolPermissionGlobal
+                        val toolDescription = toolCatalogLocale["tool_${tool}_description"]
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(tool, fontWeight = FontWeight.Medium, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    toolCatalogLocale["tool_${tool}_name"] ?: tool,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 14.sp,
+                                )
+                                if (!toolDescription.isNullOrBlank()) {
+                                    Text(
+                                        toolDescription,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                             PermissionLevelChoice(
                                 label = stringResource(R.string.settings_allow),
                                 selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ALLOW &&

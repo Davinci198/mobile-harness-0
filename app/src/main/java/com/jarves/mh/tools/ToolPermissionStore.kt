@@ -100,9 +100,6 @@ class ToolPermissionStore(private val storage: ToolPermissionStorage) {
             "VisitWeb",
             "HttpRequest",
             "DownloadFile",
-            "VisitWeb",
-            "HttpRequest",
-            "DownloadFile",
             "ShizukuExec",
         )
 

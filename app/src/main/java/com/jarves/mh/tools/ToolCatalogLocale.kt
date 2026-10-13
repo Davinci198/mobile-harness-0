@@ -27,11 +27,20 @@ class ToolCatalogLocale(private val readAsset: (String) -> String) {
 
     companion object {
         fun parse(content: String): Map<String, String> {
-            val levels = JSONObject(content).getJSONObject("risk_levels")
+            val root = JSONObject(content)
+            val levels = root.getJSONObject("risk_levels")
             return buildMap {
                 for (key in levels.keys()) {
                     val label = levels.opt(key) as? String
                     if (!label.isNullOrBlank()) put(key, label)
+                }
+                val tools = root.optJSONObject("tools") ?: return@buildMap
+                for (tool in tools.keys()) {
+                    val entry = tools.optJSONObject(tool) ?: continue
+                    val name = entry.opt("name") as? String
+                    if (!name.isNullOrBlank()) put("tool_${tool}_name", name)
+                    val description = entry.opt("description") as? String
+                    if (!description.isNullOrBlank()) put("tool_${tool}_description", description)
                 }
             }
         }
