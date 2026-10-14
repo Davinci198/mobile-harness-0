@@ -4595,7 +4595,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun discoverModels(profile: ProviderProfile, secret: String): ModelDiscoveryResult {
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
         val agent = _state.value.agentKind
-        val result = providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, agent))
+        var result = providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, agent))
+        // OmniRush access tokens expire in hours: a rejected catalog fetch
+        // rotates the pair once and retries, so Test/Discover self-heal exactly
+        // like sessions do through the proxy. Refresh only runs on a 401/403 —
+        // never blindly, so we never steal a rotation from the user's other
+        // logged-in clients.
+        if (profile.kind == ProviderKind.OMNIRUSH && result is ModelDiscoveryResult.Failure &&
+            result.message.startsWith("Check the saved API key")
+        ) {
+            val fresh = withContext(Dispatchers.IO) {
+                runCatching { refreshOmniRushToken() }.getOrNull().orEmpty()
+            }
+            if (fresh.isNotBlank()) {
+                result = providerApi.discoverModels(profile.baseUrl, fresh, providerProtocolForAgent(profile, agent))
+            }
+        }
         if (result is ModelDiscoveryResult.Success) {
             preferences.saveModelCatalog(
                 agent,
@@ -4632,13 +4647,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
-        return providerApi.validate(
+        val first = providerApi.validate(
             profile.baseUrl,
             profile.model,
             key,
             providerProtocolForAgent(profile, _state.value.agentKind),
             models,
         )
+        // Same self-heal as discoverModels: a rejected OmniRush check rotates
+        // the pair once and retries (see refreshOmniRushToken).
+        if (profile.kind == ProviderKind.OMNIRUSH && first is ConnectionValidation.Failure &&
+            first.label == "Rejected"
+        ) {
+            val fresh = withContext(Dispatchers.IO) {
+                runCatching { refreshOmniRushToken() }.getOrNull().orEmpty()
+            }
+            if (fresh.isNotBlank()) {
+                return providerApi.validate(
+                    profile.baseUrl,
+                    profile.model,
+                    fresh,
+                    providerProtocolForAgent(profile, _state.value.agentKind),
+                    models,
+                )
+            }
+        }
+        return first
     }
 
     fun pingApi() {
