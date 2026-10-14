@@ -115,9 +115,11 @@ internal object OmniRush {
      * `buildOpencodeConfig`): the `@ai-sdk/openai` provider speaks /responses,
      * pointed at our loopback proxy which injects the client gate headers.
      *
-     * Models carry id + display name ONLY: opencode v2.0.28 drops the whole
-     * provider (no-route) when a model entry carries a `limit` map
-     * (verified live in the guest: identical config without `limit` resolves).
+     * Models carry id + display name only (same minimal shape as the NVIDIA
+     * pattern). Verified live 2026-10-15: an important negative result — a
+     * 401 at load (dead access token) surfaces as `provider.no-route` ("Model
+     * unavailable"), NOT as an auth error. Every "Model unavailable" seen on
+     * device traced back to an expired pasted key, never to this config.
      */
     fun configContent(gatewayUrl: String): String = buildString {
         append("""{"${'$'}schema":"https://opencode.ai/config.json","snapshot":false,""")
