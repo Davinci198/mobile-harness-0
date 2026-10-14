@@ -45,7 +45,7 @@ class OmniRushContractTest {
             setOf("gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"),
             models.keys().asSequence().toSet(),
         )
-        assertEquals(400_000, models.getJSONObject("gpt-6-astra").getJSONObject("limit").getInt("context"))
+        assertEquals("GPT 6 Astra", models.getJSONObject("gpt-6-astra").getString("name"))
     }
 
     @Test

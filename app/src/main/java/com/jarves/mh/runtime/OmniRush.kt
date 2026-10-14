@@ -28,11 +28,11 @@ internal object OmniRush {
     const val BASE_URL = "https://omnirush.ai/omnirush/v1"
     const val DEFAULT_MODEL = "gpt-6-astra"
 
-    /** Catalog snapshot (display names + limits), used for the guest opencode config. */
-    val MODELS: Map<String, OmniRushModel> = linkedMapOf(
-        "gpt-6-astra" to OmniRushModel("GPT 6 Astra", context = 400_000, output = 128_000),
-        "gpt-6-sol" to OmniRushModel("GPT 6 Sol", context = 400_000, output = 128_000),
-        "gpt-6.1-sol" to OmniRushModel("GPT 6.1 Sol", context = 400_000, output = 128_000),
+    /** Catalog snapshot (id to display name), used for the guest opencode config. */
+    val MODELS: Map<String, String> = linkedMapOf(
+        "gpt-6-astra" to "GPT 6 Astra",
+        "gpt-6-sol" to "GPT 6 Sol",
+        "gpt-6.1-sol" to "GPT 6.1 Sol",
     )
 
     const val CLIENT_USER_AGENT = "omnirush"
@@ -114,6 +114,10 @@ internal object OmniRush {
      * Guest opencode provider config for OmniRush (mirrors the CLI's own
      * `buildOpencodeConfig`): the `@ai-sdk/openai` provider speaks /responses,
      * pointed at our loopback proxy which injects the client gate headers.
+     *
+     * Models carry id + display name ONLY: opencode v2.0.28 drops the whole
+     * provider (no-route) when a model entry carries a `limit` map
+     * (verified live in the guest: identical config without `limit` resolves).
      */
     fun configContent(gatewayUrl: String): String = buildString {
         append("""{"${'$'}schema":"https://opencode.ai/config.json","snapshot":false,""")
@@ -122,19 +126,13 @@ internal object OmniRush {
         append(""""name":"omnirush.ai",""")
         append(""""options":{"baseURL":"$gatewayUrl","apiKey":"{env:OMNIRUSH_ACCESS_TOKEN}"},""")
         append(""""models":{""")
-        MODELS.entries.forEachIndexed { index, (id, model) ->
+        MODELS.entries.forEachIndexed { index, (id, display) ->
             if (index > 0) append(",")
-            append(""""$id":{"name":"${model.display}","limit":{"context":${model.context},"output":${model.output}}}""")
+            append(""""$id":{"name":"$display"}""")
         }
         append("}}}}}")
     }
 }
-
-internal data class OmniRushModel(
-    val display: String,
-    val context: Int,
-    val output: Int,
-)
 
 /**
  * App-side OmniRush session state handed to [LocalOpenAiProxy]: the client
