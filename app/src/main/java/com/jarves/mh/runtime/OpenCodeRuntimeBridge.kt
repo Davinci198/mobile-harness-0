@@ -195,6 +195,13 @@ internal fun opencodeModelPrefix(kind: ProviderKind): String? = when (kind) {
 }
 
 internal fun opencodeModelArg(provider: ProviderProfile, gatewayUrl: String?, model: String): String = when {
+    provider.kind == ProviderKind.OMNIRUSH -> {
+        // The proxy config registers provider id `omnirush` (see
+        // OmniRush.configContent), so the flag must name it explicitly: the
+        // generic gateway fallback below would emit `openai/…`, which that
+        // config does not define.
+        "omnirush/${model.ifBlank { provider.kind.defaultModel }}"
+    }
     provider.kind == ProviderKind.NVIDIA_NIM -> {
         // `--model` is `provider/modelKey` where modelKey must match the
         // OPENCODE_CONFIG_CONTENT models map; modelKey doubles as the chat
