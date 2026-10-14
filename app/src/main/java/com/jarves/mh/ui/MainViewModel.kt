@@ -65,6 +65,8 @@ import com.jarves.mh.runtime.ProjectAgent
 import com.jarves.mh.runtime.ProjectAgentChangeHistory
 import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.HermesRuntimeBridge
+import com.jarves.mh.runtime.OmniRush
+import com.jarves.mh.runtime.OmniRushProxyAuth
 import com.jarves.mh.runtime.OpenCodeRuntimeBridge
 import com.jarves.mh.runtime.RuntimeInstaller
 import com.jarves.mh.runtime.requiresSavedSecret
@@ -613,6 +615,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         syncShizukuBridge()
         refreshFileRoots()
+        openCodeRuntime.omniRushAuth = OmniRushProxyAuth(
+            clientVersion = { preferences.omniRushClientVersion },
+            onFloor = { floor -> preferences.omniRushClientVersion = floor },
+            refreshAccessToken = { refreshOmniRushToken() },
+        )
         // GitHub's official CLI owns its OAuth credential. Remove credentials from
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
@@ -3417,6 +3424,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         vault.remove(kind.name, keyId)
         refreshActiveApiKey(kind)
         return vault.list(kind.name)
+    }
+
+    /**
+     * Rotates the OmniRush device-token pair after a 401 and persists both
+     * sides (access token as the active key, refresh token as the named
+     * companion). Returns the fresh access token, or null when no refresh
+     * token is saved or the rotation is refused (signed out). Blocking —
+     * invoked from the loopback proxy's request threads, never the main one.
+     */
+    fun refreshOmniRushToken(): String? {
+        val scope = ProviderKind.OMNIRUSH.name
+        val refresh = vault.credentials(scope)
+            .firstOrNull { it.name.equals(OmniRush.REFRESH_KEY_NAME, ignoreCase = true) }
+            ?.secret.orEmpty()
+        if (refresh.isBlank()) return null
+        val rotated = OmniRush.refreshNow(refresh, preferences.omniRushClientVersion) ?: return null
+        vault.put(scope, rotated.first)
+        vault.putNamed(scope, OmniRush.REFRESH_KEY_NAME, rotated.second)
+        return rotated.first
     }
 
     fun upsertCustomEndpoint(endpoint: CustomEndpoint) {

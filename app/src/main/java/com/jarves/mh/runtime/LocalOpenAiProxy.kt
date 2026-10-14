@@ -17,6 +17,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** True when this profile's OpenAI-compatible traffic can ride the loopback proxy. */
 internal fun ProviderProfile.routesThroughOpenAiProxy(): Boolean = when (kind) {
     ProviderKind.NVIDIA_NIM -> true
+    // OmniRush only speaks /responses behind a client gate (bare `omnirush`
+    // User-Agent + X-OmniRush-Client) that guest CLIs cannot send themselves,
+    // so it ALWAYS rides the proxy — direct is not an option.
+    ProviderKind.OMNIRUSH -> true
     ProviderKind.CUSTOM -> dshApi.ifBlank { "anthropic-messages" } == "openai-completions"
     else -> false
 }
@@ -38,6 +42,7 @@ internal fun ProviderProfile.routesThroughOpenAiProxy(): Boolean = when (kind) {
 internal class LocalOpenAiProxy(
     private val profile: ProviderProfile,
     private val apiKey: String,
+    private val omniRush: OmniRushProxyAuth? = null,
 ) : AutoCloseable {
     private val running = AtomicBoolean(true)
     private val server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
@@ -81,7 +86,7 @@ internal class LocalOpenAiProxy(
             }
             val body = readBody(input, headers)
             runCatching {
-                val (connection, code) = forward(method, rawTarget, headers, body)
+                val (connection, code) = forwardWithRetry(method, rawTarget, headers, body)
                 try {
                     writeUpstreamResponse(output, connection, code)
                 } finally {
@@ -101,6 +106,8 @@ internal class LocalOpenAiProxy(
         rawTarget: String,
         headers: Map<String, String>,
         body: ByteArray,
+        bearer: String = apiKey,
+        clientVersion: String? = null,
     ): Pair<HttpURLConnection, Int> {
         val origin = "${target.scheme}://${target.authority}"
         val connection = URL(origin + rawTarget).openConnection() as HttpURLConnection
@@ -108,12 +115,24 @@ internal class LocalOpenAiProxy(
         connection.connectTimeout = 20_000
         connection.readTimeout = 180_000
         connection.instanceFollowRedirects = false
-        connection.setRequestProperty("Authorization", "Bearer $apiKey")
+        connection.setRequestProperty("Authorization", "Bearer $bearer")
+        if (profile.kind == ProviderKind.OMNIRUSH) {
+            // The gateway only serves recognised clients: a versioned
+            // `omnirush/x.y` UA is refused as a lookalike, so the guest's own
+            // User-Agent must never reach it.
+            connection.setRequestProperty("User-Agent", OmniRush.CLIENT_USER_AGENT)
+            connection.setRequestProperty(
+                OmniRush.CLIENT_HEADER,
+                OmniRush.clientHeaderValue(clientVersion ?: omniRush?.clientVersion?.invoke().orEmpty()),
+            )
+        }
         for ((name, value) in headers) {
             when (name) {
                 "host", "content-length", "connection", "expect", "accept-encoding",
                 "authorization", "transfer-encoding", "proxy-authorization", "proxy-connection",
                 -> Unit
+                "user-agent" -> if (profile.kind == ProviderKind.OMNIRUSH) Unit
+                else connection.setRequestProperty(name, value)
                 else -> connection.setRequestProperty(name, value)
             }
         }
@@ -125,6 +144,65 @@ internal class LocalOpenAiProxy(
         val code = connection.responseCode
         return connection to code
     }
+
+    /**
+     * OmniRush self-healing: a 401 rotates the device-token pair once, a 426
+     * version floor bumps the client label once. Anything else (or a second
+     * consecutive failure) passes through untouched. Non-OmniRush profiles
+     * forward exactly once, as before.
+     */
+    private fun forwardWithRetry(
+        method: String,
+        rawTarget: String,
+        headers: Map<String, String>,
+        body: ByteArray,
+    ): Pair<HttpURLConnection, Int> {
+        val auth = omniRush
+        if (profile.kind != ProviderKind.OMNIRUSH || auth == null) {
+            return forward(method, rawTarget, headers, body)
+        }
+        var bearer = apiKey
+        var version = auth.clientVersion()
+        repeat(2) { attempt ->
+            val (connection, code) = forward(method, rawTarget, headers, body, bearer, version)
+            if (attempt == 0) {
+                if (code == 401) {
+                    val fresh = runCatching { auth.refreshAccessToken() }.getOrNull().orEmpty()
+                    if (fresh.isNotBlank() && fresh != bearer) {
+                        runCatching { connection.disconnect() }
+                        bearer = fresh
+                        return@repeat
+                    }
+                }
+                if (code == 426) {
+                    val floor = OmniRush.parseUpdateFloor(readErrorBody(connection))
+                    if (floor != null && OmniRush.isNewerVersion(floor, version)) {
+                        runCatching { auth.onFloor(floor) }
+                        runCatching { connection.disconnect() }
+                        version = floor
+                        return@repeat
+                    }
+                }
+            }
+            return connection to code
+        }
+        return forward(method, rawTarget, headers, body, bearer, version)
+    }
+
+    private fun readErrorBody(connection: HttpURLConnection): String = runCatching {
+        connection.errorStream?.use { stream ->
+            val buffer = ByteArray(4 * 1024)
+            val out = ByteArrayOutputStream()
+            var total = 0
+            while (total < 8 * 1024) {
+                val count = stream.read(buffer)
+                if (count <= 0) break
+                out.write(buffer, 0, count)
+                total += count
+            }
+            out.toByteArray().decodeToString()
+        }.orEmpty()
+    }.getOrDefault("")
 
     private fun writeUpstreamResponse(
         output: BufferedOutputStream,

@@ -39,6 +39,11 @@ internal abstract class HeadlessCliBridge(
     protected val context: Context,
     protected val secretFor: (ProviderProfile) -> String?,
 ) : RuntimeBridge, java.io.Closeable {
+    /**
+     * OmniRush session state for [LocalOpenAiProxy], set by the ViewModel.
+     * Null for every other provider (and until the user saves OmniRush keys).
+     */
+    var omniRushAuth: OmniRushProxyAuth? = null
     protected val installer = RuntimeInstaller(context)
     private val checkpoints by lazy { WorkspaceCheckpoints(context.filesDir).forAgent(kind) }
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
@@ -288,6 +293,13 @@ internal abstract class HeadlessCliBridge(
      */
     private fun openAiProxyFor(provider: ProviderProfile, secret: String): LocalOpenAiProxy? {
         if (secret.isBlank() || !provider.routesThroughOpenAiProxy()) return null
+        // OmniRush without saved auth state cannot self-heal (401/426), so it
+        // must not start: a bare proxy would 403/426 every call with no recovery.
+        val omniAuth = omniRushAuth?.takeIf { provider.kind == ProviderKind.OMNIRUSH }
+        if (provider.kind == ProviderKind.OMNIRUSH && omniAuth == null) {
+            Log.w("HeadlessBridge", "OmniRush proxy needs saved access + refresh keys")
+            return null
+        }
         val warm = supportsWarmSession()
         val signature = listOf(
             provider.kind.name,
@@ -295,9 +307,10 @@ internal abstract class HeadlessCliBridge(
             provider.resolvedBaseUrl,
             provider.dshApi,
             secret,
+            omniAuth?.clientVersion?.invoke().orEmpty(),
         ).joinToString("|")
         if (warm) warmProxy?.takeIf { warmProxySignature == signature }?.let { return it }
-        val proxy = runCatching { LocalOpenAiProxy(provider, secret).start() }
+        val proxy = runCatching { LocalOpenAiProxy(provider, secret, omniAuth).start() }
             .onFailure { Log.w("HeadlessBridge", "Could not start local OpenAI proxy", it) }
             .getOrNull() ?: return null
         if (warm) {

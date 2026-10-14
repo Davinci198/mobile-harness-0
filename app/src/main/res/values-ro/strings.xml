@@ -123,6 +123,7 @@
     <string name="settings_api_key">Cheie API</string>
     <string name="settings_show_hide_key">Arată sau ascunde cheia nouă</string>
     <string name="settings_save_api_key">Salvează cheia API</string>
+    <string name="settings_omnirush_keys_hint">OmniRush își rotește tokenurile: salvează access token-ul ca cheie activă și adaugă refresh token-ul ca a doua cheie, numită „refresh”. Aplicația le reîmprospătează automat.</string>
     <string name="settings_checking_connection">Se verifică conexiunea</string>
     <string name="settings_test_and_save">Testează conexiunea și salvează</string>
     <string name="settings_update_channel">Canal de actualizare</string>

@@ -123,6 +123,7 @@
     <string name="settings_api_key">API key</string>
     <string name="settings_show_hide_key">Show or hide new key</string>
     <string name="settings_save_api_key">Save API key</string>
+    <string name="settings_omnirush_keys_hint">OmniRush rotates its tokens: save the access token as the active key and add the refresh token as a second key named “refresh”. The app refreshes both automatically.</string>
     <string name="settings_checking_connection">Checking connection</string>
     <string name="settings_test_and_save">Test connection and save</string>
     <string name="settings_update_channel">Update channel</string>

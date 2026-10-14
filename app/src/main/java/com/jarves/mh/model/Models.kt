@@ -43,6 +43,15 @@ enum class ProviderKind(
         fixedBaseUrl = true,
         fixedProtocol = true,
     ),
+    OMNIRUSH(
+        "OmniRush",
+        "Coding models through the OmniRush gateway",
+        ProviderProtocol.OPENAI_RESPONSES,
+        "https://omnirush.ai/omnirush/v1",
+        "gpt-6-astra",
+        fixedBaseUrl = true,
+        fixedProtocol = true,
+    ),
     FREE(
         "Hermes",
         "Free tier, works without an API key",
@@ -125,6 +134,7 @@ val DSH_PROTOCOL_PROVIDERS: Set<ProviderKind> = setOf(
 
 fun defaultDshApiForProvider(kind: ProviderKind): String = when (kind) {
     ProviderKind.OPENCODE_ZEN -> "openai-responses"
+    ProviderKind.OMNIRUSH -> "openai-responses"
     ProviderKind.NVIDIA_NIM -> "openai-completions"
     else -> "anthropic-messages"
 }
@@ -179,7 +189,7 @@ fun dshApiForProtocol(protocol: ProviderProtocol): String = when (protocol) {
 }
 
 /** Providers usable with OpenCode and Hermes: the same keyed set as DeepSeek Harness plus a key-free option. */
-val OPENCODE_PROVIDERS: Set<ProviderKind> = DEEPSEEK_HARNESS_PROVIDERS + ProviderKind.FREE
+val OPENCODE_PROVIDERS: Set<ProviderKind> = DEEPSEEK_HARNESS_PROVIDERS + ProviderKind.FREE + ProviderKind.OMNIRUSH
 
 /**
  * Provider choices shown for the selected coding agent. The key-free tier
@@ -189,8 +199,10 @@ val OPENCODE_PROVIDERS: Set<ProviderKind> = DEEPSEEK_HARNESS_PROVIDERS + Provide
 fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
     AgentKind.DEEPSEEK_HARNESS -> ProviderKind.entries.filter { it in DEEPSEEK_HARNESS_PROVIDERS }
     AgentKind.OPENCODE -> ProviderKind.entries.filter { it in OPENCODE_PROVIDERS && it != ProviderKind.FREE }
-    AgentKind.HERMES -> ProviderKind.entries.filter { it in OPENCODE_PROVIDERS }
-    AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { it == ProviderKind.OPENCODE_ZEN || it == ProviderKind.FREE }
+    // OmniRush is OpenCode-only for now: its gateway speaks /responses with a
+    // client gate the Hermes/DSH paths do not implement.
+    AgentKind.HERMES -> ProviderKind.entries.filter { it in OPENCODE_PROVIDERS && it != ProviderKind.OMNIRUSH }
+    AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { it == ProviderKind.OPENCODE_ZEN || it == ProviderKind.FREE || it == ProviderKind.OMNIRUSH }
     AgentKind.ANTIGRAVITY -> emptyList()
 }
 

@@ -84,6 +84,15 @@ internal class OpenCodeRuntimeBridge(
                     environment["OPENCODE_CONFIG_CONTENT"] =
                         openAiCompatibleConfigContent("nvidia", gatewayUrl, "NVIDIA_API_KEY", modelId)
                 }
+                ProviderKind.OMNIRUSH -> {
+                    // The gateway only serves /responses behind its client gate
+                    // (see OmniRush + LocalOpenAiProxy): the guest talks to the
+                    // loopback proxy with the @ai-sdk/openai provider, exactly
+                    // like the CLI's own managed-engine config.
+                    environment["OMNIRUSH_ACCESS_TOKEN"] = key
+                    environment["OPENCODE_CONFIG_CONTENT"] =
+                        OmniRush.configContent(gatewayUrl)
+                }
                 else -> {
                     environment["OPENAI_API_KEY"] = key
                     environment["OPENAI_BASE_URL"] = gatewayUrl
@@ -141,6 +150,9 @@ internal class OpenCodeRuntimeBridge(
             }
             ProviderKind.CLAUDE -> Unit
             ProviderKind.FREE -> Unit
+            // OMNIRUSH never runs direct: without the loopback proxy nobody
+            // injects the client-gate headers, so every call would 403.
+            ProviderKind.OMNIRUSH -> Unit
         }
         return environment
     }
@@ -175,6 +187,7 @@ internal fun opencodeModelPrefix(kind: ProviderKind): String? = when (kind) {
     // The catalog provider for Zen is `opencode`, so the CLI flag must be
     // `opencode/<model>`; `opencode-zen/…` resolves to nothing ("Unexpected server error").
     ProviderKind.OPENCODE_ZEN -> "opencode"
+    ProviderKind.OMNIRUSH -> "omnirush"
     ProviderKind.NVIDIA_NIM -> "nvidia"
     ProviderKind.CUSTOM -> null
     ProviderKind.FREE -> null

@@ -78,6 +78,8 @@ internal fun hermesProviderName(provider: ProviderProfile): String = when (provi
     ProviderKind.LLM_ROUTER -> "openrouter"
     ProviderKind.OPENCODE_ZEN -> "openai"
     ProviderKind.NVIDIA_NIM -> "nvidia"
+    // Unreachable: OmniRush is OpenCode-only (see providersForAgent).
+    ProviderKind.OMNIRUSH -> "openai"
     ProviderKind.CUSTOM -> {
         val api = provider.dshApi.ifBlank { "anthropic-messages" }
         if (api == "openai-completions" || api == "openai-responses") "openai" else "anthropic"
@@ -163,6 +165,8 @@ internal fun hermesEnvironmentFor(
         }
         ProviderKind.CLAUDE -> Unit
         ProviderKind.FREE -> Unit
+        // Unreachable: OmniRush is OpenCode-only (see providersForAgent).
+        ProviderKind.OMNIRUSH -> Unit
     }
     return environment
 }

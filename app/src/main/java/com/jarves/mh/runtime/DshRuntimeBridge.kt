@@ -1480,6 +1480,7 @@ internal object DshRouteMapper {
             )
             ProviderKind.CLAUDE -> throw IllegalArgumentException("Claude subscription login is not supported by DeepSeek Harness")
             ProviderKind.FREE -> throw IllegalArgumentException("The Free provider is only available for Hermes")
+            ProviderKind.OMNIRUSH -> throw IllegalArgumentException("OmniRush is only available for OpenCode")
         }
     }
 }
