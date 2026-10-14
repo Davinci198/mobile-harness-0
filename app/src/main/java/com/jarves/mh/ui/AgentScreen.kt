@@ -134,6 +134,7 @@ import com.jarves.mh.network.EndpointModelCatalog
 import com.jarves.mh.network.ModelDiscoveryResult
 import com.jarves.mh.network.ProviderApiClient
 import com.jarves.mh.runtime.AntigravityAuthStatus
+import com.jarves.mh.runtime.OmniRushAuthStatus
 import com.jarves.mh.ui.theme.PocketAccent
 import com.jarves.mh.ui.theme.PocketAccentTeal
 import com.jarves.mh.ui.theme.PocketBlue
@@ -266,6 +267,9 @@ fun AgentScreen(
     onStartAntigravityLogin: () -> Unit = {},
     onSubmitAntigravityCode: (String) -> Unit = {},
     onLogoutAntigravity: () -> Unit = {},
+    onStartOmniRushLogin: () -> Unit = {},
+    onCancelOmniRushLogin: () -> Unit = {},
+    onLogoutOmniRush: () -> Unit = {},
     onRefreshAntigravityModels: () -> Unit = {},
     onSetAntigravityModel: (String) -> Unit = {},
     onSetAntigravityEffort: (String) -> Unit = {},
@@ -1909,6 +1913,9 @@ fun AgentScreen(
                             status = context.getString(R.string.agent_key_removed, selectedKind.title)
                             statusOk = true
                         },
+                        onStartOmniRushLogin = onStartOmniRushLogin,
+                        onCancelOmniRushLogin = onCancelOmniRushLogin,
+                        onLogoutOmniRush = onLogoutOmniRush,
                         customEndpoints = state.customEndpoints,
                         onApplyEndpoint = { ep ->
                             baseUrl = ep.baseUrl
@@ -2373,6 +2380,65 @@ private fun AgentAntigravityCard(
 }
 
 @Composable
+private fun OmniRushSignInCard(
+    auth: com.jarves.mh.runtime.OmniRushAuthState,
+    onStartLogin: () -> Unit,
+    onCancelLogin: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.omnirush_signin_title), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            auth.message?.let {
+                Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            when (auth.status) {
+                OmniRushAuthStatus.SIGNED_IN -> {
+                    Text(stringResource(R.string.omnirush_signed_in), fontSize = 11.sp, color = Color(0xFF2E9D72))
+                    OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.omnirush_signout))
+                    }
+                }
+                OmniRushAuthStatus.STARTING, OmniRushAuthStatus.COMPLETING -> {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    TextButton(onClick = onCancelLogin) { Text(stringResource(R.string.settings_cancel)) }
+                }
+                OmniRushAuthStatus.AWAITING_APPROVAL -> {
+                    auth.userCode?.let { code ->
+                        OutlinedButton(
+                            onClick = { clipboard.setText(AnnotatedString(code)) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(stringResource(R.string.omnirush_copy_code, code)) }
+                    }
+                    auth.approveUrl?.let { url ->
+                        OutlinedButton(
+                            onClick = { clipboard.setText(AnnotatedString(url)) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(stringResource(R.string.omnirush_copy_url)) }
+                    }
+                    Text(stringResource(R.string.omnirush_approve_hint), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    TextButton(onClick = onCancelLogin) { Text(stringResource(R.string.settings_cancel)) }
+                }
+                OmniRushAuthStatus.SIGNED_OUT, OmniRushAuthStatus.EXPIRED, OmniRushAuthStatus.ERROR -> {
+                    Text(stringResource(R.string.omnirush_signin_hint), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = onStartLogin, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            if (auth.status == OmniRushAuthStatus.SIGNED_OUT) stringResource(R.string.omnirush_signin)
+                            else stringResource(R.string.omnirush_retry),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun AgentProviderCard(
     state: AppUiState,
     selectedKind: ProviderKind,
@@ -2402,6 +2468,9 @@ private fun AgentProviderCard(
     onAddKey: () -> Unit,
     onActivateKey: (String) -> Unit,
     onRemoveKey: (String) -> Unit,
+    onStartOmniRushLogin: () -> Unit = {},
+    onCancelOmniRushLogin: () -> Unit = {},
+    onLogoutOmniRush: () -> Unit = {},
     customEndpoints: List<CustomEndpoint>,
     onApplyEndpoint: (CustomEndpoint) -> Unit,
     onCreateEndpoint: () -> Unit,
@@ -2854,6 +2923,15 @@ private fun AgentProviderCard(
                             )
                         }
                     }
+                }
+
+                if (selectedKind == ProviderKind.OMNIRUSH) {
+                    OmniRushSignInCard(
+                        auth = state.omniRushAuth,
+                        onStartLogin = onStartOmniRushLogin,
+                        onCancelLogin = onCancelOmniRushLogin,
+                        onLogout = onLogoutOmniRush,
+                    )
                 }
 
                 AnimatedVisibility(keysExpanded) {

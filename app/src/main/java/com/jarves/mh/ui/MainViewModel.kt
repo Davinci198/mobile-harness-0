@@ -66,6 +66,8 @@ import com.jarves.mh.runtime.ProjectAgentChangeHistory
 import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.HermesRuntimeBridge
 import com.jarves.mh.runtime.OmniRush
+import com.jarves.mh.runtime.OmniRushAuthController
+import com.jarves.mh.runtime.OmniRushAuthState
 import com.jarves.mh.runtime.OmniRushProxyAuth
 import com.jarves.mh.runtime.OpenCodeRuntimeBridge
 import com.jarves.mh.runtime.RuntimeInstaller
@@ -435,6 +437,7 @@ data class AppUiState(
     val agentUpdateTotalBytes: Long? = null,
     val agentUpdateBytesPerSecond: Long? = null,
     val antigravityAuth: AntigravityAuthState = AntigravityAuthState(),
+    val omniRushAuth: OmniRushAuthState = OmniRushAuthState(),
     val antigravityModel: String = "",
     val antigravityEffort: String = "high",
     val antigravityModels: List<String> = emptyList(),
@@ -542,6 +545,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var modelScanJob: kotlinx.coroutines.Job? = null
     private var modelScanGeneration: Int = 0
     @Volatile private var lastOpenedAntigravityAuthUrl: String? = null
+    @Volatile private var lastOpenedOmniRushAuthUrl: String? = null
     private var activeRuntimeRequest: RuntimeRetryRequest? = null
     private val failedApiKeyIds = mutableSetOf<String>()
     @Volatile private var androidBuildProcess: Process? = null
@@ -572,6 +576,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.antigravityAccountEmail = email.orEmpty()
         if (!signedIn) preferences.clearAgentConversations(AgentKind.ANTIGRAVITY)
     }
+    private val omniRushAuthController = OmniRushAuthController(
+        deviceName = OmniRush.deviceName(),
+        clientVersion = { preferences.omniRushClientVersion },
+        onTokens = { accessToken, refreshToken ->
+            vault.put(ProviderKind.OMNIRUSH.name, accessToken)
+            vault.putNamed(ProviderKind.OMNIRUSH.name, OmniRush.REFRESH_KEY_NAME, refreshToken)
+            refreshActiveApiKey(ProviderKind.OMNIRUSH)
+        },
+        onSignedOut = {
+            vault.remove(ProviderKind.OMNIRUSH.name)
+            refreshActiveApiKey(ProviderKind.OMNIRUSH)
+        },
+        initiallySignedIn = vault.contains(ProviderKind.OMNIRUSH.name),
+    )
     private val _state = MutableStateFlow(
         AppUiState(
             startupMessage = s(R.string.boot_checking_device),
@@ -656,6 +674,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(antigravityAuth = auth) }
                 auth.authorizationUrl?.takeIf { it != lastOpenedAntigravityAuthUrl }?.let { url ->
                     lastOpenedAntigravityAuthUrl = url
+                    runCatching {
+                        getApplication<Application>().startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }.onFailure {
+                        _state.update { state -> state.copy(toastMessage = s(R.string.mvm_browser_copy_signin)) }
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            omniRushAuthController.state.collect { auth ->
+                _state.update { it.copy(omniRushAuth = auth) }
+                auth.approveUrl?.takeIf { it != lastOpenedOmniRushAuthUrl }?.let { url ->
+                    lastOpenedOmniRushAuthUrl = url
                     runCatching {
                         getApplication<Application>().startActivity(
                             Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -4223,6 +4256,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { antigravityAuthController.logout() }
                 .onFailure { error -> _state.update { it.copy(toastMessage = error.message ?: s(R.string.signout_fail)) } }
         }
+    }
+
+    fun startOmniRushLogin() {
+        if (_state.value.agentInstalling != null || _state.value.isRunning) return
+        lastOpenedOmniRushAuthUrl = null
+        viewModelScope.launch { omniRushAuthController.beginLogin() }
+    }
+
+    fun cancelOmniRushLogin() {
+        omniRushAuthController.cancel()
+    }
+
+    fun logoutOmniRush() {
+        viewModelScope.launch { omniRushAuthController.signedOut() }
     }
 
     fun setAntigravityModel(model: String) {

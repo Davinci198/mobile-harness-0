@@ -78,4 +78,28 @@ class OmniRushContractTest {
         val body = OmniRush.refreshRequestBody("omr_secret")
         assertEquals("omr_secret", JSONObject(body).getString("refresh_token"))
     }
+
+    @Test
+    fun `authorize response parses the pending approval`() {
+        val auth = OmniRush.parseAuthorizeResponse(
+            """{"device_code":"d1","user_code":"ABCD-1234","verification_uri":"https://omnirush.ai/x","verification_uri_complete":"https://omnirush.ai/x?c=1","interval":5,"expires_in":600}""",
+            nowMillis = 1_000L,
+        )
+        assertEquals("d1", auth?.deviceCode)
+        assertEquals("ABCD-1234", auth?.userCode)
+        assertEquals("https://omnirush.ai/x?c=1", auth?.approveUrl)
+        assertEquals(5L, auth?.intervalSec)
+        assertEquals(1_000L + 600_000L, auth?.expiresAtMillis)
+    }
+
+    @Test
+    fun `authorize response rejects incomplete payloads and fills defaults`() {
+        assertNull(OmniRush.parseAuthorizeResponse("""{"user_code":"X"}"""))
+        val auth = OmniRush.parseAuthorizeResponse(
+            """{"device_code":"d","user_code":"u","verification_uri_complete":"https://x"}""",
+            nowMillis = 0L,
+        )
+        assertEquals(5L, auth?.intervalSec)
+        assertEquals(600_000L, auth?.expiresAtMillis)
+    }
 }

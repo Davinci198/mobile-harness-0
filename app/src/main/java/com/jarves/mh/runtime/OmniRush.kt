@@ -99,6 +99,106 @@ internal object OmniRush {
         }
     }.getOrNull()
 
+    // ── Device-flow login (own identity per install, like the CLI) ──
+
+    /** Pending authorization created by `POST {manager}/device/authorize`. */
+    data class DeviceAuthorization(
+        val deviceCode: String,
+        val userCode: String,
+        val approveUrl: String,
+        val intervalSec: Long,
+        val expiresAtMillis: Long,
+    )
+
+    fun parseAuthorizeResponse(body: String, nowMillis: Long = System.currentTimeMillis()): DeviceAuthorization? {
+        fun field(name: String): String? =
+            Regex(""""$name"\s*:\s*"([^"]+)"""").find(body)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
+        fun longField(name: String): Long? =
+            Regex(""""$name"\s*:\s*(\d+)"""").find(body)?.groupValues?.get(1)?.toLongOrNull()
+        val deviceCode = field("device_code") ?: return null
+        val userCode = field("user_code") ?: return null
+        val approveUrl = field("verification_uri_complete") ?: field("verification_uri") ?: return null
+        val interval = longField("interval")?.takeIf { it > 0 } ?: 5L
+        val expiresIn = longField("expires_in")?.takeIf { it > 0 } ?: 600L
+        return DeviceAuthorization(deviceCode, userCode, approveUrl, interval, nowMillis + expiresIn * 1000)
+    }
+
+    /** Blocking authorize call; null on network failure or a rejected request. */
+    fun authorizeNow(deviceName: String, clientVersion: String): DeviceAuthorization? = runCatching {
+        val url = java.net.URL("$MANAGER_URL/device/authorize")
+        val connection = url.openConnection() as java.net.HttpURLConnection
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 30_000
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("User-Agent", CLIENT_USER_AGENT)
+            connection.setRequestProperty(CLIENT_HEADER, clientHeaderValue(clientVersion))
+            val body = """{"device_name":"${deviceName.take(64)}","platform":"android"}""".toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(body.size)
+            connection.outputStream.use { it.write(body) }
+            if (connection.responseCode != 200) return null
+            parseAuthorizeResponse(connection.inputStream.use { it.readBytes().decodeToString() })
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrNull()
+
+    /** One poll of `POST {manager}/device/token`. */
+    sealed interface DeviceTokenPoll {
+        /** Still waiting (HTTP 428 or `authorization_pending`). */
+        data object Pending : DeviceTokenPoll
+        /** Expired or denied: start over. */
+        data class Failed(val detail: String) : DeviceTokenPoll
+        /** Approved: the fresh pair (access, refresh). */
+        data class Approved(val accessToken: String, val refreshToken: String) : DeviceTokenPoll
+    }
+
+    fun pollTokenNow(deviceCode: String, clientVersion: String): DeviceTokenPoll {
+        val (code, text) = runCatching {
+            val url = java.net.URL("$MANAGER_URL/device/token")
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            try {
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 20_000
+                connection.readTimeout = 30_000
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("Accept", "application/json")
+                connection.setRequestProperty("User-Agent", CLIENT_USER_AGENT)
+                connection.setRequestProperty(CLIENT_HEADER, clientHeaderValue(clientVersion))
+                val body = """{"device_code":"${deviceCode.replace("\"", "")}"}""".toByteArray(Charsets.UTF_8)
+                connection.setFixedLengthStreamingMode(body.size)
+                connection.outputStream.use { it.write(body) }
+                val status = connection.responseCode
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                status to (stream?.use { it.readBytes().decodeToString() }.orEmpty())
+            } finally {
+                connection.disconnect()
+            }
+        }.getOrNull() ?: return DeviceTokenPoll.Failed("network")
+        if (code == 200) {
+            val pair = parseRefreshResponse(text)
+            if (pair != null) return DeviceTokenPoll.Approved(pair.first, pair.second)
+            return DeviceTokenPoll.Failed("bad-response")
+        }
+        if (code == 428 || "authorization_pending" in text) return DeviceTokenPoll.Pending
+        return DeviceTokenPoll.Failed(detailOf(text))
+    }
+
+    private fun detailOf(body: String): String =
+        Regex(""""detail"\s*:\s*"([^"]+)"""").find(body)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
+            ?: "rejected"
+
+    /** Stable per-device login name, mirroring the CLI's hostname-based default. */
+    fun deviceName(): String {
+        val model = runCatching { android.os.Build.MODEL }.getOrNull().orEmpty()
+        val clean = model.replace(Regex("[^A-Za-z0-9_-]"), "").take(48)
+        return if (clean.isNotBlank()) "PocketDev-$clean" else "PocketDev-Android"
+    }
+
     /**
      * Parses a 200 rotation answer `{access_token, refresh_token}` into the
      * new pair, or null when the body is not a rotation answer.
@@ -120,8 +220,7 @@ internal object OmniRush {
      * 401 at load (dead access token) surfaces as `provider.no-route` ("Model
      * unavailable"), NOT as an auth error. Every "Model unavailable" seen on
      * device traced back to an expired pasted key, never to this config.
-     */
-    fun configContent(gatewayUrl: String): String = buildString {
+     */    fun configContent(gatewayUrl: String): String = buildString {
         append("""{"${'$'}schema":"https://opencode.ai/config.json","snapshot":false,""")
         append(""""provider":{"omnirush":{""")
         append(""""npm":"@ai-sdk/openai",""")

@@ -91,6 +91,15 @@
     <string name="settings_complete_signin">Finalizează autentificarea</string>
     <string name="settings_reconnect_google">Reconectare cu Google</string>
     <string name="settings_signin_google">Autentificare cu Google</string>
+    <string name="omnirush_signin_title">Autentificare OmniRush</string>
+    <string name="omnirush_signin_hint">Autentifică-te cu browserul. Aplicația primește propriul login de dispozitiv, separat de orice CLI din Termux sau desktop.</string>
+    <string name="omnirush_signin">Autentificare cu browserul</string>
+    <string name="omnirush_retry">Încearcă din nou</string>
+    <string name="omnirush_copy_code">Copiază codul %1$s</string>
+    <string name="omnirush_copy_url">Copiază URL-ul paginii de aprobare</string>
+    <string name="omnirush_approve_hint">Deschide pagina de aprobare (se deschide automat), introdu codul dacă ți se cere, aprobă, apoi așteaptă aici.</string>
+    <string name="omnirush_signed_in">OmniRush conectat. Tokenurile se reîmprospătează automat.</string>
+    <string name="omnirush_signout">Deconectare din OmniRush</string>
     <string name="settings_model">Model</string>
     <string name="settings_antigravity_model_id">ID model Antigravity</string>
     <string name="settings_refresh_models">Reîmprospătează modelele</string>
