@@ -95,6 +95,20 @@ class DshRuntimeBridge(
      * 8-12s proot + node + dsh boot that dominated short turns.
      */
     @Volatile private var warmChannel: DshSdkChannel? = null
+    /**
+     * OmniRush session state for [LocalOpenAiProxy], set by the ViewModel. Null
+     * for every other provider (and until the user signs in).
+     */
+    internal var omniRushAuth: OmniRushProxyAuth? = null
+    /**
+     * Loopback proxy carrying the OmniRush client gate. Its URL is baked into
+     * `settings.yaml` at spawn, so — exactly like [HeadlessCliBridge]'s warm
+     * proxy — one instance is cached per provider signature: a fresh ephemeral
+     * port every turn would both force a respawn and strand the reused process
+     * on a closed socket.
+     */
+    @Volatile private var omniProxy: LocalOpenAiProxy? = null
+    @Volatile private var omniProxySignature: String? = null
     @Volatile private var activeSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
     @Volatile private var activeProjectSlug: String? = null
@@ -172,6 +186,19 @@ class DshRuntimeBridge(
             return@withContext sessionId
         }
 
+        // OmniRush reaches the gateway through a loopback proxy (client gate +
+        // token self-heal); without the session state it cannot start at all.
+        val omniProxy = omniProxyFor(provider, secret)
+        if (provider.kind == ProviderKind.OMNIRUSH && omniProxy == null) {
+            eventBus.emit(
+                RuntimeEvent.SessionFailed(
+                    sessionId,
+                    "OmniRush is not signed in. Sign in from Settings → OmniRush, then retry.",
+                ),
+            )
+            return@withContext sessionId
+        }
+
         runCatching {
             RuntimeTaskController.stopAction = {
                 userStopRequested = true
@@ -193,7 +220,7 @@ class DshRuntimeBridge(
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
-            val route = DshRouteMapper.forProfile(provider)
+            val route = DshRouteMapper.forProfile(provider, omniProxy?.url)
             writeDshSettings(installed.rootfs, route, provider)
             val environment = buildEnvironment(route, secret)
             val model = provider.model.ifBlank { route.defaultModel }
@@ -620,6 +647,41 @@ class DshRuntimeBridge(
         Log.i("DshBridge", "SDK channel closed (turns=${channel.turns}, alive=${channel.process.isAlive})")
     }
 
+    /**
+     * The loopback proxy an OmniRush turn reaches the gateway through, cached by
+     * provider signature. Returns null for every other provider, for a missing
+     * key, and — unlike the other routes — when the OmniRush session state is not
+     * wired yet, because a bare proxy without token rotation would 401 forever.
+     */
+    private fun omniProxyFor(provider: ProviderProfile, secret: String): LocalOpenAiProxy? {
+        if (provider.kind != ProviderKind.OMNIRUSH) return null
+        if (secret.isBlank()) return null
+        val auth = omniRushAuth
+        if (auth == null) {
+            Log.w("DshBridge", "OmniRush proxy needs saved access + refresh keys")
+            return null
+        }
+        val signature = listOf(
+            provider.kind.name,
+            provider.model,
+            provider.resolvedBaseUrl,
+            provider.dshApi,
+            secret,
+            auth.clientVersion(),
+        ).joinToString("|")
+        omniProxy?.takeIf { omniProxySignature == signature }?.let { return it }
+        val proxy = runCatching { LocalOpenAiProxy(provider, secret, auth).start() }
+            .onFailure { Log.w("DshBridge", "Could not start local OpenAI proxy", it) }
+            .getOrNull() ?: return null
+        // A different signature means a different gateway target: retire the old
+        // socket. The warm channel still pointing at it is respawned on its own
+        // signature mismatch.
+        runCatching { omniProxy?.close() }
+        omniProxy = proxy
+        omniProxySignature = signature
+        return proxy
+    }
+
     /** Guest environment for [route]; identical across every warm reuse. */
     private fun buildEnvironment(route: DshRoute, secret: String): Map<String, String> {
         val environment = linkedMapOf(
@@ -675,7 +737,12 @@ class DshRuntimeBridge(
                 }
                 val installed = installer.installedRuntime()
                 installer.ensureDshAndroidCompatibility()
-                val route = DshRouteMapper.forProfile(provider)
+                val omniProxy = omniProxyFor(provider, secret)
+                if (provider.kind == ProviderKind.OMNIRUSH && omniProxy == null) {
+                    Log.d("Prewarm", "skip: OmniRush proxy unavailable")
+                    return@runCatching
+                }
+                val route = DshRouteMapper.forProfile(provider, omniProxy?.url)
                 writeDshSettings(installed.rootfs, route, provider)
                 Log.d("Prewarm", "settings.yaml written for ${provider.kind}")
                 val model = provider.model.ifBlank { route.defaultModel }
@@ -1434,7 +1501,17 @@ internal data class DshRoute(
 internal data class DshCustomRoute(val api: String, val baseUrl: String)
 
 internal object DshRouteMapper {
-    fun forProfile(profile: ProviderProfile): DshRoute {
+    /**
+     * Resolves the dsh route for [profile].
+     *
+     * [omniRushBaseUrl] is the loopback proxy's base URL and is required for
+     * OmniRush: the gateway's client gate (bare `omnirush` User-Agent +
+     * `X-OmniRush-Client`) cannot be set from a dsh route, so every OmniRush
+     * turn must reach it through [LocalOpenAiProxy]. Its models speak the OpenAI
+     * Responses API (`api: openai-responses`), the same wire dsh already uses
+     * for OpenCode Zen.
+     */
+    fun forProfile(profile: ProviderProfile, omniRushBaseUrl: String? = null): DshRoute {
         val model = profile.model.ifBlank { profile.kind.defaultModel }
         return when (profile.kind) {
             ProviderKind.DEEPSEEK -> DshRoute(
@@ -1480,7 +1557,16 @@ internal object DshRouteMapper {
             )
             ProviderKind.CLAUDE -> throw IllegalArgumentException("Claude subscription login is not supported by DeepSeek Harness")
             ProviderKind.FREE -> throw IllegalArgumentException("The Free provider is only available for Hermes")
-            ProviderKind.OMNIRUSH -> throw IllegalArgumentException("OmniRush is only available for OpenCode")
+            ProviderKind.OMNIRUSH -> DshRoute(
+                name = "mh-omnirush",
+                keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
+                defaultModel = model,
+                custom = DshCustomRoute(
+                    "openai-responses",
+                    omniRushBaseUrl
+                        ?: throw IllegalStateException("OmniRush needs the loopback proxy for DeepSeek Harness"),
+                ),
+            )
         }
     }
 }

@@ -1,7 +1,9 @@
 package com.jarves.mh.runtime
 
+import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
+import com.jarves.mh.model.providersForAgent
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -56,6 +58,43 @@ class OmniRushContractTest {
             "omnirush/gpt-6-astra",
             opencodeModelArg(ProviderProfile(ProviderKind.OMNIRUSH), "http://127.0.0.1:1/omnirush/v1", "gpt-6-astra"),
         )
+    }
+
+    @Test
+    fun `omnirush is offered to deepseek harness and opencode but not hermes`() {
+        assertTrue(ProviderKind.OMNIRUSH in providersForAgent(AgentKind.DEEPSEEK_HARNESS))
+        assertTrue(ProviderKind.OMNIRUSH in providersForAgent(AgentKind.OPENCODE))
+        assertFalse(ProviderKind.OMNIRUSH in providersForAgent(AgentKind.HERMES))
+        assertFalse(ProviderKind.OMNIRUSH in providersForAgent(AgentKind.CLAUDE_CODE))
+    }
+
+    @Test
+    fun `dsh route speaks openai responses at the loopback proxy`() {
+        val route = DshRouteMapper.forProfile(
+            ProviderProfile(ProviderKind.OMNIRUSH),
+            omniRushBaseUrl = "http://127.0.0.1:7/omnirush/v1",
+        )
+        assertEquals("mh-omnirush", route.name)
+        assertEquals("openai-responses", route.custom?.api)
+        assertEquals("http://127.0.0.1:7/omnirush/v1", route.custom?.baseUrl)
+        assertEquals(DshRuntimeBridge.FALLBACK_KEY_ENV, route.keyEnv)
+    }
+
+    @Test(expected = IllegalStateException::class)
+    fun `dsh route refuses omnirush without the proxy`() {
+        DshRouteMapper.forProfile(ProviderProfile(ProviderKind.OMNIRUSH))
+    }
+
+    @Test
+    fun `dsh settings pin the omnirush provider at the proxy`() {
+        val route = DshRouteMapper.forProfile(
+            ProviderProfile(ProviderKind.OMNIRUSH),
+            omniRushBaseUrl = "http://127.0.0.1:7/omnirush/v1",
+        )
+        val patch = dshHomePatch(route, "gpt-6-astra")
+        assertTrue(patch.contains("api: openai-responses"))
+        assertTrue(patch.contains("baseURL: 'http://127.0.0.1:7/omnirush/v1'"))
+        assertTrue(patch.contains("apiKeyEnv: ${DshRuntimeBridge.FALLBACK_KEY_ENV}"))
     }
 
     @Test

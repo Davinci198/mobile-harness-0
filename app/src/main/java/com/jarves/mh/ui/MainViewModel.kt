@@ -633,11 +633,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         syncShizukuBridge()
         refreshFileRoots()
-        openCodeRuntime.omniRushAuth = OmniRushProxyAuth(
+        val omniRushProxyAuth = OmniRushProxyAuth(
             clientVersion = { preferences.omniRushClientVersion },
             onFloor = { floor -> preferences.omniRushClientVersion = floor },
             refreshAccessToken = { refreshOmniRushToken() },
         )
+        openCodeRuntime.omniRushAuth = omniRushProxyAuth
+        dshRuntime.omniRushAuth = omniRushProxyAuth
         // GitHub's official CLI owns its OAuth credential. Remove credentials from
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
