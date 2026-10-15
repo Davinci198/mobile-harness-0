@@ -87,6 +87,8 @@ internal class LocalOpenAiProxy(
             val body = readBody(input, headers)
             runCatching {
                 val (connection, code) = forwardWithRetry(method, rawTarget, headers, body)
+                // TEMP-DEBUG: what the gateway answered per request.
+                android.util.Log.d("OpenAiProxy", "${profile.kind} $method $rawTarget -> $code")
                 try {
                     writeUpstreamResponse(output, connection, code)
                 } finally {
