@@ -10,6 +10,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OmniRushContractTest {
+    /**
+     * Android's `org.json` silently ignores trailing content after the first
+     * value, so a document with one extra `}` parses "fine" in a unit test and
+     * only blows up in the guest (opencode rejects the whole provider). Walk the
+     * document and require the brace depth to land exactly on zero at the end.
+     */
+    private fun assertStrictJson(document: String) {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (char in document) {
+            when {
+                escaped -> escaped = false
+                char == '\\' && inString -> escaped = true
+                char == '"' -> inString = !inString
+                inString -> Unit
+                char == '{' -> depth++
+                char == '}' -> depth--
+            }
+            assertTrue("unbalanced JSON near: $document", depth >= 0)
+        }
+        assertFalse("unterminated string in: $document", inString)
+        assertEquals("JSON braces do not balance in: $document", 0, depth)
+    }
+
     @Test
     fun `provider entry points at the gateway with the catalog default`() {
         assertEquals("https://omnirush.ai/omnirush/v1", ProviderKind.OMNIRUSH.defaultBaseUrl)
@@ -36,6 +61,7 @@ class OmniRushContractTest {
     @Test
     fun `guest config points the openai provider at the proxy with all models`() {
         val content = OmniRush.configContent("http://127.0.0.1:9/omnirush/v1")
+        assertStrictJson(content)
         val root = JSONObject(content)
         val provider = root.getJSONObject("provider").getJSONObject("omnirush")
         assertEquals("@ai-sdk/openai", provider.getString("npm"))
@@ -55,6 +81,7 @@ class OmniRushContractTest {
         // (provider.no-route on device). We escape before embedding.
         val hostile = "ab\"cd\\ef"
         val content = OmniRush.configContent("http://127.0.0.1:9/omnirush/v1", hostile)
+        assertStrictJson(content)
         val apiKey = JSONObject(content)
             .getJSONObject("provider")
             .getJSONObject("omnirush")

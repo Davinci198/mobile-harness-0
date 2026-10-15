@@ -236,7 +236,12 @@ internal object OmniRush {
                 if (index > 0) append(",")
                 append(""""$id":{"name":"$display"}""")
             }
-            append("}}}}}")
+            // Close models, provider entry, providers map, root document.
+            // Exactly four: one extra brace makes the document invalid JSON,
+            // opencode drops the whole provider and every model answers
+            // `provider.no-route` ("Model unavailable") — the real device
+            // failure, live-verified 2026-10-15.
+            append("}}}}")
         }
         if (apiKey == null) return template
         return template.replace(

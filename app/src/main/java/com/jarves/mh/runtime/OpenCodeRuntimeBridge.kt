@@ -95,12 +95,6 @@ internal class OpenCodeRuntimeBridge(
                     environment["OMNIRUSH_ACCESS_TOKEN"] = key
                     environment["OPENCODE_CONFIG_CONTENT"] =
                         OmniRush.configContent(gatewayUrl, key)
-                    // TEMP-DEBUG (no-route hunt): full config + proxy url, never the key.
-                    android.util.Log.d(
-                        "OmniRushDbg",
-                        "cfg=${environment["OPENCODE_CONFIG_CONTENT"]} " +
-                            "gw=$gatewayUrl keyLen=${key.length}",
-                    )
                 }
                 else -> {
                     environment["OPENAI_API_KEY"] = key
