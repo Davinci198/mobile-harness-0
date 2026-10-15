@@ -105,12 +105,24 @@ internal class LocalOpenAiProxy(
         }
     }
 
+    /**
+     * The bearer to send right now.
+     *
+     * [apiKey] is frozen when the proxy starts, but the proxy outlives many
+     * rotations: after the first one, reusing the frozen value would 401 every
+     * request and burn a single-use refresh token each time. Prefer the token
+     * the vault holds now, falling back to the frozen key for non-OmniRush
+     * profiles (which never rotate) or when the vault has nothing newer.
+     */
+    private fun currentBearer(): String =
+        omniRush?.currentAccessToken?.invoke()?.takeIf { it.isNotBlank() } ?: apiKey
+
     private fun forward(
         method: String,
         rawTarget: String,
         headers: Map<String, String>,
         body: ByteArray,
-        bearer: String = apiKey,
+        bearer: String = currentBearer(),
         clientVersion: String? = null,
     ): Pair<HttpURLConnection, Int> {
         val origin = "${target.scheme}://${target.authority}"
@@ -165,7 +177,7 @@ internal class LocalOpenAiProxy(
         if (profile.kind != ProviderKind.OMNIRUSH || auth == null) {
             return forward(method, rawTarget, headers, body)
         }
-        var bearer = apiKey
+        var bearer = currentBearer()
         var version = auth.clientVersion()
         repeat(2) { attempt ->
             val (connection, code) = forward(method, rawTarget, headers, body, bearer, version)
