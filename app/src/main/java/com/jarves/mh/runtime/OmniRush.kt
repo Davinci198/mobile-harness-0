@@ -71,12 +71,32 @@ internal object OmniRush {
         """{"refresh_token":"${refreshToken.replace("\"", "")}"}"""
 
     /**
-     * Blocking device-token rotation against `{manager}/device/refresh`.
-     * Returns the new (access, refresh) pair, or null when the refresh token
-     * is dead (401/409/signed out) or the network fails. Call off the main
-     * thread — the loopback proxy invokes this from its request threads.
+     * Outcome of one `device/refresh` attempt.
+     *
+     * [code] is the HTTP status, or 0 when the request never completed (the
+     * network failed). [access]/[refresh] are set only on a 200 carrying a
+     * parseable pair. The status lets callers tell a dead pair (401/409, sign
+     * in again) from a transient manager outage (0/5xx, keep the pair).
      */
-    fun refreshNow(refreshToken: String, clientVersion: String): Pair<String, String>? = runCatching {
+    data class RefreshResult(
+        val code: Int,
+        val access: String? = null,
+        val refresh: String? = null,
+    ) {
+        /** The rotated pair, or null unless the 200 carried both halves. */
+        val rotated: Pair<String, String>?
+            get() = if (access != null && refresh != null) access to refresh else null
+
+        /** True when the manager retired the pair; the user must sign in again. */
+        val pairIsDead: Boolean get() = code == 401 || code == 409
+    }
+
+    /**
+     * Blocking device-token rotation against `{manager}/device/refresh`.
+     * Call off the main thread — the loopback proxy invokes this from its
+     * request threads.
+     */
+    fun refreshNowDetailed(refreshToken: String, clientVersion: String): RefreshResult = runCatching {
         val url = java.net.URL("$MANAGER_URL/device/refresh")
         val connection = url.openConnection() as java.net.HttpURLConnection
         try {
@@ -91,13 +111,23 @@ internal object OmniRush {
             val body = refreshRequestBody(refreshToken).toByteArray(Charsets.UTF_8)
             connection.setFixedLengthStreamingMode(body.size)
             connection.outputStream.use { it.write(body) }
-            if (connection.responseCode != 200) return null
+            val code = connection.responseCode
+            if (code != 200) return@runCatching RefreshResult(code)
             val text = connection.inputStream.use { it.readBytes().decodeToString() }
-            parseRefreshResponse(text)
+            val pair = parseRefreshResponse(text)
+            RefreshResult(code, pair?.first, pair?.second)
         } finally {
             connection.disconnect()
         }
-    }.getOrNull()
+    }.getOrElse { RefreshResult(0) }
+
+    /**
+     * The rotated (access, refresh) pair, or null when the refresh token is dead
+     * (401/409/signed out) or the network fails. Callers that must distinguish a
+     * dead pair from a transient outage use [refreshNowDetailed] instead.
+     */
+    fun refreshNow(refreshToken: String, clientVersion: String): Pair<String, String>? =
+        refreshNowDetailed(refreshToken, clientVersion).rotated
 
     // ── Device-flow login (own identity per install, like the CLI) ──
 
@@ -266,4 +296,11 @@ internal data class OmniRushProxyAuth(
      * returns the fresh access token, or null when signed out.
      */
     val refreshAccessToken: () -> String?,
+    /**
+     * The access token currently persisted. Lets the proxy reuse a pair a
+     * concurrent request already rotated instead of rotating again — the
+     * manager's refresh tokens are single-use, so a redundant rotation would
+     * burn a pair and can strand the caller on a bare 401.
+     */
+    val currentAccessToken: () -> String? = { null },
 )

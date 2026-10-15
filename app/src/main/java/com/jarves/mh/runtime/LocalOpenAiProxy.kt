@@ -171,10 +171,18 @@ internal class LocalOpenAiProxy(
             val (connection, code) = forward(method, rawTarget, headers, body, bearer, version)
             if (attempt == 0) {
                 if (code == 401) {
-                    val fresh = runCatching { auth.refreshAccessToken() }.getOrNull().orEmpty()
-                    if (fresh.isNotBlank() && fresh != bearer) {
+                    // Prefer a pair another request already rotated: the stored
+                    // token differs from the one that just 401'd, so reuse it
+                    // instead of burning another single-use refresh token.
+                    val stored = runCatching { auth.currentAccessToken() }.getOrNull()
+                    val rotated = if (!stored.isNullOrBlank() && stored != bearer) {
+                        stored
+                    } else {
+                        runCatching { auth.refreshAccessToken() }.getOrNull()
+                    }
+                    if (!rotated.isNullOrBlank() && rotated != bearer) {
                         runCatching { connection.disconnect() }
-                        bearer = fresh
+                        bearer = rotated
                         return@repeat
                     }
                 }

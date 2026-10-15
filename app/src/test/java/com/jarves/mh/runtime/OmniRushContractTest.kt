@@ -161,6 +161,27 @@ class OmniRushContractTest {
     }
 
     @Test
+    fun `a 401 rotation marks the pair dead so the ui can ask for sign-in`() {
+        val dead = OmniRush.RefreshResult(401)
+        assertNull(dead.rotated)
+        assertTrue(dead.pairIsDead)
+
+        // A transient manager outage must NOT be treated as a dead pair.
+        assertFalse(OmniRush.RefreshResult(0).pairIsDead)
+        assertFalse(OmniRush.RefreshResult(503).pairIsDead)
+    }
+
+    @Test
+    fun `a 200 rotation exposes the pair only when both halves parsed`() {
+        val ok = OmniRush.RefreshResult(200, "a1", "r1")
+        assertEquals("a1" to "r1", ok.rotated)
+        assertFalse(ok.pairIsDead)
+
+        // A 200 whose body never parsed carries no pair to persist.
+        assertNull(OmniRush.RefreshResult(200).rotated)
+    }
+
+    @Test
     fun `authorize response parses the pending approval`() {
         val auth = OmniRush.parseAuthorizeResponse(
             """{"device_code":"d1","user_code":"ABCD-1234","verification_uri":"https://omnirush.ai/x","verification_uri_complete":"https://omnirush.ai/x?c=1","interval":5,"expires_in":600}""",
