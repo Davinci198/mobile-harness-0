@@ -216,22 +216,33 @@ internal object OmniRush {
      * pointed at our loopback proxy which injects the client gate headers.
      *
      * Models carry id + display name only (same minimal shape as the NVIDIA
-     * pattern). Verified live 2026-10-15: an important negative result — a
-     * 401 at load (dead access token) surfaces as `provider.no-route` ("Model
-     * unavailable"), NOT as an auth error. Every "Model unavailable" seen on
-     * device traced back to an expired pasted key, never to this config.
-     */    fun configContent(gatewayUrl: String): String = buildString {
-        append("""{"${'$'}schema":"https://opencode.ai/config.json","snapshot":false,""")
-        append(""""provider":{"omnirush":{""")
-        append(""""npm":"@ai-sdk/openai",""")
-        append(""""name":"omnirush.ai",""")
-        append(""""options":{"baseURL":"$gatewayUrl","apiKey":"{env:OMNIRUSH_ACCESS_TOKEN}"},""")
-        append(""""models":{""")
-        MODELS.entries.forEachIndexed { index, (id, display) ->
-            if (index > 0) append(",")
-            append(""""$id":{"name":"$display"}""")
+     * pattern). When [apiKey] is given, the `{env:…}` placeholder is replaced
+     * with the JSON-escaped key instead of relying on opencode's textual
+     * substitution: device tokens may contain `"` or `\`, which would
+     * otherwise produce malformed JSON — opencode drops the whole provider
+     * and every model answers `provider.no-route` ("Model unavailable").
+     * Verified live 2026-10-15: a `"` inside the key reproduces the exact
+     * device failure; the escaped form resolves.
+     */
+    fun configContent(gatewayUrl: String, apiKey: String? = null): String {
+        val template = buildString {
+            append("""{"${'$'}schema":"https://opencode.ai/config.json","snapshot":false,""")
+            append(""""provider":{"omnirush":{""")
+            append(""""npm":"@ai-sdk/openai",""")
+            append(""""name":"omnirush.ai",""")
+            append(""""options":{"baseURL":"$gatewayUrl","apiKey":"{env:OMNIRUSH_ACCESS_TOKEN}"},""")
+            append(""""models":{""")
+            MODELS.entries.forEachIndexed { index, (id, display) ->
+                if (index > 0) append(",")
+                append(""""$id":{"name":"$display"}""")
+            }
+            append("}}}}}")
         }
-        append("}}}}}")
+        if (apiKey == null) return template
+        return template.replace(
+            "\"{env:OMNIRUSH_ACCESS_TOKEN}\"",
+            org.json.JSONObject.quote(apiKey),
+        )
     }
 }
 

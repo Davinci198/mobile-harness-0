@@ -49,6 +49,21 @@ class OmniRushContractTest {
     }
 
     @Test
+    fun `keys with quotes survive embedding without breaking the document`() {
+        // Device tokens may carry '"' or '\': opencode's own textual {env:}
+        // fill-in would corrupt the JSON and drop the whole provider
+        // (provider.no-route on device). We escape before embedding.
+        val hostile = "ab\"cd\\ef"
+        val content = OmniRush.configContent("http://127.0.0.1:9/omnirush/v1", hostile)
+        val apiKey = JSONObject(content)
+            .getJSONObject("provider")
+            .getJSONObject("omnirush")
+            .getJSONObject("options")
+            .getString("apiKey")
+        assertEquals(hostile, apiKey)
+    }
+
+    @Test
     fun `update floor parses out of a 426 body`() {
         assertEquals(
             "2.4.11",

@@ -88,10 +88,13 @@ internal class OpenCodeRuntimeBridge(
                     // The gateway only serves /responses behind its client gate
                     // (see OmniRush + LocalOpenAiProxy): the guest talks to the
                     // loopback proxy with the @ai-sdk/openai provider, exactly
-                    // like the CLI's own managed-engine config.
+                    // like the CLI's own managed-engine config. The key is
+                    // embedded JSON-escaped (never via textual {env:} fill-in:
+                    // device tokens may carry '"' or '\' which would corrupt
+                    // the whole document and drop the provider).
                     environment["OMNIRUSH_ACCESS_TOKEN"] = key
                     environment["OPENCODE_CONFIG_CONTENT"] =
-                        OmniRush.configContent(gatewayUrl)
+                        OmniRush.configContent(gatewayUrl, key)
                     // TEMP-DEBUG (no-route hunt): full config + proxy url, never the key.
                     android.util.Log.d(
                         "OmniRushDbg",
