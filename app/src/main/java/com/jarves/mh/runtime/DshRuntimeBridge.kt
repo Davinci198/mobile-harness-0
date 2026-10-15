@@ -110,6 +110,13 @@ class DshRuntimeBridge(
     @Volatile private var omniProxy: LocalOpenAiProxy? = null
     @Volatile private var omniProxySignature: String? = null
     @Volatile private var activeSessionId: String? = null
+    /**
+     * dsh-side id of the running turn. Normally [activeSessionId], but a retry
+     * must mint a fresh one: dsh persists sessions per workspace, so reusing the
+     * id of a failed attempt makes dsh reject the retry as a duplicate
+     * ("session already exists") instead of re-running the model.
+     */
+    @Volatile private var activeDshSessionId: String? = null
     @Volatile private var userStopRequested: Boolean = false
     @Volatile private var activeProjectSlug: String? = null
     @Volatile private var taskStartedAtElapsedRealtime: Long = 0L
@@ -143,7 +150,7 @@ class DshRuntimeBridge(
                 method = "session/prompt",
                 id = SDK_PROMPT_ID,
                 params = JSONObject()
-                    .put("sessionId", sessionId)
+                    .put("sessionId", activeDshSessionId ?: sessionId)
                     .put(
                         "contentBlocks",
                         JSONArray().put(JSONObject().put("type", "text").put("text", prompt)),
@@ -251,9 +258,16 @@ class DshRuntimeBridge(
                 }
                 activeProcess = channel.process
                 if (userStopRequested) channel.process.destroy()
+                // dsh persists sessions per workspace, so a retry that reused the
+                // failed attempt's id would be rejected as a duplicate. Attempt 1
+                // keeps the app's id (matching the UI and the session directory);
+                // every retry mints a fresh one.
+                val dshSessionId = dshSessionIdForAttempt(sessionId, attempt)
+                activeDshSessionId = dshSessionId
                 val sdkResult = runSdkSession(
                     channel = channel,
                     sessionId = sessionId,
+                    dshSessionId = dshSessionId,
                     route = route,
                     model = model,
                     guestWorkspacePath = guestWorkspacePath,
@@ -318,6 +332,7 @@ class DshRuntimeBridge(
         }
         activeProcess = null
         activeSessionId = null
+        activeDshSessionId = null
         RuntimeTaskController.stopAction = null
         sessionId
     }
@@ -334,6 +349,7 @@ class DshRuntimeBridge(
     private suspend fun runSdkSession(
         channel: DshSdkChannel,
         sessionId: String,
+        dshSessionId: String,
         route: DshRoute,
         model: String,
         guestWorkspacePath: String,
@@ -342,7 +358,7 @@ class DshRuntimeBridge(
         val process = channel.process
         val nativeProcess = process as? NativeSpawnProcess
             ?: error("Unsupported Android runtime process")
-        val parser = DshSdkProtocolParser(sessionId)
+        val parser = DshSdkProtocolParser(dshSessionId)
         var sawRunning = false
         var completed = false
         var sawActivity = false
@@ -362,7 +378,7 @@ class DshRuntimeBridge(
             method = "session/prompt",
             id = SDK_PROMPT_ID,
             params = JSONObject()
-                .put("sessionId", sessionId)
+                .put("sessionId", dshSessionId)
                 .put(
                     "contentBlocks",
                     JSONArray().put(JSONObject().put("type", "text").put("text", prompt)),
@@ -1160,6 +1176,9 @@ private suspend fun emitReasoningSummary(
         val m = message.lowercase()
         return m.contains("temporarily overloaded") ||
             m.contains("overloaded") ||
+            // OmniRush answers a correlated capacity failure on /responses with
+            // this wording; the same code also surfaces as "overloaded".
+            m.contains("at capacity") ||
             m.contains("temporarily unavailable") ||
             m.contains("service temporarily") ||
             m.contains("pi_ai_error") ||
@@ -1348,6 +1367,18 @@ export default function mhSkillsTools(ctx) {
 }
 
 internal fun yamlQuote(value: String): String = "'${value.replace("'", "''")}'"
+
+/**
+ * The dsh session id for retry [attempt] of an app session.
+ *
+ * dsh persists sessions per workspace, so reusing the id of a failed attempt
+ * makes it reject the retry as a duplicate (`session "…" already exists`)
+ * instead of re-running the model. Attempt 1 keeps the app's id so the UI, the
+ * logs, and the session directory agree; every later attempt mints a fresh id,
+ * since the failed attempt left nothing worth resuming.
+ */
+internal fun dshSessionIdForAttempt(appSessionId: String, attempt: Int): String =
+    if (attempt <= 1) appSessionId else UUID.randomUUID().toString()
 
 /**
  * Cordis home patch for the dsh 0.2.0 settings surface

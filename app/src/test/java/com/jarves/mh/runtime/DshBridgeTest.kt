@@ -611,6 +611,25 @@ class DshHomePatchTest {
     }
 }
 
+class DshRetrySessionIdTest {
+    @Test
+    fun firstAttemptKeepsTheAppSessionId() {
+        assertEquals("app-session", dshSessionIdForAttempt("app-session", 1))
+    }
+
+    @Test
+    fun retriesMintFreshIdsSoDshDoesNotRejectTheDuplicate() {
+        val app = "app-session"
+        val second = dshSessionIdForAttempt(app, 2)
+        val third = dshSessionIdForAttempt(app, 3)
+
+        assertNotEquals(app, second)
+        assertNotEquals(second, third)
+        // A fresh id must be a UUID: dsh's session store keys on that shape.
+        assertEquals(36, second.length)
+    }
+}
+
 class DshQuestionParseTest {
     @Test
     fun parsesTheGuestQuestionPayload() {
