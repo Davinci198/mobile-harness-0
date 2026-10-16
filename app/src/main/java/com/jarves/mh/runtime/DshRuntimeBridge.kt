@@ -289,21 +289,28 @@ class DshRuntimeBridge(
                     )
                     return@runCatching
                 }
-                // A failed turn leaves the reused process in an unknown state: drop it
-                // so the retry (and every later Agent Execution) boots from scratch.
                 val deadExit = if (channel.process.isAlive) {
                     null
                 } else {
                     runCatching { channel.process.exitValue() }.getOrNull()
                 }
-                closeWarmChannel(channel)
+                val rawFailure = sdkResult.failure
+                val transient = rawFailure.isNotBlank() && isTransientProviderOverload(rawFailure)
+                // A provider-side rejection ("overloaded", "at capacity") never
+                // touched the SDK process: the protocol finished the turn, so a
+                // live channel stays warm and the retry skips the 8-12s boot.
+                // Anything else (crash, exit, bare failure) leaves the reused
+                // process in an unknown state and must drop it so the retry
+                // boots from scratch.
+                val healthyOverload = transient && deadExit == null
+                if (!healthyOverload) closeWarmChannel(channel)
                 activeProcess = null
                 if (userStopRequested) throw DshSessionException("Stopped by user")
-                lastFailure = sdkResult.failure.ifBlank {
+                lastFailure = rawFailure.ifBlank {
                     if (deadExit != null) "DeepSeek Harness stopped with exit code $deadExit"
                     else "DeepSeek Harness stopped unexpectedly"
                 }
-                if (!isTransientProviderOverload(lastFailure) || attempt >= RETRY_MAX_ATTEMPTS) {
+                if (!transient || attempt >= RETRY_MAX_ATTEMPTS) {
                     error(lastFailure)
                 }
                 pushForegroundProgress("DeepSeek Harness provider is overloaded — retrying ($attempt/${RETRY_MAX_ATTEMPTS})…")
@@ -677,13 +684,17 @@ class DshRuntimeBridge(
             Log.w("DshBridge", "OmniRush proxy needs saved access + refresh keys")
             return null
         }
+        // The rotating access token and the client version are deliberately NOT
+        // part of the signature: the proxy reads both live for every request
+        // ([LocalOpenAiProxy.currentBearer], [OmniRushProxyAuth.clientVersion]),
+        // so a rotation must not retire the socket. Retiring it would hand the
+        // guest a new base URL, change [dshWarmSignature] and force the 8-12s
+        // cold PRoot boot on the next turn.
         val signature = listOf(
             provider.kind.name,
             provider.model,
             provider.resolvedBaseUrl,
             provider.dshApi,
-            secret,
-            auth.clientVersion(),
         ).joinToString("|")
         omniProxy?.takeIf { omniProxySignature == signature }?.let { return it }
         val proxy = runCatching { LocalOpenAiProxy(provider, secret, auth).start() }
@@ -722,8 +733,11 @@ class DshRuntimeBridge(
             // default — in-workspace work runs silently, anything wider asks.
             "DSH_PERMISSION_MODE" to "workspace-write",
             // Guest CLIs refuse to boot with an empty key variable; a loopback
-            // gateway ignores the header, so send a placeholder instead.
-            route.keyEnv to secret.ifBlank { "loopback" },
+            // gateway ignores the header, so send a placeholder instead. On the
+            // OmniRush route that placeholder is mandatory for warm reuse too:
+            // the real token rotates hourly and baking it in would change
+            // [dshWarmSignature] and force a cold boot on every rotation.
+            route.keyEnv to dshGuestKey(route, secret),
         )
         if (route.keyEnv != FALLBACK_KEY_ENV) environment.remove(FALLBACK_KEY_ENV)
         return environment
@@ -1191,6 +1205,12 @@ private suspend fun emitReasoningSummary(
     companion object {
         const val DSH_HOME_GUEST_PATH = "/root/.dsh"
         const val FALLBACK_KEY_ENV = "MH_DSH_API_KEY"
+        /**
+         * Fixed value handed to a guest that talks to a loopback gateway: the
+         * proxy injects the real token, and a constant keeps the warm signature
+         * stable while the token rotates hourly.
+         */
+        const val LOOPBACK_KEY = "loopback"
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
         /** Cap on how much prior chat text is forwarded into the prompt. */
         private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 40_000
@@ -1500,6 +1520,20 @@ internal class DshSdkChannel(val signature: String, val process: Process) {
 }
 
 /**
+ * The credential handed to a guest for [route].
+ *
+ * The loopback OmniRush route never needs the real token — [LocalOpenAiProxy]
+ * injects the live one per request — so it gets a fixed placeholder. That is
+ * not cosmetic: the guest environment is part of [dshWarmSignature], so a token
+ * baked in there would change the signature on every rotation and force an
+ * 8-12s cold PRoot boot instead of a warm reuse. Every other route passes the
+ * real key.
+ */
+internal fun dshGuestKey(route: DshRoute, secret: String): String =
+    if (route.name == DshRouteMapper.OMNIRUSH_ROUTE_NAME) DshRuntimeBridge.LOOPBACK_KEY
+    else secret.ifBlank { DshRuntimeBridge.LOOPBACK_KEY }
+
+/**
  * Warm-session identity: every input baked into the guest process at spawn.
  * `writeDshSettings` derives its file from the route and model, so those two
  * cover the on-disk config; the workspace and environment carry the project
@@ -1532,6 +1566,13 @@ internal data class DshRoute(
 internal data class DshCustomRoute(val api: String, val baseUrl: String)
 
 internal object DshRouteMapper {
+    /**
+     * Route name of the OmniRush loopback route. Used to recognise that route
+     * elsewhere ([dshGuestKey]), so the rotating token never forces a cold
+     * respawn of the guest.
+     */
+    const val OMNIRUSH_ROUTE_NAME = "mh-omnirush"
+
     /**
      * Resolves the dsh route for [profile].
      *
@@ -1589,7 +1630,7 @@ internal object DshRouteMapper {
             ProviderKind.CLAUDE -> throw IllegalArgumentException("Claude subscription login is not supported by DeepSeek Harness")
             ProviderKind.FREE -> throw IllegalArgumentException("The Free provider is only available for Hermes")
             ProviderKind.OMNIRUSH -> DshRoute(
-                name = "mh-omnirush",
+                name = OMNIRUSH_ROUTE_NAME,
                 keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
                 defaultModel = model,
                 custom = DshCustomRoute(

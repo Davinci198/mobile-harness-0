@@ -715,4 +715,34 @@ class DshWarmSignatureTest {
         )
         assertNotEquals(signature(), signature(route = custom))
     }
+
+    @Test
+    fun omnirushGuestKeyIsConstantSoARotationKeepsTheChannelWarm() {
+        val route = DshRouteMapper.forProfile(
+            ProviderProfile(ProviderKind.OMNIRUSH),
+            "http://127.0.0.1:55999",
+        )
+        // The token rotates hourly and the guest never sees it: baking it into
+        // the environment would change the warm signature on every rotation and
+        // cost the 8-12s PRoot boot that dominates short OmniRush turns.
+        assertEquals(dshGuestKey(route, "access-v1"), dshGuestKey(route, "access-v2"))
+        assertEquals(DshRuntimeBridge.LOOPBACK_KEY, dshGuestKey(route, ""))
+        // Baking the raw token in (the old behaviour) would have booted fresh
+        // on every rotation…
+        assertNotEquals(
+            signature(route = route, environment = mapOf(DshRuntimeBridge.FALLBACK_KEY_ENV to "access-v1")),
+            signature(route = route, environment = mapOf(DshRuntimeBridge.FALLBACK_KEY_ENV to "access-v2")),
+        )
+        // …while the key the guest actually receives keeps one warm channel.
+        assertEquals(
+            signature(route = route, environment = mapOf(DshRuntimeBridge.FALLBACK_KEY_ENV to dshGuestKey(route, "access-v1"))),
+            signature(route = route, environment = mapOf(DshRuntimeBridge.FALLBACK_KEY_ENV to dshGuestKey(route, "access-v2"))),
+        )
+    }
+
+    @Test
+    fun aNonLoopbackRouteStillGetsItsRealKey() {
+        assertEquals("sk-live", dshGuestKey(officialRoute, "sk-live"))
+        assertEquals(DshRuntimeBridge.LOOPBACK_KEY, dshGuestKey(officialRoute, ""))
+    }
 }
