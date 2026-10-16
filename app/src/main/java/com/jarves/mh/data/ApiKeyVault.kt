@@ -65,6 +65,32 @@ class ApiKeyVault(context: Context) {
         return entries.map { it.copy(isActive = it.id == active) }
     }
 
+    /**
+     * Inserts or replaces the entry called [name] (case-insensitive) without
+     * touching the active pointer. Used for companion secrets such as the
+     * OmniRush refresh token, which rotates next to the active access token.
+     */
+    @Synchronized
+    fun putNamed(providerId: String, name: String, secret: String) {
+        require(secret.isNotBlank()) { "Secret cannot be empty" }
+        migrateLegacySecrets()
+        val entries = ensurePool(providerId).toMutableList()
+        val existing = entries.firstOrNull { it.name.equals(name.trim(), ignoreCase = true) }
+        if (existing == null) {
+            val entry = ApiKeyInfo(
+                id = UUID.randomUUID().toString(),
+                name = name.trim().ifBlank { "API key ${entries.size + 1}" }.take(60),
+                isActive = entries.isEmpty(),
+            )
+            putEncrypted(secretKey(providerId, entry.id), secret)
+            entries += entry.copy(isActive = false)
+            savePool(providerId, entries)
+            if (entries.size == 1) setActiveId(providerId, entry.id)
+        } else {
+            putEncrypted(secretKey(providerId, existing.id), secret)
+        }
+    }
+
     @Synchronized
     fun credentials(providerId: String): List<ApiKeyCredential> = list(providerId).mapNotNull { info ->
         getEncrypted(secretKey(providerId, info.id))?.let { secret ->

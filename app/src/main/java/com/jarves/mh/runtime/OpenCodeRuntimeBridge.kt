@@ -68,7 +68,9 @@ internal class OpenCodeRuntimeBridge(
         if (rawKey.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return environment
         // Guest CLIs refuse to boot with an empty key variable, while a loopback
         // gateway ignores the header — send a placeholder instead of nothing.
-        val key = rawKey.ifBlank { "loopback" }
+        // For OmniRush that placeholder is not a fallback but the rule: the proxy
+        // injects the live token, so the guest must never carry the rotating one.
+        val key = openCodeGuestKey(provider, rawKey)
         if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
             when (kind) {
                 ProviderKind.NVIDIA_NIM -> {
@@ -83,6 +85,18 @@ internal class OpenCodeRuntimeBridge(
                     val modelId = nvidiaApiModelId(provider.model.ifBlank { provider.kind.defaultModel })
                     environment["OPENCODE_CONFIG_CONTENT"] =
                         openAiCompatibleConfigContent("nvidia", gatewayUrl, "NVIDIA_API_KEY", modelId)
+                }
+                ProviderKind.OMNIRUSH -> {
+                    // The gateway only serves /responses behind its client gate
+                    // (see OmniRush + LocalOpenAiProxy): the guest talks to the
+                    // loopback proxy with the @ai-sdk/openai provider, exactly
+                    // like the CLI's own managed-engine config. The key is
+                    // embedded JSON-escaped (never via textual {env:} fill-in:
+                    // device tokens may carry '"' or '\' which would corrupt
+                    // the whole document and drop the provider).
+                    environment["OMNIRUSH_ACCESS_TOKEN"] = key
+                    environment["OPENCODE_CONFIG_CONTENT"] =
+                        OmniRush.configContent(gatewayUrl, key)
                 }
                 else -> {
                     environment["OPENAI_API_KEY"] = key
@@ -141,6 +155,9 @@ internal class OpenCodeRuntimeBridge(
             }
             ProviderKind.CLAUDE -> Unit
             ProviderKind.FREE -> Unit
+            // OMNIRUSH never runs direct: without the loopback proxy nobody
+            // injects the client-gate headers, so every call would 403.
+            ProviderKind.OMNIRUSH -> Unit
         }
         return environment
     }
@@ -151,6 +168,25 @@ internal class OpenCodeRuntimeBridge(
 
 internal fun isOpenAiCompatibleApi(api: String): Boolean =
     api == "openai-completions" || api == "openai-responses"
+
+/** Non-empty stand-in for a key the loopback proxy is expected to discard. */
+internal const val LOOPBACK_GUEST_KEY = "loopback"
+
+/**
+ * The credential handed to the OpenCode guest for [provider].
+ *
+ * OmniRush only ever runs behind [LocalOpenAiProxy], which drops the guest's
+ * `authorization` header and injects the live vault bearer on every request, so
+ * the guest never needs the real token — and must not receive it: this key ends
+ * up in the guest environment, which is part of HeadlessCliBridge's warm-session
+ * signature, and the OmniRush token rotates hourly. Baking it in would retire the
+ * warm session on every rotation and make the next turn pay the 22-26s cold TUI
+ * boot instead of model latency. Every other provider authenticates with its own
+ * key and has to be given the real one.
+ */
+internal fun openCodeGuestKey(provider: ProviderProfile, secret: String?): String =
+    if (provider.kind == ProviderKind.OMNIRUSH) LOOPBACK_GUEST_KEY
+    else secret.orEmpty().ifBlank { LOOPBACK_GUEST_KEY }
 
 internal fun ProviderProfile.isOpenAiCompatibleCustom(): Boolean =
     kind == ProviderKind.CUSTOM && isOpenAiCompatibleApi(dshApi.ifBlank { "anthropic-messages" })
@@ -175,6 +211,7 @@ internal fun opencodeModelPrefix(kind: ProviderKind): String? = when (kind) {
     // The catalog provider for Zen is `opencode`, so the CLI flag must be
     // `opencode/<model>`; `opencode-zen/…` resolves to nothing ("Unexpected server error").
     ProviderKind.OPENCODE_ZEN -> "opencode"
+    ProviderKind.OMNIRUSH -> "omnirush"
     ProviderKind.NVIDIA_NIM -> "nvidia"
     ProviderKind.CUSTOM -> null
     ProviderKind.FREE -> null
@@ -182,6 +219,13 @@ internal fun opencodeModelPrefix(kind: ProviderKind): String? = when (kind) {
 }
 
 internal fun opencodeModelArg(provider: ProviderProfile, gatewayUrl: String?, model: String): String = when {
+    provider.kind == ProviderKind.OMNIRUSH -> {
+        // The proxy config registers provider id `omnirush` (see
+        // OmniRush.configContent), so the flag must name it explicitly: the
+        // generic gateway fallback below would emit `openai/…`, which that
+        // config does not define.
+        "omnirush/${model.ifBlank { provider.kind.defaultModel }}"
+    }
     provider.kind == ProviderKind.NVIDIA_NIM -> {
         // `--model` is `provider/modelKey` where modelKey must match the
         // OPENCODE_CONFIG_CONTENT models map; modelKey doubles as the chat

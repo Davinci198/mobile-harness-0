@@ -65,6 +65,11 @@ import com.jarves.mh.runtime.ProjectAgent
 import com.jarves.mh.runtime.ProjectAgentChangeHistory
 import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.HermesRuntimeBridge
+import com.jarves.mh.runtime.OmniRush
+import com.jarves.mh.runtime.OmniRushAuthController
+import com.jarves.mh.runtime.pairMovedSince
+import com.jarves.mh.runtime.OmniRushAuthState
+import com.jarves.mh.runtime.OmniRushProxyAuth
 import com.jarves.mh.runtime.OpenCodeRuntimeBridge
 import com.jarves.mh.runtime.RuntimeInstaller
 import com.jarves.mh.runtime.requiresSavedSecret
@@ -433,6 +438,7 @@ data class AppUiState(
     val agentUpdateTotalBytes: Long? = null,
     val agentUpdateBytesPerSecond: Long? = null,
     val antigravityAuth: AntigravityAuthState = AntigravityAuthState(),
+    val omniRushAuth: OmniRushAuthState = OmniRushAuthState(),
     val antigravityModel: String = "",
     val antigravityEffort: String = "high",
     val antigravityModels: List<String> = emptyList(),
@@ -540,6 +546,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var modelScanJob: kotlinx.coroutines.Job? = null
     private var modelScanGeneration: Int = 0
     @Volatile private var lastOpenedAntigravityAuthUrl: String? = null
+    @Volatile private var lastOpenedOmniRushAuthUrl: String? = null
     private var activeRuntimeRequest: RuntimeRetryRequest? = null
     private val failedApiKeyIds = mutableSetOf<String>()
     @Volatile private var androidBuildProcess: Process? = null
@@ -570,6 +577,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.antigravityAccountEmail = email.orEmpty()
         if (!signedIn) preferences.clearAgentConversations(AgentKind.ANTIGRAVITY)
     }
+    private val omniRushAuthController = OmniRushAuthController(
+        deviceName = OmniRush.deviceName(),
+        clientVersion = { preferences.omniRushClientVersion },
+        onTokens = { accessToken, refreshToken ->
+            vault.put(ProviderKind.OMNIRUSH.name, accessToken)
+            vault.putNamed(ProviderKind.OMNIRUSH.name, OmniRush.REFRESH_KEY_NAME, refreshToken)
+            refreshActiveApiKey(ProviderKind.OMNIRUSH)
+        },
+        onSignedOut = {
+            vault.remove(ProviderKind.OMNIRUSH.name)
+            refreshActiveApiKey(ProviderKind.OMNIRUSH)
+        },
+        initiallySignedIn = vault.contains(ProviderKind.OMNIRUSH.name),
+    )
+
+    /**
+     * Serialises OmniRush device-token rotation. Every agent's loopback proxy
+     * shares [refreshOmniRushToken], and the manager's refresh tokens are
+     * single-use: two concurrent rotations with the same token make the loser
+     * 401 and can persist a pair the server already retired.
+     */
+    private val omniRushRefreshLock = Any()
     private val _state = MutableStateFlow(
         AppUiState(
             startupMessage = s(R.string.boot_checking_device),
@@ -613,6 +642,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         syncShizukuBridge()
         refreshFileRoots()
+        val omniRushProxyAuth = OmniRushProxyAuth(
+            clientVersion = { preferences.omniRushClientVersion },
+            onFloor = { floor -> preferences.omniRushClientVersion = floor },
+            refreshAccessToken = { stale -> refreshOmniRushToken(stale) },
+            currentAccessToken = { vault.get(ProviderKind.OMNIRUSH.name) },
+        )
+        openCodeRuntime.omniRushAuth = omniRushProxyAuth
+        dshRuntime.omniRushAuth = omniRushProxyAuth
         // GitHub's official CLI owns its OAuth credential. Remove credentials from
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
@@ -649,6 +686,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(antigravityAuth = auth) }
                 auth.authorizationUrl?.takeIf { it != lastOpenedAntigravityAuthUrl }?.let { url ->
                     lastOpenedAntigravityAuthUrl = url
+                    runCatching {
+                        getApplication<Application>().startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }.onFailure {
+                        _state.update { state -> state.copy(toastMessage = s(R.string.mvm_browser_copy_signin)) }
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            omniRushAuthController.state.collect { auth ->
+                _state.update { it.copy(omniRushAuth = auth) }
+                auth.approveUrl?.takeIf { it != lastOpenedOmniRushAuthUrl }?.let { url ->
+                    lastOpenedOmniRushAuthUrl = url
                     runCatching {
                         getApplication<Application>().startActivity(
                             Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -3419,6 +3471,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return vault.list(kind.name)
     }
 
+    /**
+     * Rotates the OmniRush device-token pair after a 401 and persists both
+     * sides (access token as the active key, refresh token as the named
+     * companion). Returns the fresh access token, or null when no refresh
+     * token is saved or the rotation is refused (signed out). [staleAccess]
+     * is the bearer that failed, letting this reuse a pair a concurrent
+     * caller rotated while this one waited for the lock. Blocking —
+     * invoked from the loopback proxy's request threads, never the main one.
+     */
+    fun refreshOmniRushToken(staleAccess: String? = null): String? = synchronized(omniRushRefreshLock) {
+        val scope = ProviderKind.OMNIRUSH.name
+        // A concurrent 401 can rotate while this caller waits for the lock, and
+        // the fast-path read in the proxy happened before that wait, so it saw
+        // nothing. Taking theirs costs nothing; rotating again burns a fresh
+        // single-use refresh token for a token we already hold.
+        val stored = vault.get(scope)
+        if (pairMovedSince(staleAccess, stored)) {
+            Log.d("OmniRush", "device/refresh skipped: a concurrent request already rotated the pair")
+            return stored
+        }
+        val refresh = vault.credentials(scope)
+            .firstOrNull { it.name.equals(OmniRush.REFRESH_KEY_NAME, ignoreCase = true) }
+            ?.secret.orEmpty()
+        if (refresh.isBlank()) return null
+        val result = OmniRush.refreshNowDetailed(refresh, preferences.omniRushClientVersion)
+        val rotated = result.rotated
+        if (rotated == null) {
+            // 0/5xx keeps the pair (transient); 401/409 means the manager
+            // retired it, so every turn would fail with a bare 401 until the
+            // UI offers sign-in again.
+            Log.w("OmniRush", "device/refresh failed: HTTP ${result.code}")
+            if (result.pairIsDead) {
+                omniRushAuthController.invalidateSession(
+                    "OmniRush session expired. Sign in again from Settings → OmniRush.",
+                )
+            }
+            return null
+        }
+        vault.put(scope, rotated.first)
+        vault.putNamed(scope, OmniRush.REFRESH_KEY_NAME, rotated.second)
+        Log.d("OmniRush", "device/refresh rotated the token pair")
+        rotated.first
+    }
+
     fun upsertCustomEndpoint(endpoint: CustomEndpoint) {
         val current = preferences.loadCustomEndpoints()
         val next = if (current.any { it.id == endpoint.id }) {
@@ -3764,11 +3860,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun prewarmWarmSession(profile: ProviderProfile) {
         Log.d("Prewarm", "onSave: isRunning=${_state.value.isRunning} activeProject=${_state.value.activeProject?.id} agent=${_state.value.agentKind}")
-        if (_state.value.isRunning) return
         val project = _state.value.activeProject ?: return
+        prewarmProject(project, profile)
+    }
+
+    /**
+     * Boots the warm session for [project] so its first turn skips the
+     * interactive boot.
+     *
+     * The warm channel is keyed by the project's workspace (plus route, model
+     * and environment), so opening a project is the only moment the right one
+     * can be chosen: prewarming on provider saves alone leaves the first turn
+     * of a fresh session cold, which is the 8-12s the user notices.
+     *
+     * Cheap and safe to call repeatedly — a live channel whose signature still
+     * matches is reused, and the runtime backs off when a turn is in flight.
+     */
+    private fun prewarmProject(project: Project, provider: ProviderProfile = _state.value.provider) {
+        if (_state.value.isRunning) return
         val agent = _state.value.agentKind
         Log.d("Prewarm", "launching prewarm agent=$agent project=${project.slug}")
-        viewModelScope.launch { agentWork.prewarm(agent, project.id, project.slug, profile) }
+        viewModelScope.launch { agentWork.prewarm(agent, project.id, project.slug, provider) }
     }
 
     /** First successful key save for an agent → discover + health-scan models once. */
@@ -4024,6 +4136,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         reloadModelScanPrefs()
         _state.value.activeProject?.let { project ->
+            // The new agent's warm channel is a different process on a
+            // different route, so the project that is open right now would
+            // otherwise pay the interactive boot on the next turn.
+            prewarmProject(project)
             viewModelScope.launch {
                 val projectAgent = ProjectAgent(project.id, kind)
                 val loaded = withContext(Dispatchers.IO) {
@@ -4197,6 +4313,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { antigravityAuthController.logout() }
                 .onFailure { error -> _state.update { it.copy(toastMessage = error.message ?: s(R.string.signout_fail)) } }
         }
+    }
+
+    fun startOmniRushLogin() {
+        if (_state.value.agentInstalling != null || _state.value.isRunning) return
+        lastOpenedOmniRushAuthUrl = null
+        viewModelScope.launch { omniRushAuthController.beginLogin() }
+    }
+
+    fun cancelOmniRushLogin() {
+        omniRushAuthController.cancel()
+    }
+
+    fun logoutOmniRush() {
+        viewModelScope.launch { omniRushAuthController.signedOut() }
     }
 
     fun setAntigravityModel(model: String) {
@@ -4569,7 +4699,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun discoverModels(profile: ProviderProfile, secret: String): ModelDiscoveryResult {
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
         val agent = _state.value.agentKind
-        val result = providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, agent))
+        var result = providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, agent))
+        // OmniRush access tokens expire in hours: a rejected catalog fetch
+        // rotates the pair once and retries, so Test/Discover self-heal exactly
+        // like sessions do through the proxy. Refresh only runs on a 401/403 —
+        // never blindly, so we never steal a rotation from the user's other
+        // logged-in clients.
+        if (profile.kind == ProviderKind.OMNIRUSH && result is ModelDiscoveryResult.Failure &&
+            result.message.startsWith("Check the saved API key")
+        ) {
+            val fresh = withContext(Dispatchers.IO) {
+                runCatching { refreshOmniRushToken(key) }.getOrNull().orEmpty()
+            }
+            if (fresh.isNotBlank()) {
+                result = providerApi.discoverModels(profile.baseUrl, fresh, providerProtocolForAgent(profile, agent))
+            }
+        }
         if (result is ModelDiscoveryResult.Success) {
             preferences.saveModelCatalog(
                 agent,
@@ -4606,13 +4751,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
-        return providerApi.validate(
+        val first = providerApi.validate(
             profile.baseUrl,
             profile.model,
             key,
             providerProtocolForAgent(profile, _state.value.agentKind),
             models,
         )
+        // Same self-heal as discoverModels: a rejected OmniRush check rotates
+        // the pair once and retries (see refreshOmniRushToken).
+        if (profile.kind == ProviderKind.OMNIRUSH && first is ConnectionValidation.Failure &&
+            first.label == "Rejected"
+        ) {
+            val fresh = withContext(Dispatchers.IO) {
+                runCatching { refreshOmniRushToken(key) }.getOrNull().orEmpty()
+            }
+            if (fresh.isNotBlank()) {
+                return providerApi.validate(
+                    profile.baseUrl,
+                    profile.model,
+                    fresh,
+                    providerProtocolForAgent(profile, _state.value.agentKind),
+                    models,
+                )
+            }
+        }
+        return first
     }
 
     fun pingApi() {
@@ -4823,6 +4987,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshProjectFiles()
         refreshAndroidApkInfo()
         loadAndroidBuildRecord(project.id)
+        // Boot the warm session now: the first turn otherwise pays the 8-12s
+        // PRoot + node + dsh boot while the user waits.
+        prewarmProject(project)
         val projectAgent = ProjectAgent(project.id, _state.value.agentKind)
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
@@ -4992,6 +5159,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.saveProjectChats(project.id, listOf(firstChat))
         _state.update { it.copy(projectChats = listOf(firstChat), activeChatId = firstChat.id) }
         refreshProjectFiles()
+        prewarmProject(project)
     }
 
     fun createQuickProject() {

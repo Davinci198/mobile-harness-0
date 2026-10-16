@@ -611,6 +611,25 @@ class DshHomePatchTest {
     }
 }
 
+class DshRetrySessionIdTest {
+    @Test
+    fun firstAttemptKeepsTheAppSessionId() {
+        assertEquals("app-session", dshSessionIdForAttempt("app-session", 1))
+    }
+
+    @Test
+    fun retriesMintFreshIdsSoDshDoesNotRejectTheDuplicate() {
+        val app = "app-session"
+        val second = dshSessionIdForAttempt(app, 2)
+        val third = dshSessionIdForAttempt(app, 3)
+
+        assertNotEquals(app, second)
+        assertNotEquals(second, third)
+        // A fresh id must be a UUID: dsh's session store keys on that shape.
+        assertEquals(36, second.length)
+    }
+}
+
 class DshQuestionParseTest {
     @Test
     fun parsesTheGuestQuestionPayload() {
@@ -695,5 +714,35 @@ class DshWarmSignatureTest {
             custom = DshCustomRoute("anthropic-messages", "https://gateway.example/v1"),
         )
         assertNotEquals(signature(), signature(route = custom))
+    }
+
+    @Test
+    fun omnirushGuestKeyIsConstantSoARotationKeepsTheChannelWarm() {
+        val route = DshRouteMapper.forProfile(
+            ProviderProfile(ProviderKind.OMNIRUSH),
+            "http://127.0.0.1:55999",
+        )
+        // The token rotates hourly and the guest never sees it: baking it into
+        // the environment would change the warm signature on every rotation and
+        // cost the 8-12s PRoot boot that dominates short OmniRush turns.
+        assertEquals(dshGuestKey(route, "access-v1"), dshGuestKey(route, "access-v2"))
+        assertEquals(DshRuntimeBridge.LOOPBACK_KEY, dshGuestKey(route, ""))
+        // Baking the raw token in (the old behaviour) would have booted fresh
+        // on every rotation…
+        assertNotEquals(
+            signature(route = route, environment = mapOf(DshRuntimeBridge.FALLBACK_KEY_ENV to "access-v1")),
+            signature(route = route, environment = mapOf(DshRuntimeBridge.FALLBACK_KEY_ENV to "access-v2")),
+        )
+        // …while the key the guest actually receives keeps one warm channel.
+        assertEquals(
+            signature(route = route, environment = mapOf(DshRuntimeBridge.FALLBACK_KEY_ENV to dshGuestKey(route, "access-v1"))),
+            signature(route = route, environment = mapOf(DshRuntimeBridge.FALLBACK_KEY_ENV to dshGuestKey(route, "access-v2"))),
+        )
+    }
+
+    @Test
+    fun aNonLoopbackRouteStillGetsItsRealKey() {
+        assertEquals("sk-live", dshGuestKey(officialRoute, "sk-live"))
+        assertEquals(DshRuntimeBridge.LOOPBACK_KEY, dshGuestKey(officialRoute, ""))
     }
 }

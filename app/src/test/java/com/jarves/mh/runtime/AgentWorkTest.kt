@@ -54,6 +54,27 @@ class AgentWorkTest {
         assertEquals(listOf("session-1"), bridge.approvals)
         assertEquals(listOf("session-1"), bridge.stopped)
     }
+
+    @Test
+    fun prewarmBootsTheSelectedAgentsRuntimeForThatProject() = runBlocking {
+        val bridge = FakeRuntimeBridge()
+        val driver = object : AgentDriver {
+            override val kind = AgentKind.CLAUDE_CODE
+            override val runtime: RuntimeBridge = bridge
+            override val capabilities = setOf(AgentCapability.INTERACTIVE_APPROVALS)
+        }
+        val work = AgentWork(listOf(driver), ProjectAgentChangeHistory(File("unused")))
+        val provider = ProviderProfile(ProviderKind.ANTHROPIC)
+
+        // Warming the project itself is what lets its first turn skip the
+        // 8-12s boot, so the id and slug must reach the runtime verbatim.
+        work.prewarm(AgentKind.CLAUDE_CODE, "project-1", "slug-1", provider)
+        assertEquals(listOf("project-1|slug-1"), bridge.prewarmed)
+
+        // An agent without a driver has nothing to boot.
+        work.prewarm(AgentKind.OPENCODE, "project-1", "slug-1", provider)
+        assertEquals(listOf("project-1|slug-1"), bridge.prewarmed)
+    }
 }
 
 private class FakeRuntimeBridge : RuntimeBridge {
@@ -61,6 +82,15 @@ private class FakeRuntimeBridge : RuntimeBridge {
     override val events: Flow<RuntimeEvent> = eventBus
     val approvals = mutableListOf<String>()
     val stopped = mutableListOf<String>()
+    val prewarmed = mutableListOf<String>()
+
+    override suspend fun prewarmSession(
+        provider: ProviderProfile,
+        projectId: String,
+        projectSlug: String,
+    ) {
+        prewarmed += "$projectId|$projectSlug"
+    }
 
     override suspend fun startSession(
         projectId: String,

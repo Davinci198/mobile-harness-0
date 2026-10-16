@@ -39,6 +39,11 @@ internal abstract class HeadlessCliBridge(
     protected val context: Context,
     protected val secretFor: (ProviderProfile) -> String?,
 ) : RuntimeBridge, java.io.Closeable {
+    /**
+     * OmniRush session state for [LocalOpenAiProxy], set by the ViewModel.
+     * Null for every other provider (and until the user saves OmniRush keys).
+     */
+    var omniRushAuth: OmniRushProxyAuth? = null
     protected val installer = RuntimeInstaller(context)
     private val checkpoints by lazy { WorkspaceCheckpoints(context.filesDir).forAgent(kind) }
     private val eventBus = MutableSharedFlow<RuntimeEvent>(extraBufferCapacity = 64)
@@ -193,9 +198,14 @@ internal abstract class HeadlessCliBridge(
             if (warmTurn != null) {
                 exit = null
                 result = CliRunResult(failed = warmTurn.failed, sawAnyOutput = warmTurn.sawAnyOutput)
-                // A failed turn leaves the session in an unknown state: drop it
-                // so the next Agent Execution respawns (or goes cold) cleanly.
-                if (warmTurn.failed != null) {
+                // A turn that died, hung or could not even be written to leaves
+                // the session in an unknown state: drop it so the next Agent
+                // Execution respawns cleanly. A provider-side failure is
+                // different — the TUI answers the error and waits at its prompt,
+                // so retiring the session would make the next turn pay the
+                // 22-26s boot for something the network did.
+                val reusable = warmTurn.providerError && !warmTurn.processDied && !warmTurn.timedOut
+                if (warmTurn.failed != null && !reusable) {
                     closeWarmSession()
                     warmProxy = null
                     warmProxySignature = null
@@ -288,16 +298,21 @@ internal abstract class HeadlessCliBridge(
      */
     private fun openAiProxyFor(provider: ProviderProfile, secret: String): LocalOpenAiProxy? {
         if (secret.isBlank() || !provider.routesThroughOpenAiProxy()) return null
+        // OmniRush without saved auth state cannot self-heal (401/426), so it
+        // must not start: a bare proxy would 403/426 every call with no recovery.
+        val omniAuth = omniRushAuth?.takeIf { provider.kind == ProviderKind.OMNIRUSH }
+        if (provider.kind == ProviderKind.OMNIRUSH && omniAuth == null) {
+            Log.w("HeadlessBridge", "OmniRush proxy needs saved access + refresh keys")
+            return null
+        }
         val warm = supportsWarmSession()
-        val signature = listOf(
-            provider.kind.name,
-            provider.model,
-            provider.resolvedBaseUrl,
-            provider.dshApi,
+        val signature = headlessProxyIdentity(
+            provider,
             secret,
-        ).joinToString("|")
+            omniAuth?.clientVersion?.invoke().orEmpty(),
+        )
         if (warm) warmProxy?.takeIf { warmProxySignature == signature }?.let { return it }
-        val proxy = runCatching { LocalOpenAiProxy(provider, secret).start() }
+        val proxy = runCatching { LocalOpenAiProxy(provider, secret, omniAuth).start() }
             .onFailure { Log.w("HeadlessBridge", "Could not start local OpenAI proxy", it) }
             .getOrNull() ?: return null
         if (warm) {
@@ -334,15 +349,7 @@ internal abstract class HeadlessCliBridge(
         gatewayUrl: String?,
         guestWorkspacePath: String,
         environment: Map<String, String>,
-    ): String = listOf(
-        provider.kind.name,
-        provider.model,
-        provider.resolvedBaseUrl,
-        provider.dshApi,
-        gatewayUrl.orEmpty(),
-        guestWorkspacePath,
-        environment.toString(),
-    ).joinToString("|")
+    ): String = headlessWarmSignature(provider, gatewayUrl, guestWorkspacePath, environment)
 
     /** One interactive spawn, shared by the save-time prewarm and the turn path. */
     private fun spawnWarmProcess(
@@ -793,6 +800,55 @@ internal abstract class HeadlessCliBridge(
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
     }
 }
+
+/**
+ * Identity of the loopback proxy kept warm across turns.
+ *
+ * The OmniRush access token and client version are deliberately NOT part of it:
+ * the proxy reads both live on every request (LocalOpenAiProxy.currentBearer,
+ * OmniRushProxyAuth.clientVersion), so a rotation must not retire the socket.
+ * Retiring it would hand the guest a new base URL, change
+ * [headlessWarmSignature] and force the 22-26s cold TUI boot on the next turn.
+ * Every other provider captures its key at construction, so its identity still
+ * has to carry the secret.
+ */
+internal fun headlessProxyIdentity(
+    provider: ProviderProfile,
+    secret: String,
+    clientVersion: String,
+): String {
+    val omni = provider.kind == ProviderKind.OMNIRUSH
+    return listOf(
+        provider.kind.name,
+        provider.model,
+        provider.resolvedBaseUrl,
+        provider.dshApi,
+        if (omni) "" else secret,
+        if (omni) "" else clientVersion,
+    ).joinToString("|")
+}
+
+/**
+ * Warm-session identity: every input baked into the guest process at spawn.
+ * A change to any of these forces a respawn, so [environment] carrying a token
+ * that rotates hourly would boot a cold session on every rotation — which is
+ * why the loopback proxy's guest key is a constant placeholder
+ * ([openCodeGuestKey]) and never the real OmniRush access token.
+ */
+internal fun headlessWarmSignature(
+    provider: ProviderProfile,
+    gatewayUrl: String?,
+    guestWorkspacePath: String,
+    environment: Map<String, String>,
+): String = listOf(
+    provider.kind.name,
+    provider.model,
+    provider.resolvedBaseUrl,
+    provider.dshApi,
+    gatewayUrl.orEmpty(),
+    guestWorkspacePath,
+    environment.toString(),
+).joinToString("|")
 
 /**
  * True when a blank secret must stop the session: remote providers need a saved

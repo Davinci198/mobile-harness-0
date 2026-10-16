@@ -1187,6 +1187,13 @@ private fun ConnectionSettings(
             Text(if (addKeyExpanded) stringResource(R.string.settings_cancel) else stringResource(R.string.settings_add_key))
         }
     }
+    if (selectedKind == ProviderKind.OMNIRUSH) {
+        Text(
+            stringResource(R.string.settings_omnirush_keys_hint),
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     if (savedKeys.isNotEmpty()) {
         Text(stringResource(R.string.settings_saved_api_keys), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)) {
