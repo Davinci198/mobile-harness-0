@@ -68,7 +68,9 @@ internal class OpenCodeRuntimeBridge(
         if (rawKey.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return environment
         // Guest CLIs refuse to boot with an empty key variable, while a loopback
         // gateway ignores the header — send a placeholder instead of nothing.
-        val key = rawKey.ifBlank { "loopback" }
+        // For OmniRush that placeholder is not a fallback but the rule: the proxy
+        // injects the live token, so the guest must never carry the rotating one.
+        val key = openCodeGuestKey(provider, rawKey)
         if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
             when (kind) {
                 ProviderKind.NVIDIA_NIM -> {
@@ -166,6 +168,25 @@ internal class OpenCodeRuntimeBridge(
 
 internal fun isOpenAiCompatibleApi(api: String): Boolean =
     api == "openai-completions" || api == "openai-responses"
+
+/** Non-empty stand-in for a key the loopback proxy is expected to discard. */
+internal const val LOOPBACK_GUEST_KEY = "loopback"
+
+/**
+ * The credential handed to the OpenCode guest for [provider].
+ *
+ * OmniRush only ever runs behind [LocalOpenAiProxy], which drops the guest's
+ * `authorization` header and injects the live vault bearer on every request, so
+ * the guest never needs the real token — and must not receive it: this key ends
+ * up in the guest environment, which is part of HeadlessCliBridge's warm-session
+ * signature, and the OmniRush token rotates hourly. Baking it in would retire the
+ * warm session on every rotation and make the next turn pay the 22-26s cold TUI
+ * boot instead of model latency. Every other provider authenticates with its own
+ * key and has to be given the real one.
+ */
+internal fun openCodeGuestKey(provider: ProviderProfile, secret: String?): String =
+    if (provider.kind == ProviderKind.OMNIRUSH) LOOPBACK_GUEST_KEY
+    else secret.orEmpty().ifBlank { LOOPBACK_GUEST_KEY }
 
 internal fun ProviderProfile.isOpenAiCompatibleCustom(): Boolean =
     kind == ProviderKind.CUSTOM && isOpenAiCompatibleApi(dshApi.ifBlank { "anthropic-messages" })

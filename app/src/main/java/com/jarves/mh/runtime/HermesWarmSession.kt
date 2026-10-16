@@ -14,6 +14,13 @@ internal data class WarmTurnResult(
     val sawAnyOutput: Boolean,
     val processDied: Boolean = false,
     val timedOut: Boolean = false,
+    /**
+     * The turn failed because the provider or the agent answered with an error
+     * (429, 5xx, refused request) instead of text, while the TUI kept running
+     * and returned to its prompt. The session itself is intact — the failure
+     * came from outside it.
+     */
+    val providerError: Boolean = false,
 )
 
 /**
@@ -251,6 +258,10 @@ internal class HermesWarmSession(
         return WarmTurnResult(
             failed = if (sawText) null else lastError ?: NO_REPLY_MESSAGE,
             sawAnyOutput = sawAnyOutput,
+            // Reached with the process still alive and past the deadline check,
+            // so a non-null [lastError] is the provider talking, not a broken
+            // session.
+            providerError = lastError != null,
         )
     }
 
