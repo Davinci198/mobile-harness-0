@@ -3848,11 +3848,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun prewarmWarmSession(profile: ProviderProfile) {
         Log.d("Prewarm", "onSave: isRunning=${_state.value.isRunning} activeProject=${_state.value.activeProject?.id} agent=${_state.value.agentKind}")
-        if (_state.value.isRunning) return
         val project = _state.value.activeProject ?: return
+        prewarmProject(project, profile)
+    }
+
+    /**
+     * Boots the warm session for [project] so its first turn skips the
+     * interactive boot.
+     *
+     * The warm channel is keyed by the project's workspace (plus route, model
+     * and environment), so opening a project is the only moment the right one
+     * can be chosen: prewarming on provider saves alone leaves the first turn
+     * of a fresh session cold, which is the 8-12s the user notices.
+     *
+     * Cheap and safe to call repeatedly — a live channel whose signature still
+     * matches is reused, and the runtime backs off when a turn is in flight.
+     */
+    private fun prewarmProject(project: Project, provider: ProviderProfile = _state.value.provider) {
+        if (_state.value.isRunning) return
         val agent = _state.value.agentKind
         Log.d("Prewarm", "launching prewarm agent=$agent project=${project.slug}")
-        viewModelScope.launch { agentWork.prewarm(agent, project.id, project.slug, profile) }
+        viewModelScope.launch { agentWork.prewarm(agent, project.id, project.slug, provider) }
     }
 
     /** First successful key save for an agent → discover + health-scan models once. */
@@ -4955,6 +4971,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshProjectFiles()
         refreshAndroidApkInfo()
         loadAndroidBuildRecord(project.id)
+        // Boot the warm session now: the first turn otherwise pays the 8-12s
+        // PRoot + node + dsh boot while the user waits.
+        prewarmProject(project)
         val projectAgent = ProjectAgent(project.id, _state.value.agentKind)
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
@@ -5124,6 +5143,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.saveProjectChats(project.id, listOf(firstChat))
         _state.update { it.copy(projectChats = listOf(firstChat), activeChatId = firstChat.id) }
         refreshProjectFiles()
+        prewarmProject(project)
     }
 
     fun createQuickProject() {
