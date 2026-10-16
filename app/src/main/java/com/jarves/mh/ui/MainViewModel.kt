@@ -4124,6 +4124,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         reloadModelScanPrefs()
         _state.value.activeProject?.let { project ->
+            // The new agent's warm channel is a different process on a
+            // different route, so the project that is open right now would
+            // otherwise pay the interactive boot on the next turn.
+            prewarmProject(project)
             viewModelScope.launch {
                 val projectAgent = ProjectAgent(project.id, kind)
                 val loaded = withContext(Dispatchers.IO) {
