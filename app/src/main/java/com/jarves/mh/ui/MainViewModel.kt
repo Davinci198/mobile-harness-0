@@ -67,6 +67,7 @@ import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.HermesRuntimeBridge
 import com.jarves.mh.runtime.OmniRush
 import com.jarves.mh.runtime.OmniRushAuthController
+import com.jarves.mh.runtime.pairMovedSince
 import com.jarves.mh.runtime.OmniRushAuthState
 import com.jarves.mh.runtime.OmniRushProxyAuth
 import com.jarves.mh.runtime.OpenCodeRuntimeBridge
@@ -644,7 +645,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val omniRushProxyAuth = OmniRushProxyAuth(
             clientVersion = { preferences.omniRushClientVersion },
             onFloor = { floor -> preferences.omniRushClientVersion = floor },
-            refreshAccessToken = { refreshOmniRushToken() },
+            refreshAccessToken = { stale -> refreshOmniRushToken(stale) },
             currentAccessToken = { vault.get(ProviderKind.OMNIRUSH.name) },
         )
         openCodeRuntime.omniRushAuth = omniRushProxyAuth
@@ -3474,11 +3475,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Rotates the OmniRush device-token pair after a 401 and persists both
      * sides (access token as the active key, refresh token as the named
      * companion). Returns the fresh access token, or null when no refresh
-     * token is saved or the rotation is refused (signed out). Blocking —
+     * token is saved or the rotation is refused (signed out). [staleAccess]
+     * is the bearer that failed, letting this reuse a pair a concurrent
+     * caller rotated while this one waited for the lock. Blocking —
      * invoked from the loopback proxy's request threads, never the main one.
      */
-    fun refreshOmniRushToken(): String? = synchronized(omniRushRefreshLock) {
+    fun refreshOmniRushToken(staleAccess: String? = null): String? = synchronized(omniRushRefreshLock) {
         val scope = ProviderKind.OMNIRUSH.name
+        // A concurrent 401 can rotate while this caller waits for the lock, and
+        // the fast-path read in the proxy happened before that wait, so it saw
+        // nothing. Taking theirs costs nothing; rotating again burns a fresh
+        // single-use refresh token for a token we already hold.
+        val stored = vault.get(scope)
+        if (pairMovedSince(staleAccess, stored)) {
+            Log.d("OmniRush", "device/refresh skipped: a concurrent request already rotated the pair")
+            return stored
+        }
         val refresh = vault.credentials(scope)
             .firstOrNull { it.name.equals(OmniRush.REFRESH_KEY_NAME, ignoreCase = true) }
             ?.secret.orEmpty()
@@ -4697,7 +4709,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             result.message.startsWith("Check the saved API key")
         ) {
             val fresh = withContext(Dispatchers.IO) {
-                runCatching { refreshOmniRushToken() }.getOrNull().orEmpty()
+                runCatching { refreshOmniRushToken(key) }.getOrNull().orEmpty()
             }
             if (fresh.isNotBlank()) {
                 result = providerApi.discoverModels(profile.baseUrl, fresh, providerProtocolForAgent(profile, agent))
@@ -4752,7 +4764,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             first.label == "Rejected"
         ) {
             val fresh = withContext(Dispatchers.IO) {
-                runCatching { refreshOmniRushToken() }.getOrNull().orEmpty()
+                runCatching { refreshOmniRushToken(key) }.getOrNull().orEmpty()
             }
             if (fresh.isNotBlank()) {
                 return providerApi.validate(

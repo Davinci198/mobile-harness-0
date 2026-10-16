@@ -204,4 +204,20 @@ class OmniRushContractTest {
         assertEquals(5L, auth?.intervalSec)
         assertEquals(600_000L, auth?.expiresAtMillis)
     }
+
+    @Test
+    fun `a pair another caller rotated is reused instead of rotated again`() {
+        // Another request rotated after this one read its bearer: take theirs.
+        assertTrue(pairMovedSince("access-v1", "access-v2"))
+        // Nobody rotated: this caller still has to do it.
+        assertFalse(pairMovedSince("access-v1", "access-v1"))
+        // A forced rotation (sign-in, explicit refresh) carries no stale token
+        // of its own and must always run.
+        assertFalse(pairMovedSince(null, "access-v2"))
+        // Nothing persisted yet: this caller still has to do it.
+        assertFalse(pairMovedSince("access-v1", null))
+        // Blank means "nothing to compare with", never "the pair moved".
+        assertFalse(pairMovedSince("access-v1", ""))
+        assertFalse(pairMovedSince("", "access-v2"))
+    }
 }

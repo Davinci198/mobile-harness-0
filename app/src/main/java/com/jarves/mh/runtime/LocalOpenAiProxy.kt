@@ -187,10 +187,13 @@ internal class LocalOpenAiProxy(
                     // token differs from the one that just 401'd, so reuse it
                     // instead of burning another single-use refresh token.
                     val stored = runCatching { auth.currentAccessToken() }.getOrNull()
-                    val rotated = if (!stored.isNullOrBlank() && stored != bearer) {
+                    val rotated = if (pairMovedSince(bearer, stored)) {
                         stored
                     } else {
-                        runCatching { auth.refreshAccessToken() }.getOrNull()
+                        // The stale bearer goes along: the refresh re-checks the
+                        // vault once it holds the lock, the only place two 401s
+                        // racing here can be told apart.
+                        runCatching { auth.refreshAccessToken(bearer) }.getOrNull()
                     }
                     if (!rotated.isNullOrBlank() && rotated != bearer) {
                         runCatching { connection.disconnect() }

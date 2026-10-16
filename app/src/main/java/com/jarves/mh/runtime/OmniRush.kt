@@ -293,9 +293,11 @@ internal data class OmniRushProxyAuth(
     val onFloor: (String) -> Unit,
     /**
      * Rotate the device-token pair after a 401 and persist both sides;
-     * returns the fresh access token, or null when signed out.
+     * returns the fresh access token, or null when signed out. [staleAccess]
+     * is the bearer that just failed, so the rotation can detect a pair
+     * another request rotated in the meantime ([pairMovedSince]).
      */
-    val refreshAccessToken: () -> String?,
+    val refreshAccessToken: (staleAccess: String?) -> String?,
     /**
      * The access token currently persisted. Lets the proxy reuse a pair a
      * concurrent request already rotated instead of rotating again — the
@@ -304,3 +306,18 @@ internal data class OmniRushProxyAuth(
      */
     val currentAccessToken: () -> String? = { null },
 )
+
+/**
+ * True when the persisted access token is no longer the one [staleAccess]
+ * held: some other caller rotated the pair after this one read its bearer.
+ *
+ * Checked twice, and it has to be. On the proxy's fast path it lets a request
+ * reuse a pair another one just rotated without taking the refresh lock at
+ * all. Inside the lock it is the only place two racing 401s can be told apart:
+ * the fast-path read happens before the wait, so two callers can both see the
+ * old token and both decide to rotate (seen in production — two rotations
+ * 340ms apart for one turn). A rotation with no known stale token is a forced
+ * one and always runs.
+ */
+internal fun pairMovedSince(staleAccess: String?, storedAccess: String?): Boolean =
+    !staleAccess.isNullOrBlank() && !storedAccess.isNullOrBlank() && staleAccess != storedAccess
