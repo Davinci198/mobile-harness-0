@@ -8,9 +8,15 @@ import java.io.InputStream
  * Instalează skill-urile livrate în APK (`assets/skills/<nume>`) în root-urile de
  * skill-uri ale aplicației, de unde le descoperă agenții din runtime.
  *
- * Conținut livrat: 48 de skill-uri din ECC v2.2.3 (`76aaa77d`),
+ * Conținut livrat: 47 de skill-uri din ECC v2.2.3 (`76aaa77d`),
  * https://github.com/affaan-m/ECC, licență MIT (`assets/licenses/ecc-MIT.txt`).
  * Selecția și criteriile de excludere: `MH-CURATED.md` din repo-ul ECC.
+ *
+ * `gateguard` e scos din selecția ECC: `SKILL.md` are 42 KB, peste
+ * [SkillToolLimits.MAX_SKILL_FILE_BYTES], deci [SkillLoader] l-ar respinge cu
+ * `MANIFEST_TOO_LARGE` și ar dispărea tăcut din catalog. E oricum un hook
+ * `PreToolUse`, fără efect ca simplu text. Regresia e prinsă la build de
+ * `BundledSkillsBundleTest`.
  *
  * Model de instalare: `RuntimeInstaller.ensureMtop()` — un marker de versiune în
  * fiecare root face ca apelul de pe căile fierbinți să coste o citire de fișier.
@@ -38,7 +44,7 @@ object BundledSkills {
      * Versiunea setului livrat. Trebuie crescută la orice schimbare a conținutului
      * din `assets/skills`: markerul de pe disc compară doar acest string și numele.
      */
-    const val VERSION = "ecc-2.2.3-48"
+    const val VERSION = "ecc-2.2.3-47"
 
     /** Marker scris în fiecare root instalat: versiunea pe prima linie, apoi numele. */
     const val MANIFEST_NAME = ".mh-bundled.txt"
