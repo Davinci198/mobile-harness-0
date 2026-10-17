@@ -667,10 +667,10 @@ class DshRuntimeBridge(
             // default — in-workspace work runs silently, anything wider asks.
             "DSH_PERMISSION_MODE" to "workspace-write",
             // Guest CLIs refuse to boot with an empty key variable; a loopback
-            // gateway ignores the header, so send a placeholder instead. On the
-            // OmniRush route that placeholder is mandatory for warm reuse too:
-            // the real token rotates hourly and baking it in would change
-            // [dshWarmSignature] and force a cold boot on every rotation.
+            // gateway ignores the header, so send a placeholder instead. The
+            // placeholder also has to stay constant for warm reuse: the real key
+            // can rotate and baking it in would change [dshWarmSignature] and
+            // force a cold boot.
             route.keyEnv to dshGuestKey(route, secret),
         )
         if (route.keyEnv != FALLBACK_KEY_ENV) environment.remove(FALLBACK_KEY_ENV)
@@ -1119,8 +1119,8 @@ private suspend fun emitReasoningSummary(
         val m = message.lowercase()
         return m.contains("temporarily overloaded") ||
             m.contains("overloaded") ||
-            // OmniRush answers a correlated capacity failure on /responses with
-            // this wording; the same code also surfaces as "overloaded".
+            // a correlated capacity failure can surface with this wording too;
+            // the same code also surfaces as "overloaded".
             m.contains("at capacity") ||
             m.contains("temporarily unavailable") ||
             m.contains("service temporarily") ||
@@ -1451,16 +1451,13 @@ internal class DshSdkChannel(val signature: String, val process: Process) {
 /**
  * The credential handed to a guest for [route].
  *
- * The loopback OmniRush route never needs the real token — [LocalOpenAiProxy]
- * injects the live one per request — so it gets a fixed placeholder. That is
- * not cosmetic: the guest environment is part of [dshWarmSignature], so a token
- * baked in there would change the signature on every rotation and force an
- * 8-12s cold PRoot boot instead of a warm reuse. Every other route passes the
- * real key.
+ * The guest environment is part of [dshWarmSignature], so a token baked in
+ * there would change the signature on every rotation and force an 8-12s cold
+ * PRoot boot instead of a warm reuse. Routes that carry the real key still
+ * pass it; a blank secret falls back to the fixed placeholder.
  */
 internal fun dshGuestKey(route: DshRoute, secret: String): String =
-    if (route.name == DshRouteMapper.OMNIRUSH_ROUTE_NAME) DshRuntimeBridge.LOOPBACK_KEY
-    else secret.ifBlank { DshRuntimeBridge.LOOPBACK_KEY }
+    secret.ifBlank { DshRuntimeBridge.LOOPBACK_KEY }
 
 /**
  * Warm-session identity: every input baked into the guest process at spawn.
