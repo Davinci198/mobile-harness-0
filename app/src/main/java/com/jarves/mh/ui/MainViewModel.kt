@@ -67,7 +67,6 @@ import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.HermesRuntimeBridge
 import com.jarves.mh.runtime.OmniRush
 import com.jarves.mh.runtime.OmniRushAuthController
-import com.jarves.mh.runtime.pairMovedSince
 import com.jarves.mh.runtime.OmniRushAuthState
 import com.jarves.mh.runtime.OmniRushProxyAuth
 import com.jarves.mh.runtime.OpenCodeRuntimeBridge
@@ -591,14 +590,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
         initiallySignedIn = vault.contains(ProviderKind.OMNIRUSH.name),
     )
-
-    /**
-     * Serialises OmniRush device-token rotation. Every agent's loopback proxy
-     * shares [refreshOmniRushToken], and the manager's refresh tokens are
-     * single-use: two concurrent rotations with the same token make the loser
-     * 401 and can persist a pair the server already retired.
-     */
-    private val omniRushRefreshLock = Any()
     private val _state = MutableStateFlow(
         AppUiState(
             startupMessage = s(R.string.boot_checking_device),
@@ -642,14 +633,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         syncShizukuBridge()
         refreshFileRoots()
-        val omniRushProxyAuth = OmniRushProxyAuth(
+        openCodeRuntime.omniRushAuth = OmniRushProxyAuth(
             clientVersion = { preferences.omniRushClientVersion },
             onFloor = { floor -> preferences.omniRushClientVersion = floor },
-            refreshAccessToken = { stale -> refreshOmniRushToken(stale) },
-            currentAccessToken = { vault.get(ProviderKind.OMNIRUSH.name) },
+            refreshAccessToken = { refreshOmniRushToken() },
         )
-        openCodeRuntime.omniRushAuth = omniRushProxyAuth
-        dshRuntime.omniRushAuth = omniRushProxyAuth
         // GitHub's official CLI owns its OAuth credential. Remove credentials from
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
@@ -3475,44 +3463,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Rotates the OmniRush device-token pair after a 401 and persists both
      * sides (access token as the active key, refresh token as the named
      * companion). Returns the fresh access token, or null when no refresh
-     * token is saved or the rotation is refused (signed out). [staleAccess]
-     * is the bearer that failed, letting this reuse a pair a concurrent
-     * caller rotated while this one waited for the lock. Blocking —
+     * token is saved or the rotation is refused (signed out). Blocking —
      * invoked from the loopback proxy's request threads, never the main one.
      */
-    fun refreshOmniRushToken(staleAccess: String? = null): String? = synchronized(omniRushRefreshLock) {
+    fun refreshOmniRushToken(): String? {
         val scope = ProviderKind.OMNIRUSH.name
-        // A concurrent 401 can rotate while this caller waits for the lock, and
-        // the fast-path read in the proxy happened before that wait, so it saw
-        // nothing. Taking theirs costs nothing; rotating again burns a fresh
-        // single-use refresh token for a token we already hold.
-        val stored = vault.get(scope)
-        if (pairMovedSince(staleAccess, stored)) {
-            Log.d("OmniRush", "device/refresh skipped: a concurrent request already rotated the pair")
-            return stored
-        }
         val refresh = vault.credentials(scope)
             .firstOrNull { it.name.equals(OmniRush.REFRESH_KEY_NAME, ignoreCase = true) }
             ?.secret.orEmpty()
         if (refresh.isBlank()) return null
-        val result = OmniRush.refreshNowDetailed(refresh, preferences.omniRushClientVersion)
-        val rotated = result.rotated
-        if (rotated == null) {
-            // 0/5xx keeps the pair (transient); 401/409 means the manager
-            // retired it, so every turn would fail with a bare 401 until the
-            // UI offers sign-in again.
-            Log.w("OmniRush", "device/refresh failed: HTTP ${result.code}")
-            if (result.pairIsDead) {
-                omniRushAuthController.invalidateSession(
-                    "OmniRush session expired. Sign in again from Settings → OmniRush.",
-                )
-            }
-            return null
-        }
+        val rotated = OmniRush.refreshNow(refresh, preferences.omniRushClientVersion) ?: return null
         vault.put(scope, rotated.first)
         vault.putNamed(scope, OmniRush.REFRESH_KEY_NAME, rotated.second)
-        Log.d("OmniRush", "device/refresh rotated the token pair")
-        rotated.first
+        return rotated.first
     }
 
     fun upsertCustomEndpoint(endpoint: CustomEndpoint) {
@@ -4709,7 +4672,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             result.message.startsWith("Check the saved API key")
         ) {
             val fresh = withContext(Dispatchers.IO) {
-                runCatching { refreshOmniRushToken(key) }.getOrNull().orEmpty()
+                runCatching { refreshOmniRushToken() }.getOrNull().orEmpty()
             }
             if (fresh.isNotBlank()) {
                 result = providerApi.discoverModels(profile.baseUrl, fresh, providerProtocolForAgent(profile, agent))
@@ -4764,7 +4727,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             first.label == "Rejected"
         ) {
             val fresh = withContext(Dispatchers.IO) {
-                runCatching { refreshOmniRushToken(key) }.getOrNull().orEmpty()
+                runCatching { refreshOmniRushToken() }.getOrNull().orEmpty()
             }
             if (fresh.isNotBlank()) {
                 return providerApi.validate(

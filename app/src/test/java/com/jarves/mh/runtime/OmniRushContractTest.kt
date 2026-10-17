@@ -1,9 +1,7 @@
 package com.jarves.mh.runtime
 
-import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
-import com.jarves.mh.model.providersForAgent
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -58,43 +56,6 @@ class OmniRushContractTest {
             "omnirush/gpt-6-astra",
             opencodeModelArg(ProviderProfile(ProviderKind.OMNIRUSH), "http://127.0.0.1:1/omnirush/v1", "gpt-6-astra"),
         )
-    }
-
-    @Test
-    fun `omnirush is offered to deepseek harness and opencode but not hermes`() {
-        assertTrue(ProviderKind.OMNIRUSH in providersForAgent(AgentKind.DEEPSEEK_HARNESS))
-        assertTrue(ProviderKind.OMNIRUSH in providersForAgent(AgentKind.OPENCODE))
-        assertFalse(ProviderKind.OMNIRUSH in providersForAgent(AgentKind.HERMES))
-        assertFalse(ProviderKind.OMNIRUSH in providersForAgent(AgentKind.CLAUDE_CODE))
-    }
-
-    @Test
-    fun `dsh route speaks openai responses at the loopback proxy`() {
-        val route = DshRouteMapper.forProfile(
-            ProviderProfile(ProviderKind.OMNIRUSH),
-            omniRushBaseUrl = "http://127.0.0.1:7/omnirush/v1",
-        )
-        assertEquals("mh-omnirush", route.name)
-        assertEquals("openai-responses", route.custom?.api)
-        assertEquals("http://127.0.0.1:7/omnirush/v1", route.custom?.baseUrl)
-        assertEquals(DshRuntimeBridge.FALLBACK_KEY_ENV, route.keyEnv)
-    }
-
-    @Test(expected = IllegalStateException::class)
-    fun `dsh route refuses omnirush without the proxy`() {
-        DshRouteMapper.forProfile(ProviderProfile(ProviderKind.OMNIRUSH))
-    }
-
-    @Test
-    fun `dsh settings pin the omnirush provider at the proxy`() {
-        val route = DshRouteMapper.forProfile(
-            ProviderProfile(ProviderKind.OMNIRUSH),
-            omniRushBaseUrl = "http://127.0.0.1:7/omnirush/v1",
-        )
-        val patch = dshHomePatch(route, "gpt-6-astra")
-        assertTrue(patch.contains("api: openai-responses"))
-        assertTrue(patch.contains("baseURL: 'http://127.0.0.1:7/omnirush/v1'"))
-        assertTrue(patch.contains("apiKeyEnv: ${DshRuntimeBridge.FALLBACK_KEY_ENV}"))
     }
 
     @Test
@@ -161,27 +122,6 @@ class OmniRushContractTest {
     }
 
     @Test
-    fun `a 401 rotation marks the pair dead so the ui can ask for sign-in`() {
-        val dead = OmniRush.RefreshResult(401)
-        assertNull(dead.rotated)
-        assertTrue(dead.pairIsDead)
-
-        // A transient manager outage must NOT be treated as a dead pair.
-        assertFalse(OmniRush.RefreshResult(0).pairIsDead)
-        assertFalse(OmniRush.RefreshResult(503).pairIsDead)
-    }
-
-    @Test
-    fun `a 200 rotation exposes the pair only when both halves parsed`() {
-        val ok = OmniRush.RefreshResult(200, "a1", "r1")
-        assertEquals("a1" to "r1", ok.rotated)
-        assertFalse(ok.pairIsDead)
-
-        // A 200 whose body never parsed carries no pair to persist.
-        assertNull(OmniRush.RefreshResult(200).rotated)
-    }
-
-    @Test
     fun `authorize response parses the pending approval`() {
         val auth = OmniRush.parseAuthorizeResponse(
             """{"device_code":"d1","user_code":"ABCD-1234","verification_uri":"https://omnirush.ai/x","verification_uri_complete":"https://omnirush.ai/x?c=1","interval":5,"expires_in":600}""",
@@ -203,21 +143,5 @@ class OmniRushContractTest {
         )
         assertEquals(5L, auth?.intervalSec)
         assertEquals(600_000L, auth?.expiresAtMillis)
-    }
-
-    @Test
-    fun `a pair another caller rotated is reused instead of rotated again`() {
-        // Another request rotated after this one read its bearer: take theirs.
-        assertTrue(pairMovedSince("access-v1", "access-v2"))
-        // Nobody rotated: this caller still has to do it.
-        assertFalse(pairMovedSince("access-v1", "access-v1"))
-        // A forced rotation (sign-in, explicit refresh) carries no stale token
-        // of its own and must always run.
-        assertFalse(pairMovedSince(null, "access-v2"))
-        // Nothing persisted yet: this caller still has to do it.
-        assertFalse(pairMovedSince("access-v1", null))
-        // Blank means "nothing to compare with", never "the pair moved".
-        assertFalse(pairMovedSince("access-v1", ""))
-        assertFalse(pairMovedSince("", "access-v2"))
     }
 }

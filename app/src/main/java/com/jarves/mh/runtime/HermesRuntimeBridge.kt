@@ -78,9 +78,7 @@ internal fun hermesProviderName(provider: ProviderProfile): String = when (provi
     ProviderKind.LLM_ROUTER -> "openrouter"
     ProviderKind.OPENCODE_ZEN -> "openai"
     ProviderKind.NVIDIA_NIM -> "nvidia"
-    // Unreachable: OmniRush is not offered to Hermes (see providersForAgent).
-    // Its gateway serves only /responses; Hermes' providers speak chat
-    // completions, so it cannot take OmniRush.
+    // Unreachable: OmniRush is OpenCode-only (see providersForAgent).
     ProviderKind.OMNIRUSH -> "openai"
     ProviderKind.CUSTOM -> {
         val api = provider.dshApi.ifBlank { "anthropic-messages" }
@@ -167,7 +165,7 @@ internal fun hermesEnvironmentFor(
         }
         ProviderKind.CLAUDE -> Unit
         ProviderKind.FREE -> Unit
-        // Unreachable: OmniRush is not offered to Hermes (see providersForAgent).
+        // Unreachable: OmniRush is OpenCode-only (see providersForAgent).
         ProviderKind.OMNIRUSH -> Unit
     }
     return environment
