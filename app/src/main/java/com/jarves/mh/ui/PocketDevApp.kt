@@ -2261,9 +2261,6 @@ private fun RootScreenHost(
                     onStartAntigravityLogin = viewModel::startAntigravityLogin,
                     onSubmitAntigravityCode = viewModel::submitAntigravityCode,
                     onLogoutAntigravity = viewModel::logoutAntigravity,
-                    onStartOmniRushLogin = viewModel::startOmniRushLogin,
-                    onCancelOmniRushLogin = viewModel::cancelOmniRushLogin,
-                    onLogoutOmniRush = viewModel::logoutOmniRush,
                     onRefreshAntigravityModels = viewModel::refreshAntigravityModels,
                     onSetAntigravityModel = viewModel::setAntigravityModel,
                     onSetAntigravityEffort = viewModel::setAntigravityEffort,
@@ -2818,7 +2815,6 @@ private fun ProviderChoiceRow(
         ProviderKind.KIMI -> Color(0xFF8B7CF6)
         ProviderKind.OPENCODE_ZEN -> Color(0xFF22C55E)
         ProviderKind.NVIDIA_NIM -> Color(0xFF76B900)
-        ProviderKind.OMNIRUSH -> Color(0xFF38BDF8)
         ProviderKind.CUSTOM -> PocketAccent
         ProviderKind.FREE -> Color(0xFF34D399)
     }
@@ -2830,7 +2826,6 @@ private fun ProviderChoiceRow(
         ProviderKind.KIMI -> "K"
         ProviderKind.OPENCODE_ZEN -> "Z"
         ProviderKind.NVIDIA_NIM -> "NV"
-        ProviderKind.OMNIRUSH -> "OM"
         ProviderKind.CUSTOM -> "<>"
         ProviderKind.FREE -> "H"
     }
@@ -5231,7 +5226,6 @@ private fun ModelsPickerDialog(
             ProviderKind.FREE,
             ProviderKind.NVIDIA_NIM,
             ProviderKind.OPENCODE_ZEN,
-            ProviderKind.OMNIRUSH,
             ProviderKind.ANTHROPIC,
             ProviderKind.DEEPSEEK,
             ProviderKind.KIMI,

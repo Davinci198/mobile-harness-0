@@ -91,15 +91,6 @@
     <string name="settings_complete_signin">Complete sign-in</string>
     <string name="settings_reconnect_google">Reconnect with Google</string>
     <string name="settings_signin_google">Sign in with Google</string>
-    <string name="omnirush_signin_title">OmniRush sign-in</string>
-    <string name="omnirush_signin_hint">Sign in with your browser. The app gets its own device login, separate from any Termux or desktop CLI.</string>
-    <string name="omnirush_signin">Sign in with browser</string>
-    <string name="omnirush_retry">Try again</string>
-    <string name="omnirush_copy_code">Copy code %1$s</string>
-    <string name="omnirush_copy_url">Copy approval page URL</string>
-    <string name="omnirush_approve_hint">Open the approval page (it opens automatically), enter the code if asked, approve, then wait here.</string>
-    <string name="omnirush_signed_in">OmniRush connected. Tokens refresh automatically.</string>
-    <string name="omnirush_signout">Log out of OmniRush</string>
     <string name="settings_model">Model</string>
     <string name="settings_antigravity_model_id">Antigravity model ID</string>
     <string name="settings_refresh_models">Refresh models</string>
@@ -132,7 +123,6 @@
     <string name="settings_api_key">API key</string>
     <string name="settings_show_hide_key">Show or hide new key</string>
     <string name="settings_save_api_key">Save API key</string>
-    <string name="settings_omnirush_keys_hint">OmniRush rotates its tokens: save the access token as the active key and add the refresh token as a second key named “refresh”. The app refreshes both automatically.</string>
     <string name="settings_checking_connection">Checking connection</string>
     <string name="settings_test_and_save">Test connection and save</string>
     <string name="settings_update_channel">Update channel</string>

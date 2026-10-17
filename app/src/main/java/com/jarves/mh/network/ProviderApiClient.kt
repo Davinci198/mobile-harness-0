@@ -265,22 +265,6 @@ class ProviderApiClient(
             health.forEach { onProgress(it) }
             return@withContext health
         }
-        // OmniRush gates /responses the same way (see validateOmniRushCatalog):
-        // per-model probes from Settings would 403, so health also means
-        // "listed in the live catalog". Real verification happens on the
-        // first Agent Execution through the loopback proxy.
-        if (isOmniRush(cleanBaseUrl)) {
-            val listed = omniRushCatalogIds(cleanBaseUrl, cleanKey, protocol) ?: return@withContext emptyList()
-            val health = models.map { model ->
-                if (model.id in listed) {
-                    ModelHealth(model.id, ModelHealthStatus.OK, 0L, 200, "listed in catalog")
-                } else {
-                    ModelHealth(model.id, ModelHealthStatus.FAIL, 0L, 0, "not in the live catalog")
-                }
-            }
-            health.forEach { onProgress(it) }
-            return@withContext health
-        }
         // Without a guest token the free tier refuses completion probes; health
         // there falls back to "listed in the live catalog". With a token the
         // probes below run for real, so retired free models show as broken.
@@ -411,9 +395,6 @@ class ProviderApiClient(
         }
         if (isOpenCodeZen(cleanBaseUrl)) {
             return@withContext validateZenCatalog(cleanBaseUrl, cleanKey, protocol)
-        }
-        if (isOmniRush(cleanBaseUrl)) {
-            return@withContext validateOmniRushCatalog(cleanBaseUrl, cleanKey, protocol)
         }
         if (freeTier && cleanKey.isBlank()) {
             return@withContext validateNousFreeCatalog(cleanBaseUrl, protocol)
@@ -584,51 +565,6 @@ class ProviderApiClient(
     }
 
     /**
-     * OmniRush gates /responses to its own client (bare `omnirush` User-Agent
-     * + X-OmniRush-Client), which Settings probes do not send — see OmniRush
-     * and LocalOpenAiProxy. "Test connection" therefore proves reachability
-     * through the Bearer-only model list, like OpenCode Zen.
-     */
-    private suspend fun validateOmniRushCatalog(
-        baseUrl: String,
-        apiKey: String,
-        protocol: ProviderProtocol,
-    ): ConnectionValidation {
-        var lastCode = 0
-        var lastBody = ""
-        var lastError: String? = null
-        for (endpoint in modelEndpoints(baseUrl, protocol)) {
-            val response = request(endpoint, "GET", apiKey, protocol = protocol)
-            if (response.code in 200..299) {
-                val count = ModelResponseParser.parse(response.body).size
-                return ConnectionValidation.Success("Connected to OmniRush. $count models available.")
-            }
-            if (response.code == 404) continue
-            lastCode = response.code
-            lastBody = response.body
-            lastError = response.error
-            break
-        }
-        return when {
-            lastCode == 401 || lastCode == 403 -> ConnectionValidation.Failure(
-                "Check this API key or select another saved key.",
-                providerErrorMessage(lastBody),
-                "Rejected",
-            )
-            lastCode > 0 -> ConnectionValidation.Failure(
-                "Check the Base URL and selected gateway protocol.",
-                providerErrorMessage(lastBody),
-                "Endpoint error",
-            )
-            else -> ConnectionValidation.Failure(
-                "Check your internet connection and provider settings.",
-                lastError,
-                "Network error",
-            )
-        }
-    }
-
-    /**
      * The Hermes free tier has no key to test: "Test connection" proves
      * reachability through the anonymously served Nous catalog (completion
      * probes there need an account).
@@ -750,32 +686,6 @@ class ProviderApiClient(
      */
     internal fun isOpenCodeZen(baseUrl: String): Boolean =
         normalizeBaseUrl(baseUrl).startsWith("https://opencode.ai/zen", ignoreCase = true)
-
-    /**
-     * OmniRush publishes its model list to any valid Bearer token but gates
-     * /responses to its own client headers (see OmniRush), so connection
-     * checks and health scans go through the catalog; live calls ride the
-     * loopback proxy instead.
-     */
-    internal fun isOmniRush(baseUrl: String): Boolean =
-        normalizeBaseUrl(baseUrl).startsWith("https://omnirush.ai/omnirush", ignoreCase = true)
-
-    /** Live OmniRush catalog ids, or null when the list could not be fetched. */
-    private suspend fun omniRushCatalogIds(
-        baseUrl: String,
-        apiKey: String,
-        protocol: ProviderProtocol,
-    ): Set<String>? {
-        for (endpoint in modelEndpoints(baseUrl, protocol)) {
-            val response = request(endpoint, "GET", apiKey, protocol = protocol)
-            if (response.code in 200..299) {
-                return ModelResponseParser.parse(response.body).mapTo(mutableSetOf()) { it.id }
-            }
-            if (response.code == 404) continue
-            return null
-        }
-        return null
-    }
 
     /**
      * The Hermes free tier's Nous inference endpoint publishes its 400+ model
