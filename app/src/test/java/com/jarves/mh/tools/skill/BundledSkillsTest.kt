@@ -68,6 +68,18 @@ class BundledSkillsTest {
     }
 
     @Test
+    fun reinstallsWhenABundledSkillIsGoneFromDisk() {
+        skill("alpha", "SKILL.md" to "# alpha")
+        BundledSkills.ensure(target, source)
+        File(target, "alpha").deleteRecursively()
+
+        val report = BundledSkills.ensure(target, source)
+
+        assertFalse(report.skipped)
+        assertEquals("# alpha", File(target, "alpha/SKILL.md").readText())
+    }
+
+    @Test
     fun rewritesBundledSkillsWhenTheVersionChanges() {
         skill("alpha", "SKILL.md" to "# bundled")
         BundledSkills.ensure(target, source, version = "v1")

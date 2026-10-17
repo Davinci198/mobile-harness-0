@@ -27,6 +27,12 @@ import java.io.InputStream
  *  - skill-urile adăugate de utilizator nu sunt niciodată atinse;
  *  - un skill scos din bundle la un upgrade e șters, ca setul de pe disc să fie
  *    exact cel livrat.
+ *
+ * Markerul nu e singura dovadă că instalarea e validă: [ensure] verifică și că
+ * directoarele există. Root-urile de skill-uri sunt scriibile și de alții — în
+ * guest, Hermes are un curator care mută skill-uri între activ/învechit/arhivat
+ * — iar un marker care rămâne „curent" peste un catalog golit ar raporta succes
+ * la nesfârșit. Cu verificarea, următoarea rulare rescrie ce lipsește.
  */
 object BundledSkills {
 
@@ -74,14 +80,15 @@ object BundledSkills {
 
     /**
      * Sincronizează [target] cu bundle-ul. Idempotent: când markerul poartă deja
-     * [version] și aceleași nume, discul nu e atins.
+     * [version] și aceleași nume, iar skill-urile sunt încă pe disc, nu se atinge
+     * nimic.
      */
     fun ensure(target: File, source: Source, version: String = VERSION): Report {
         val names = source.list(ASSET_DIR).filter(::isPortableName).sorted()
         val manifest = File(target, MANIFEST_NAME)
-        if (manifest.readTextOrNull() == manifestText(version, names)) {
-            return Report(names.size, emptyList(), skipped = true)
-        }
+        val current = manifest.readTextOrNull() == manifestText(version, names) &&
+            names.all { File(target, it).exists() }
+        if (current) return Report(names.size, emptyList(), skipped = true)
 
         val previous = parseManifest(manifest.readTextOrNull())
         if (!target.isDirectory && !target.mkdirs()) {

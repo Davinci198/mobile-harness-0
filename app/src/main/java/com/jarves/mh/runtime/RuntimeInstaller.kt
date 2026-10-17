@@ -2881,6 +2881,12 @@ fi
          *    `~/.gemini/config/skills/<name>/SKILL.md` ca rădăcină globală;
          *  - Hermes — `.hermes/skills`: `get_skills_dir()` = `HERMES_HOME/skills`,
          *    iar aplicația nu setează `HERMES_HOME`, deci cade pe `$HOME/.hermes`.
+         *    E root-ul `TIER_LOCAL` din ordinea lui de căutare și e scanat
+         *    recursiv, deci ies în catalog și skill-urile plate. Acolo stau deja
+         *    12 categorii ale lui (58 de skill-uri) plus un curator care mută
+         *    skill-uri între activ/învechit/arhivat; verificarea de existență din
+         *    [com.jarves.mh.tools.skill.BundledSkills.ensure] acoperă cazul în care
+         *    un skill de-al nostru e mutat de altcineva.
          *
          * DSH nu primește fișiere în guest: canalul lui e plugin-ul `mh-skills`
          * peste [com.jarves.mh.tools.skill.SkillLoader], iar un `.dsh/skills`
