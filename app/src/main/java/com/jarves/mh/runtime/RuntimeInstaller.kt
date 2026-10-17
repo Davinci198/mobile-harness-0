@@ -18,6 +18,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 import com.jarves.mh.model.DevStack
+import com.jarves.mh.tools.skill.BundledSkills
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
@@ -347,6 +348,7 @@ class RuntimeInstaller(private val context: Context) {
 
         migrateLegacyClaudeMarker()
         ensureSettingsAndHooks()
+        ensureBundledSkills()
 
         // Node.js and Git are always available in the Core runtime. Python,
         // C/C++, PHP, and Android remain opt-in stacks during onboarding.
@@ -412,6 +414,32 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureAgentWrappers() {
         ensureShWrapper(OPENCODE_GUEST_PATH, OPENCODE2_GUEST_PATH)
         ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
+    }
+
+    /**
+     * Instalează skill-urile livrate în APK în root-urile de skill-uri: `files/skills`,
+     * de unde [com.jarves.mh.tools.skill.SkillLoader] le servește agenților prin
+     * plugin-ul `mh-skills`, și `root/.claude/skills` din guest, descoperit nativ de
+     * Claude Code.
+     *
+     * DSH nu primește fișiere în guest: canalul lui e plugin-ul peste
+     * [com.jarves.mh.tools.skill.SkillLoader], iar un `.dsh/skills` real ar duplica
+     * fiecare skill în catalog. Idempotent, deci sigur pe căi de pornire.
+     */
+    fun ensureBundledSkills() {
+        val source = BundledSkills.assetSource(context.assets)
+        installBundle(File(context.filesDir, BundledSkills.HOST_DIR), source)
+        if (rootfs.isDirectory) installBundle(File(rootfs, CLAUDE_SKILLS_GUEST_DIR), source)
+    }
+
+    private fun installBundle(target: File, source: BundledSkills.Source) {
+        val report = runCatching { BundledSkills.ensure(target, source) }.getOrElse { error ->
+            android.util.Log.w("RuntimeInstaller", "Skill bundle install failed for $target", error)
+            return
+        }
+        if (report.skipped) return
+        val stale = if (report.removed.isEmpty()) "" else " (${report.removed.size} stale removed)"
+        android.util.Log.i("RuntimeInstaller", "Installed ${report.installed} bundled skills in $target$stale")
     }
 
     /**
@@ -2831,6 +2859,8 @@ fi
         )
         private const val CLAUDE_BUNDLED_VERSION = "2.1.263"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
+        /** Root-ul de skill-uri descoperit nativ de Claude Code în guest. */
+        private const val CLAUDE_SKILLS_GUEST_DIR = "root/.claude/skills"
         private val CLAUDE_BUNDLE = RuntimeBundle(
             label = "Claude Code",
             fileName = "pocketdev-claude-arm64-2026.09.1.tar.zst",

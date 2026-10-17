@@ -83,8 +83,12 @@ class DshRuntimeBridge(
      */
     private fun skillLoader(): com.jarves.mh.tools.skill.SkillLoader? {
         val slug = activeProjectSlug ?: return null
+        val bundled = com.jarves.mh.tools.skill.BundledSkills
+        // Idempotent și ieftin după prima rulare: garantează că root-ul de skill-uri
+        // e populat înainte ca SkillLoader să îl scaneze.
+        installer.ensureBundledSkills()
         return com.jarves.mh.tools.skill.SkillLoader(
-            root = File(context.filesDir, "skills"),
+            root = File(context.filesDir, bundled.HOST_DIR),
             guestRoot = "/workspace/$slug/.mobilharness/skills",
             gate = deviceGate,
         )
