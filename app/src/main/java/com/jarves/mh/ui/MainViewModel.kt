@@ -3475,6 +3475,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (ready) {
                     installer.cleanupLegacyWorkspaceScaffolding()
                     installer.ensureAgentWrappers()
+                    installer.ensureBundledSkills()
                 }
             }
         }
