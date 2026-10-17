@@ -145,18 +145,6 @@ class AppPreferences(private val context: Context) {
         get() = preferences.getString("dsh_version", "") ?: ""
         set(value) { preferences.edit().putString("dsh_version", value).apply() }
 
-    /**
-     * Last known-good OmniRush `cli/<v>` client label. The gateway's version
-     * floor moves with its near-daily CLI releases; the proxy auto-bumps this
-     * from 426 answers instead of hardcoding a label that rots.
-     */
-    var omniRushClientVersion: String
-        get() = preferences.getString(
-            "omnirush_client_version",
-            com.jarves.mh.runtime.OmniRush.FALLBACK_CLIENT_VERSION,
-        ) ?: com.jarves.mh.runtime.OmniRush.FALLBACK_CLIENT_VERSION
-        set(value) { preferences.edit().putString("omnirush_client_version", value).apply() }
-
     var themeMode: String
         get() = preferences.getString("theme_mode", "dark") ?: "dark"
         set(value) { preferences.edit().putString("theme_mode", value).apply() }

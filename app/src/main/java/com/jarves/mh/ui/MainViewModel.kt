@@ -65,10 +65,6 @@ import com.jarves.mh.runtime.ProjectAgent
 import com.jarves.mh.runtime.ProjectAgentChangeHistory
 import com.jarves.mh.runtime.RuntimeInstallProgress
 import com.jarves.mh.runtime.HermesRuntimeBridge
-import com.jarves.mh.runtime.OmniRush
-import com.jarves.mh.runtime.OmniRushAuthController
-import com.jarves.mh.runtime.OmniRushAuthState
-import com.jarves.mh.runtime.OmniRushProxyAuth
 import com.jarves.mh.runtime.OpenCodeRuntimeBridge
 import com.jarves.mh.runtime.RuntimeInstaller
 import com.jarves.mh.runtime.requiresSavedSecret
@@ -437,7 +433,6 @@ data class AppUiState(
     val agentUpdateTotalBytes: Long? = null,
     val agentUpdateBytesPerSecond: Long? = null,
     val antigravityAuth: AntigravityAuthState = AntigravityAuthState(),
-    val omniRushAuth: OmniRushAuthState = OmniRushAuthState(),
     val antigravityModel: String = "",
     val antigravityEffort: String = "high",
     val antigravityModels: List<String> = emptyList(),
@@ -545,7 +540,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var modelScanJob: kotlinx.coroutines.Job? = null
     private var modelScanGeneration: Int = 0
     @Volatile private var lastOpenedAntigravityAuthUrl: String? = null
-    @Volatile private var lastOpenedOmniRushAuthUrl: String? = null
     private var activeRuntimeRequest: RuntimeRetryRequest? = null
     private val failedApiKeyIds = mutableSetOf<String>()
     @Volatile private var androidBuildProcess: Process? = null
@@ -576,20 +570,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.antigravityAccountEmail = email.orEmpty()
         if (!signedIn) preferences.clearAgentConversations(AgentKind.ANTIGRAVITY)
     }
-    private val omniRushAuthController = OmniRushAuthController(
-        deviceName = OmniRush.deviceName(),
-        clientVersion = { preferences.omniRushClientVersion },
-        onTokens = { accessToken, refreshToken ->
-            vault.put(ProviderKind.OMNIRUSH.name, accessToken)
-            vault.putNamed(ProviderKind.OMNIRUSH.name, OmniRush.REFRESH_KEY_NAME, refreshToken)
-            refreshActiveApiKey(ProviderKind.OMNIRUSH)
-        },
-        onSignedOut = {
-            vault.remove(ProviderKind.OMNIRUSH.name)
-            refreshActiveApiKey(ProviderKind.OMNIRUSH)
-        },
-        initiallySignedIn = vault.contains(ProviderKind.OMNIRUSH.name),
-    )
     private val _state = MutableStateFlow(
         AppUiState(
             startupMessage = s(R.string.boot_checking_device),
@@ -633,11 +613,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         syncShizukuBridge()
         refreshFileRoots()
-        openCodeRuntime.omniRushAuth = OmniRushProxyAuth(
-            clientVersion = { preferences.omniRushClientVersion },
-            onFloor = { floor -> preferences.omniRushClientVersion = floor },
-            refreshAccessToken = { refreshOmniRushToken() },
-        )
         // GitHub's official CLI owns its OAuth credential. Remove credentials from
         // the retired custom OAuth implementation and discover the real CLI status.
         vault.remove(LEGACY_GITHUB_TOKEN_KEY)
@@ -674,21 +649,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(antigravityAuth = auth) }
                 auth.authorizationUrl?.takeIf { it != lastOpenedAntigravityAuthUrl }?.let { url ->
                     lastOpenedAntigravityAuthUrl = url
-                    runCatching {
-                        getApplication<Application>().startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                        )
-                    }.onFailure {
-                        _state.update { state -> state.copy(toastMessage = s(R.string.mvm_browser_copy_signin)) }
-                    }
-                }
-            }
-        }
-        viewModelScope.launch {
-            omniRushAuthController.state.collect { auth ->
-                _state.update { it.copy(omniRushAuth = auth) }
-                auth.approveUrl?.takeIf { it != lastOpenedOmniRushAuthUrl }?.let { url ->
-                    lastOpenedOmniRushAuthUrl = url
                     runCatching {
                         getApplication<Application>().startActivity(
                             Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -3459,25 +3419,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return vault.list(kind.name)
     }
 
-    /**
-     * Rotates the OmniRush device-token pair after a 401 and persists both
-     * sides (access token as the active key, refresh token as the named
-     * companion). Returns the fresh access token, or null when no refresh
-     * token is saved or the rotation is refused (signed out). Blocking —
-     * invoked from the loopback proxy's request threads, never the main one.
-     */
-    fun refreshOmniRushToken(): String? {
-        val scope = ProviderKind.OMNIRUSH.name
-        val refresh = vault.credentials(scope)
-            .firstOrNull { it.name.equals(OmniRush.REFRESH_KEY_NAME, ignoreCase = true) }
-            ?.secret.orEmpty()
-        if (refresh.isBlank()) return null
-        val rotated = OmniRush.refreshNow(refresh, preferences.omniRushClientVersion) ?: return null
-        vault.put(scope, rotated.first)
-        vault.putNamed(scope, OmniRush.REFRESH_KEY_NAME, rotated.second)
-        return rotated.first
-    }
-
     fun upsertCustomEndpoint(endpoint: CustomEndpoint) {
         val current = preferences.loadCustomEndpoints()
         val next = if (current.any { it.id == endpoint.id }) {
@@ -4278,20 +4219,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun startOmniRushLogin() {
-        if (_state.value.agentInstalling != null || _state.value.isRunning) return
-        lastOpenedOmniRushAuthUrl = null
-        viewModelScope.launch { omniRushAuthController.beginLogin() }
-    }
-
-    fun cancelOmniRushLogin() {
-        omniRushAuthController.cancel()
-    }
-
-    fun logoutOmniRush() {
-        viewModelScope.launch { omniRushAuthController.signedOut() }
-    }
-
     fun setAntigravityModel(model: String) {
         preferences.antigravityModel = model
         val modelEffort = antigravityEffortFromModel(model)
@@ -4662,22 +4589,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun discoverModels(profile: ProviderProfile, secret: String): ModelDiscoveryResult {
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
         val agent = _state.value.agentKind
-        var result = providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, agent))
-        // OmniRush access tokens expire in hours: a rejected catalog fetch
-        // rotates the pair once and retries, so Test/Discover self-heal exactly
-        // like sessions do through the proxy. Refresh only runs on a 401/403 —
-        // never blindly, so we never steal a rotation from the user's other
-        // logged-in clients.
-        if (profile.kind == ProviderKind.OMNIRUSH && result is ModelDiscoveryResult.Failure &&
-            result.message.startsWith("Check the saved API key")
-        ) {
-            val fresh = withContext(Dispatchers.IO) {
-                runCatching { refreshOmniRushToken() }.getOrNull().orEmpty()
-            }
-            if (fresh.isNotBlank()) {
-                result = providerApi.discoverModels(profile.baseUrl, fresh, providerProtocolForAgent(profile, agent))
-            }
-        }
+        val result = providerApi.discoverModels(profile.baseUrl, key, providerProtocolForAgent(profile, agent))
         if (result is ModelDiscoveryResult.Success) {
             preferences.saveModelCatalog(
                 agent,
@@ -4714,32 +4626,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
-        val first = providerApi.validate(
+        return providerApi.validate(
             profile.baseUrl,
             profile.model,
             key,
             providerProtocolForAgent(profile, _state.value.agentKind),
             models,
         )
-        // Same self-heal as discoverModels: a rejected OmniRush check rotates
-        // the pair once and retries (see refreshOmniRushToken).
-        if (profile.kind == ProviderKind.OMNIRUSH && first is ConnectionValidation.Failure &&
-            first.label == "Rejected"
-        ) {
-            val fresh = withContext(Dispatchers.IO) {
-                runCatching { refreshOmniRushToken() }.getOrNull().orEmpty()
-            }
-            if (fresh.isNotBlank()) {
-                return providerApi.validate(
-                    profile.baseUrl,
-                    profile.model,
-                    fresh,
-                    providerProtocolForAgent(profile, _state.value.agentKind),
-                    models,
-                )
-            }
-        }
-        return first
     }
 
     fun pingApi() {
