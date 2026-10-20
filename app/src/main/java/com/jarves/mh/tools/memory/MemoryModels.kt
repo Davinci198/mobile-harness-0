@@ -22,7 +22,18 @@ data class MemoryRecord(
     val tags: List<String>,
     val createdAtMillis: Long,
     val updatedAtMillis: Long,
+    val scope: MemoryScope = MemoryScope.GLOBAL,
 )
+
+/** Namespace that keeps project and agent memories from crossing boundaries. */
+data class MemoryScope(
+    val projectId: String = "",
+    val agentId: String = "",
+) {
+    companion object {
+        val GLOBAL = MemoryScope()
+    }
+}
 
 data class MemoryLink(
     val id: String,

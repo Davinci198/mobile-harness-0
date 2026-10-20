@@ -2,7 +2,9 @@ MOBILE-HARNESS — RAPORT DE BUGURI
 Data: 2026-10-08
 Repo: ~/dev/Mobile-Harness
 Revizie analizată: ce47d5a465e5700ab9ee0da3f0522981bde667b5
-Stare: 9 probleme identificate, nereparate în cadrul acestui audit.
+Stare: AUDIT ISTORIC — cele 9 probleme au fost reparate ulterior și sunt
+marcate ca verificate în commitul 52d2326; acest fișier păstrează dovezile și
+cazurile de regresie pentru referință.
 
 VALIDARE ȘI LIMITE
 - Constatările sunt susținute de analiza statică a codului și a apelanților.

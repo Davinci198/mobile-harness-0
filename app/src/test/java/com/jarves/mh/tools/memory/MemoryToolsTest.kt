@@ -66,12 +66,16 @@ class MemoryToolsTest {
         tools = newTools()
     }
 
-    private fun newTools(hooks: List<AIToolHook> = emptyList()) = MemoryTools(
+    private fun newTools(
+        hooks: List<AIToolHook> = emptyList(),
+        scope: MemoryScope = MemoryScope.GLOBAL,
+    ) = MemoryTools(
         store = memoryStore,
         gate = ToolPermissionGate(permissionStore),
         hooks = hooks,
         clock = { now++ },
         idFactory = { ids.removeFirst() },
+        scope = scope,
     )
 
     private fun created(title: String, content: String, path: String = "", tags: List<String> = emptyList()): MemoryRecord {
@@ -103,6 +107,18 @@ class MemoryToolsTest {
         val second = created("Same", "two")
         assertTrue(first.id != second.id)
         assertEquals(2, memoryStore.data.memories.size)
+    }
+
+    @Test
+    fun scopedToolsCannotReadAnotherProjectOrAgentMemory() {
+        val projectA = newTools(scope = MemoryScope("project-a", "claude"))
+        val projectB = newTools(scope = MemoryScope("project-b", "claude"))
+        val memory = projectA.create("Private", "project A") as MemoryToolResult.Created
+
+        assertTrue(projectA.read(memory.memory.id) is MemoryToolResult.Found)
+        assertTrue(projectB.read(memory.memory.id) is MemoryToolResult.Error)
+        assertTrue(projectB.search("Private") is MemoryToolResult.SearchResults)
+        assertEquals(0, (projectB.search("Private") as MemoryToolResult.SearchResults).total)
     }
 
     @Test

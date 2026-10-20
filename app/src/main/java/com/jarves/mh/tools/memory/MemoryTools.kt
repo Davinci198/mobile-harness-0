@@ -11,6 +11,7 @@ class MemoryTools(
     private val hooks: List<AIToolHook> = emptyList(),
     private val clock: () -> Long = System::currentTimeMillis,
     private val idFactory: () -> String = { UUID.randomUUID().toString() },
+    private val scope: MemoryScope = MemoryScope.GLOBAL,
 ) {
     @Synchronized
     fun create(
@@ -32,16 +33,18 @@ class MemoryTools(
             tags = normalizedTags,
             createdAtMillis = now,
             updatedAtMillis = now,
+            scope = scope,
         )
         val data = store.load()
-        store.save(data.copy(memories = data.memories + memory))
+        val visible = visibleData(data)
+        saveVisible(data, visible.copy(memories = visible.memories + memory))
         MemoryToolResult.Created(memory)
     }
 
     @Synchronized
     fun read(id: String): MemoryToolResult = execute("MemoryRead", "read memory: $id") {
         val memoryId = validateId(id)
-        val memory = store.load().memories.firstOrNull { it.id == memoryId }
+        val memory = visibleData(store.load()).memories.firstOrNull { it.id == memoryId }
             ?: throw MemoryNotFoundException("Memory not found: $memoryId")
         MemoryToolResult.Found(memory)
     }
@@ -56,7 +59,8 @@ class MemoryTools(
     ): MemoryToolResult = execute("MemoryUpdate", "update memory: $id") {
         val memoryId = validateId(id)
         val data = store.load()
-        val current = data.memories.firstOrNull { it.id == memoryId }
+        val visible = visibleData(data)
+        val current = visible.memories.firstOrNull { it.id == memoryId }
             ?: throw MemoryNotFoundException("Memory not found: $memoryId")
         val updated = current.copy(
             title = title?.let(::validateTitle) ?: current.title,
@@ -66,7 +70,10 @@ class MemoryTools(
         )
         if (updated == current) return@execute MemoryToolResult.Updated(current)
         val result = updated.copy(updatedAtMillis = clock())
-        store.save(data.copy(memories = data.memories.map { if (it.id == memoryId) result else it }))
+        saveVisible(
+            data,
+            visible.copy(memories = visible.memories.map { if (it.id == memoryId) result else it }),
+        )
         MemoryToolResult.Updated(result)
     }
 
@@ -74,13 +81,14 @@ class MemoryTools(
     fun delete(id: String): MemoryToolResult = execute("MemoryDelete", "delete memory: $id") {
         val memoryId = validateId(id)
         val data = store.load()
-        if (data.memories.none { it.id == memoryId }) throw MemoryNotFoundException("Memory not found: $memoryId")
-        val remainingLinks = data.links.filterNot { it.fromId == memoryId || it.toId == memoryId }
-        store.save(data.copy(
-            memories = data.memories.filterNot { it.id == memoryId },
+        val visible = visibleData(data)
+        if (visible.memories.none { it.id == memoryId }) throw MemoryNotFoundException("Memory not found: $memoryId")
+        val remainingLinks = visible.links.filterNot { it.fromId == memoryId || it.toId == memoryId }
+        saveVisible(data, visible.copy(
+            memories = visible.memories.filterNot { it.id == memoryId },
             links = remainingLinks,
         ))
-        MemoryToolResult.Deleted(memoryId, data.links.size - remainingLinks.size)
+        MemoryToolResult.Deleted(memoryId, visible.links.size - remainingLinks.size)
     }
 
     @Synchronized
@@ -89,7 +97,7 @@ class MemoryTools(
             val normalizedQuery = validateQuery(query)
             validateLimit(limit)
             val terms = normalizedQuery.lowercase().split(Regex("\\s+"))
-            val matches = store.load().memories.mapNotNull { memory ->
+            val matches = visibleData(store.load()).memories.mapNotNull { memory ->
                 val title = memory.title.lowercase()
                 val content = memory.content.lowercase()
                 val score = terms.sumOf { term ->
@@ -117,7 +125,7 @@ class MemoryTools(
     ): MemoryToolResult = execute("MemoryList", "list memories: $path") {
         val normalizedPath = normalizePath(path)
         validatePage(limit, offset)
-        val matches = store.load().memories
+        val matches = visibleData(store.load()).memories
             .filter { normalizedPath.isEmpty() || it.path == normalizedPath || it.path.startsWith("$normalizedPath/") }
             .sortedWith(compareByDescending<MemoryRecord> { it.updatedAtMillis }.thenBy { it.id })
         MemoryToolResult.Memories(matches.drop(offset).take(limit), matches.size)
@@ -136,9 +144,10 @@ class MemoryTools(
         val linkType = validateLinkType(type)
         val linkDescription = validateLinkDescription(description)
         val data = store.load()
-        if (data.memories.none { it.id == sourceId }) throw MemoryNotFoundException("Source memory not found: $sourceId")
-        if (data.memories.none { it.id == targetId }) throw MemoryNotFoundException("Target memory not found: $targetId")
-        data.links.firstOrNull { it.fromId == sourceId && it.toId == targetId && it.type == linkType }?.let {
+        val visible = visibleData(data)
+        if (visible.memories.none { it.id == sourceId }) throw MemoryNotFoundException("Source memory not found: $sourceId")
+        if (visible.memories.none { it.id == targetId }) throw MemoryNotFoundException("Target memory not found: $targetId")
+        visible.links.firstOrNull { it.fromId == sourceId && it.toId == targetId && it.type == linkType }?.let {
             return@execute MemoryToolResult.Linked(it, false)
         }
         val link = MemoryLink(
@@ -149,7 +158,7 @@ class MemoryTools(
             description = linkDescription,
             createdAtMillis = clock(),
         )
-        store.save(data.copy(links = data.links + link))
+        saveVisible(data, visible.copy(links = visible.links + link))
         MemoryToolResult.Linked(link, true)
     }
 
@@ -157,8 +166,9 @@ class MemoryTools(
     fun unlink(linkId: String): MemoryToolResult = execute("MemoryUnlink", "unlink memory: $linkId") {
         val id = validateId(linkId)
         val data = store.load()
-        if (data.links.none { it.id == id }) throw MemoryNotFoundException("Memory link not found: $id")
-        store.save(data.copy(links = data.links.filterNot { it.id == id }))
+        val visible = visibleData(data)
+        if (visible.links.none { it.id == id }) throw MemoryNotFoundException("Memory link not found: $id")
+        saveVisible(data, visible.copy(links = visible.links.filterNot { it.id == id }))
         MemoryToolResult.Unlinked(id)
     }
 
@@ -170,11 +180,11 @@ class MemoryTools(
     ): MemoryToolResult = execute("MemoryLinkList", "list memory links: ${memoryId.orEmpty()}") {
         validatePage(limit, offset)
         val incidentId = memoryId?.let(::validateId)
-        val data = store.load()
-        if (incidentId != null && data.memories.none { it.id == incidentId }) {
+        val visible = visibleData(store.load())
+        if (incidentId != null && visible.memories.none { it.id == incidentId }) {
             throw MemoryNotFoundException("Memory not found: $incidentId")
         }
-        val matches = data.links
+        val matches = visible.links
             .filter { incidentId == null || it.fromId == incidentId || it.toId == incidentId }
             .sortedWith(compareByDescending<MemoryLink> { it.createdAtMillis }.thenBy { it.id })
         MemoryToolResult.Links(matches.drop(offset).take(limit), matches.size)
@@ -227,6 +237,22 @@ class MemoryTools(
         } finally {
             hooks.forEach { hook -> safely { hook.onToolExecutionFinished(tool) } }
         }
+    }
+
+    private fun visibleData(data: MemoryData): MemoryData {
+        val memories = data.memories.filter { it.scope == scope }
+        val ids = memories.mapTo(mutableSetOf(), MemoryRecord::id)
+        return MemoryData(
+            memories = memories,
+            links = data.links.filter { it.fromId in ids && it.toId in ids },
+        )
+    }
+
+    private fun saveVisible(original: MemoryData, visible: MemoryData) {
+        val scopedIds = original.memories.filter { it.scope == scope }.mapTo(mutableSetOf(), MemoryRecord::id)
+        val memories = original.memories.filterNot { it.scope == scope } + visible.memories
+        val links = original.links.filterNot { it.fromId in scopedIds || it.toId in scopedIds } + visible.links
+        store.save(original.copy(memories = memories, links = links))
     }
 
     private inline fun safely(block: () -> Unit) {

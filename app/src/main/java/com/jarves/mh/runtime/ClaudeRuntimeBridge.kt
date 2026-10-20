@@ -177,7 +177,7 @@ class ClaudeRuntimeBridge(
                 add("--max-turns")
                 add("25")
             }
-            Log.d("ClaudeBridge", "Launching command: $command")
+            Log.d("ClaudeBridge", "Starting Claude session (argv=${command.size}, model=${provider.model})")
             val process = installer.process(
                 installed.proot,
                 installed.rootfs,
@@ -214,7 +214,6 @@ class ClaudeRuntimeBridge(
                             val line = pendingOutput.substring(0, newline).trimEnd('\r')
                             pendingOutput.delete(0, newline + 1)
                             if (line.isNotBlank()) {
-                                Log.d("ClaudeBridge", "OUTPUT: $line")
                                 ProviderRuntimeErrorDetector.detect(line)?.let { reason ->
                                     process.destroyForcibly()
                                     throw ProviderSessionException(reason)
@@ -231,7 +230,6 @@ class ClaudeRuntimeBridge(
                     }
                 }
                 pendingOutput.toString().trim().takeIf(String::isNotBlank)?.let { line ->
-                    Log.d("ClaudeBridge", "TRAILING OUTPUT: $line")
                     if (!consumeClaudeEvent(sessionId, line)) lastDiagnostic = line.takeLast(500)
                 }
                 val exit = process.waitFor()
@@ -246,7 +244,7 @@ class ClaudeRuntimeBridge(
                 }
                 val changed = checkpoints.changedFiles(workspace, before)
                 if (changed.isNotEmpty()) {
-                    Log.d("ClaudeBridge", "Changed files: $changed")
+                    Log.d("ClaudeBridge", "Changed files: ${changed.size}")
                     checkpoints.saveChangedPaths(projectId, changed, workspace)
                     val paths = checkpoints.readChangedPaths(projectId).filterNot(checkpoints::isInternalRuntimePath)
                     val details = checkpoints.buildChangeDetails(projectId, workspace, paths)
@@ -328,12 +326,12 @@ class ClaudeRuntimeBridge(
 
                     when (val decision = permissionGate.evaluate(toolName, explanation)) {
                         is ToolPermissionGateDecision.Allowed -> {
-                            Log.d("ClaudeBridge", "Policy allow $approvalId for $toolName ($paths)")
+                            Log.d("ClaudeBridge", "Policy allow for tool=$toolName")
                             response.writeText("allow")
                             file.delete()
                         }
                         is ToolPermissionGateDecision.Blocked -> {
-                            Log.d("ClaudeBridge", "Policy deny $approvalId for $toolName: ${decision.reason}")
+                            Log.d("ClaudeBridge", "Policy deny for tool=$toolName")
                             response.writeText("deny")
                             file.delete()
                             eventBus.emit(
@@ -351,7 +349,7 @@ class ClaudeRuntimeBridge(
                                 risk = classifyRisk(toolName, command),
                             )
                             pending[approvalId] = PendingPermission(request, response)
-                            Log.d("ClaudeBridge", "Ask user $approvalId for $toolName ($paths)")
+                            Log.d("ClaudeBridge", "Approval requested for tool=$toolName")
                             eventBus.emit(RuntimeEvent.ToolRequested(sessionId, request))
                         }
                     }

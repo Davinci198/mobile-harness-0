@@ -12,7 +12,7 @@ import android.content.pm.PackageManager
  *  - `<meta-data android:name="com.jarves.mh.plugin.capabilities" android:value="TOOLS"/>`
  *    — comma-separated [PluginCapability] names;
  *  - `<meta-data android:name="com.jarves.mh.plugin.entry_point" android:value=".MyPluginService"/>`
- *    — the fully-qualified name of a Service implementing [PluginToolHost];
+ *    — the fully-qualified name of the exported Service serving [PluginIpc];
  *  - that service must also appear in the plugin's `<service>` declarations
  *    (enforced by [PluginValidator], not here).
  *
@@ -57,25 +57,15 @@ object PluginPackageManager {
     }
 
     /**
-     * Load the plugin's entry-point service as a [PluginToolHost].
+     * Attach to the plugin's exported Messenger service.
      *
-     * The class comes from the plugin's own APK through
-     * [Context.createPackageContext] with code loading enabled; it must be a
-     * public, no-arg constructible implementation of [PluginToolHost].
-     * Returns null (and never throws to the caller) when the plugin cannot be
-     * attached — a broken plugin must not take discovery down with it.
+     * Plugin code must stay in the plugin process. The returned adapter speaks
+     * [PluginIpc] and never reflectively loads or instantiates plugin classes in
+     * the host process.
      */
     fun bind(context: Context, plugin: PluginCandidate): PluginToolHost? {
-        val serviceName = plugin.entryPointService ?: return null
         return runCatching {
-            val pluginContext = context.createPackageContext(
-                plugin.packageName,
-                Context.CONTEXT_INCLUDE_CODE or Context.CONTEXT_IGNORE_SECURITY,
-            )
-            pluginContext.classLoader
-                .loadClass(serviceName)
-                .getDeclaredConstructor()
-                .newInstance() as PluginToolHost
+            IpcPluginToolHost(context, plugin.packageName, plugin.entryPointService)
         }.getOrNull()
     }
 }

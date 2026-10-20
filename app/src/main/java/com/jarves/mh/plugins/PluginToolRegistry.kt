@@ -37,8 +37,10 @@ class PluginToolRegistry(
             for (binding in bindings) {
                 val tools = runCatching { binding.host.listTools() }.getOrElse { failure ->
                     log("Plugin '${binding.plugin.packageName}' failed to list tools: $failure")
+                    runCatching { binding.host.close() }
                     continue
                 }
+                var retained = false
                 for (tool in tools) {
                     val existing = entries[tool.name]
                     if (existing != null) {
@@ -49,12 +51,22 @@ class PluginToolRegistry(
                         continue
                     }
                     entries[tool.name] = Entry(binding, tool)
+                    retained = true
                 }
+                if (!retained) runCatching { binding.host.close() }
             }
         }
     }
 
     fun register(binding: PluginToolBinding) = registerAll(listOf(binding))
+
+    /** Remove all dynamic tools and close their cross-process connections. */
+    fun clear() {
+        val bindings = synchronized(lock) {
+            entries.values.map { it.binding }.distinctBy { it.plugin.packageName }.also { entries.clear() }
+        }
+        bindings.forEach { binding -> runCatching { binding.host.close() } }
+    }
 
     /** Every admitted tool, in registration order. */
     fun tools(): List<PluginTool> = synchronized(lock) { entries.values.map { it.tool } }

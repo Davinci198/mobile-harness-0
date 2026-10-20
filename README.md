@@ -10,7 +10,7 @@
 
   <br />
 
-  [![Release v1.0.4](https://img.shields.io/badge/Release-v1.0.4-F28C52?style=flat-square&logo=github&logoColor=white)](https://github.com/Davinci198/mobile-harness-0/releases/tag/debug-final-29057ec)
+  [![Latest release](https://img.shields.io/github/v/release/Davinci198/mobile-harness-0?display_name=tag&style=flat-square&color=F28C52&logo=github&logoColor=white)](https://github.com/Davinci198/mobile-harness-0/releases)
   [![Android 9+](https://img.shields.io/badge/Android-9%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#system-requirements)
   [![ARM64](https://img.shields.io/badge/CPU-ARM64-5B8DEF?style=flat-square)](#system-requirements)
   [![MIT License](https://img.shields.io/badge/License-MIT-8B7CF6?style=flat-square&logo=opensourceinitiative&logoColor=white)](LICENSE)
@@ -18,8 +18,8 @@
 
   <br />
 
-  [**Download Online APK**](https://github.com/Davinci198/mobile-harness-0/releases/download/debug-final-29057ec/app-online-debug.apk) &nbsp;•&nbsp;
-  [**Download Offline APK**](https://github.com/Davinci198/mobile-harness-0/releases/download/debug-final-29057ec/app-offline-debug.apk) &nbsp;•&nbsp;
+  [**Download Online APK**](https://github.com/Davinci198/mobile-harness-0/releases) &nbsp;•&nbsp;
+  [**Download Offline APK**](https://github.com/Davinci198/mobile-harness-0/releases) &nbsp;•&nbsp;
   [**Watch Walkthrough (3 min)**](https://youtu.be/QzAau52Z7yQ) &nbsp;•&nbsp;
   [**Quickstart Guide**](#quickstart) &nbsp;•&nbsp;
   [**Architecture**](#architecture) &nbsp;•&nbsp;
@@ -62,7 +62,7 @@
       <h3>Online Edition</h3>
       <p><strong>Recommended</strong></p>
       <p>Start with the smaller APK. Core, Python, and Android runtime bundles are downloaded only when needed.</p>
-      <a href="https://github.com/Davinci198/mobile-harness-0/releases/download/debug-final-29057ec/app-online-debug.apk">
+      <a href="https://github.com/Davinci198/mobile-harness-0/releases">
         <img src="https://img.shields.io/badge/Download-Online_APK-F28C52?style=for-the-badge&logo=android&logoColor=white" alt="Download Online APK" />
       </a>
     </td>
@@ -70,7 +70,7 @@
       <h3>Offline Edition</h3>
       <p><strong>Everything included</strong></p>
       <p>Includes the Core, Python, and Android runtime bundles for setup with limited or unavailable internet.</p>
-      <a href="https://github.com/Davinci198/mobile-harness-0/releases/download/debug-final-29057ec/app-offline-debug.apk">
+      <a href="https://github.com/Davinci198/mobile-harness-0/releases">
         <img src="https://img.shields.io/badge/Download-Offline_APK-5B8DEF?style=for-the-badge&logo=android&logoColor=white" alt="Download Offline APK" />
       </a>
     </td>
@@ -86,7 +86,7 @@
 
 ## Capabilities
 
-Mobile Harness unites modern **Jetpack Compose UI** with a self-contained **Ubuntu 20.04 LTS subsystem**. It gives you a desktop-class software development environment in your pocket without requiring root access, unlocked bootloaders, or external applications like Termux.
+Mobile Harness unites modern **Jetpack Compose UI** with a self-contained **Ubuntu 26.04.1 LTS ARM64 subsystem**. It gives you a desktop-class software development environment in your pocket without requiring root access, unlocked bootloaders, or external applications like Termux.
 
 <table>
   <tr>
@@ -96,7 +96,7 @@ Mobile Harness unites modern **Jetpack Compose UI** with a self-contained **Ubun
     </td>
     <td width="50%" valign="top">
       <h3>Isolated Linux Subsystem</h3>
-      <p>A full Ubuntu 20.04 ARM64 userspace running inside PRoot. Includes Node.js, npm, Git, OpenSSL, and essential shell tooling out of the box.</p>
+      <p>A full Ubuntu 26.04.1 ARM64 userspace running inside PRoot. Includes Node.js, npm, Git, OpenSSL, and essential shell tooling out of the box.</p>
     </td>
   </tr>
   <tr>
@@ -166,11 +166,11 @@ Mobile Harness unites modern **Jetpack Compose UI** with a self-contained **Ubun
 Get up and running in 3 guided steps:
 
 ### 1. Download & Install
-Download the latest signed release APK from [GitHub Releases](https://github.com/Davinci198/mobile-harness-0/releases/tag/debug-final-29057ec).
+Download the latest signed release APK from [GitHub Releases](https://github.com/Davinci198/mobile-harness-0/releases).
 
 ```text
 Target Architecture : ARM64 (arm64-v8a)
-Package Version     : v1.0.4 (debug-final-29057ec)
+Package Version     : See the selected GitHub release
 Minimum OS Level    : Android 9.0 (API 28)
 ```
 
@@ -259,7 +259,7 @@ flowchart TB
     end
 
     subgraph Subsystem[" Private Linux Subsystem (PRoot ARM64) "]
-        Ubuntu["Ubuntu 20.04 LTS Subsystem<br/>Rootless Userspace Environment"]
+        Ubuntu["Ubuntu 26.04.1 LTS ARM64 Subsystem<br/>Rootless Userspace Environment"]
         Agent["Agent Registry<br/>Claude • DeepSeek • Antigravity • OpenCode • Hermes"]
         Tools["Development Toolchains<br/>Node.js • Git • Python • C++"]
         Workspace["Local Project Workspace<br/>Files • Git History • Checkpoints"]
@@ -290,7 +290,7 @@ flowchart TB
 ```
 
 ### Core Runtime Components
-* **Base Environment**: Ubuntu 20.04 ARM64 verified rootfs
+* **Base Environment**: Ubuntu 26.04.1 ARM64 verified rootfs
 * **Agent Engine**: Registry-selected, isolated drivers for five coding agents — Claude Code, DeepSeek Harness, the official Antigravity CLI, OpenCode, and Hermes
 * **Native Tooling**: Node.js LTS, npm, Git, OpenSSL, curl, and GNU coreutils
 * **Process Virtualization**: PRoot user-space architecture emulation with zero kernel modifications
