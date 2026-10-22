@@ -126,6 +126,18 @@ internal fun hermesEnvironmentFor(
     if (gatewayUrl != null && provider.routesThroughOpenAiProxy()) {
         environment["OPENAI_API_KEY"] = key
         environment["OPENAI_BASE_URL"] = gatewayUrl
+        // Hermes resolves a provider's credential from that provider's own env
+        // var (PROVIDER_REGISTRY: "nvidia" -> NVIDIA_API_KEY), never from the
+        // OpenAI-compatible pair, so the nvidia turn refused to start with
+        // "No usable credentials found for provider 'nvidia'" even though the
+        // key was there. The proxy injects the real key on the way out, so the
+        // value here only has to be usable — but the base URL must point at
+        // the proxy, or the guest dials NVIDIA directly and loses the
+        // "TLS lives in the app process" guarantee the proxy exists for.
+        if (kind == ProviderKind.NVIDIA_NIM) {
+            environment["NVIDIA_API_KEY"] = key
+            environment["NVIDIA_BASE_URL"] = gatewayUrl
+        }
         return environment
     }
     when (kind) {

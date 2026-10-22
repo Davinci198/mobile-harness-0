@@ -82,6 +82,19 @@ internal class WarmTurnBoundary(echo: String) {
     private var running = false
     private var done = false
 
+    /**
+     * The last error Hermes rendered on its own, without a hook event.
+     *
+     * The interactive stdout is a rendered TUI, so the reply text only reaches
+     * the app through the webhook stream. A failure that happens before the
+     * stream starts (a missing credential, a rejected model) is rendered as a
+     * plain "⚠️  message" line and never fires a hook, which used to surface
+     * as a generic "no reply for this turn" while the real cause sat in the
+     * TUI. Keeping the line lets the failure report the actual reason.
+     */
+    var lastErrorLine: String? = null
+        private set
+
     /** True once the turn is observably running (hint line seen). */
     val turnStarted: Boolean get() = running
 
@@ -96,6 +109,7 @@ internal class WarmTurnBoundary(echo: String) {
         // The TUI colours the prompt mark itself, so the raw line starts with
         // escape sequences; match on the text it renders.
         val line = stripAnsi(rawLine).trim()
+        captureError(line)
         if (!running) {
             if (RUNNING_MARKERS.any { line.contains(it) }) running = true
             return false
@@ -109,9 +123,20 @@ internal class WarmTurnBoundary(echo: String) {
         return done
     }
 
+    private fun captureError(line: String) {
+        // The status bar renders a bare "⚠ " bullet inside a bordered box
+        // ("⚠ update available", "⚠ space-bunny-alpha │ ctx 12%"), while a real
+        // failure is a standalone emoji line: "⚠️  No usable credentials ...".
+        // The variation selector is what tells them apart.
+        if (!line.startsWith(WARNING_MARK)) return
+        val text = line.removePrefix(WARNING_MARK).trim().ifEmpty { return }
+        lastErrorLine = text
+    }
+
     companion object {
         private const val PROMPT_MARK = "❯"
         private const val ECHO_PREFIX_CHARS = 60
+        private const val WARNING_MARK = "\u26A0\uFE0F"
         private val RUNNING_MARKERS = listOf("msg=interrupt", "Ctrl+C cancel")
     }
 }
