@@ -1,6 +1,7 @@
 package com.jarves.mh.runtime
 
 import com.jarves.mh.model.ProviderKind
+import com.jarves.mh.model.ProviderProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
