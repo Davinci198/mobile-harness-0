@@ -282,6 +282,7 @@ internal class HermesWarmSession(
     /** Waits until the session is idle at its prompt and able to accept input. */
     private suspend fun awaitInteractivePrompt(target: Process): Boolean {
         val deadline = System.currentTimeMillis() + READY_TIMEOUT_MS
+        val boundary = WarmTurnBoundary("")
         while (System.currentTimeMillis() < deadline) {
             if (!target.isAlive) return false
             val chunk = sawNewOutput(target)
@@ -294,6 +295,14 @@ internal class HermesWarmSession(
             while (newline >= 0) {
                 val line = lineBuffer.substring(0, newline).trimEnd('\r')
                 lineBuffer.delete(0, newline + 1)
+                boundary.onOutputLine(line)
+                // The Nous free tier answers with a browser challenge. The
+                // guest has no browser, so the session would sit on it until
+                // the boot timeout; fail fast with the real reason instead.
+                if (boundary.lastErrorLine != null) {
+                    Log.i("HermesWarmSession", "boot blocked: ${boundary.lastErrorLine}")
+                    return false
+                }
                 if (stripAnsi(line).trim().startsWith(PROMPT_MARK)) {
                     Log.i("HermesWarmSession", "tui ready at prompt")
                     return true

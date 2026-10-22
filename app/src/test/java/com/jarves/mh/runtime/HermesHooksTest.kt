@@ -166,4 +166,23 @@ class HermesHooksTest {
         boundary.onOutputLine("  ⚠ ❯ msg=interrupt · /queue · /bg · Ctrl+C cancel")
         assertNull(boundary.lastErrorLine)
     }
+
+    @Test
+    fun boundaryNamesTheNousBrowserChallenge() {
+        val boundary = WarmTurnBoundary("hello")
+        boundary.onOutputLine("Nous needs to run a quick check before starting your free session.")
+        assertEquals(NOUS_CHALLENGE_MESSAGE, boundary.lastErrorLine)
+    }
+
+    @Test
+    fun theColdParserReportsTheNousBrowserChallenge() {
+        val parsed = HermesJsonlParser.parseLine(
+            "Nous needs to run a quick check before starting your free session.",
+            sessionId = "s-1",
+        )
+        assertTrue(parsed is CliParsed.Events)
+        val events = parsed as CliParsed.Events
+        assertEquals(NOUS_CHALLENGE_MESSAGE, events.failed)
+        assertTrue(events.terminal)
+    }
 }

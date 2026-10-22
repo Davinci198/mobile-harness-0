@@ -1053,6 +1053,12 @@ internal object OpenCodeJsonlParser {
  */
 internal object HermesJsonlParser {
     fun parseLine(line: String, sessionId: String): CliParsed {
+        // The Nous free tier answers a token exchange with a browser check
+        // instead of JSON. The guest cannot open a browser, so the run would
+        // sit there until it is killed; report the real reason instead.
+        if (line.contains(NOUS_CHALLENGE_MARK)) {
+            return CliParsed.Events(failed = NOUS_CHALLENGE_MESSAGE, terminal = true)
+        }
         val event = runCatching { JSONObject(line) }.getOrNull() ?: return CliParsed.IGNORED
         val type = event.optString("type")
         if (type.contains("error", true)) {
