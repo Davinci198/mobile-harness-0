@@ -198,7 +198,7 @@ internal class HermesWarmSession(
             if (!target.isAlive) {
                 drain()
                 return WarmTurnResult(
-                    failed = lastError ?: DIED_MESSAGE,
+                    failed = lastError ?: boundary.lastErrorLine ?: DIED_MESSAGE,
                     sawAnyOutput = sawAnyOutput,
                     processDied = true,
                 )
@@ -249,7 +249,7 @@ internal class HermesWarmSession(
             delay(50)
         }
         return WarmTurnResult(
-            failed = if (sawText) null else lastError ?: NO_REPLY_MESSAGE,
+            failed = if (sawText) null else lastError ?: boundary.lastErrorLine ?: NO_REPLY_MESSAGE,
             sawAnyOutput = sawAnyOutput,
         )
     }

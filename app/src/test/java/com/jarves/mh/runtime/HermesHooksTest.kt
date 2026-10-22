@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -143,5 +144,26 @@ class HermesHooksTest {
         assertTrue(
             boundary.onOutputLine("\u001B[0m\u001B[38;5;230m\u276F\u001B[0m Research this topic\u001B[0m"),
         )
+    }
+
+    @Test
+    fun boundaryKeepsHermesOwnErrorLine() {
+        val boundary = WarmTurnBoundary("hello")
+        boundary.markRunning()
+        boundary.onOutputLine("\u26A0\uFE0F  No usable credentials found for provider 'nvidia'. Set NVIDIA_API_KEY.")
+        assertEquals(
+            "No usable credentials found for provider 'nvidia'. Set NVIDIA_API_KEY.",
+            boundary.lastErrorLine,
+        )
+    }
+
+    @Test
+    fun statusBarBulletsAreNotErrors() {
+        val boundary = WarmTurnBoundary("hello")
+        // The status box renders a bare "⚠ " bullet; it is chrome, not a failure.
+        boundary.onOutputLine("  ⚠ update available")
+        boundary.onOutputLine("  ⚠ space-bunny-alpha │ ctx 12% │ 3s")
+        boundary.onOutputLine("  ⚠ ❯ msg=interrupt · /queue · /bg · Ctrl+C cancel")
+        assertNull(boundary.lastErrorLine)
     }
 }
