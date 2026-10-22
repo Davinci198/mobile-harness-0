@@ -172,7 +172,7 @@ internal abstract class HeadlessCliBridge(
             // guest network suspension when the app loses focus.
             openAiProxy = openAiProxyFor(provider, secret)
             val gatewayUrl = openAiProxy?.url
-            Log.d("HeadlessBridge", "Local OpenAI proxy: ${gatewayUrl ?: "disabled"}")
+            Log.d("HeadlessBridge", "Local OpenAI proxy ${if (gatewayUrl == null) "disabled" else "enabled"}")
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
@@ -202,7 +202,10 @@ internal abstract class HeadlessCliBridge(
                 }
             } else {
                 val command = commandFor(contextPrompt, provider, secret, guestWorkspacePath, gatewayUrl)
-                Log.d("HeadlessBridge", "${kind.title} command: $command")
+                Log.d(
+                    "HeadlessBridge",
+                    "${kind.title} cold session starting (argv=${command.size}, proxy=${gatewayUrl != null})",
+                )
                 val process = installer.process(
                     installed.proot,
                     installed.rootfs,
@@ -636,6 +639,7 @@ internal abstract class HeadlessCliBridge(
                     (msg.fromUser || msg.text.isNotBlank() || msg.workItems.isNotEmpty())
             }
             .dropLast(1)
+            .recentWithinCharacterBudget(MAX_CONVERSATION_HISTORY_CHARACTERS)
 
         val sb = StringBuilder()
         sb.appendLine("<project-context>")
@@ -791,6 +795,8 @@ internal abstract class HeadlessCliBridge(
 
     companion object {
         private const val FOREGROUND_PROGRESS_MIN_INTERVAL_MS = 750L
+        /** Keep one-shot CLI prompts bounded like the warm Claude/DSH paths. */
+        private const val MAX_CONVERSATION_HISTORY_CHARACTERS = 40_000
     }
 }
 

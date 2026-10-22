@@ -43,6 +43,13 @@ class WorkflowCatalogTest {
     }
 
     @Test
+    fun discoveredPluginToolMakesWorkflowExecutable() {
+        val w = workflow(listOf(WorkflowStep("EchoPlugin", mapOf("text" to "hello"))))
+        assertTrue(WorkflowCatalog.isExecutable(w, setOf("EchoPlugin")))
+        assertNull(WorkflowCatalog.rejectionReason(w, setOf("EchoPlugin")))
+    }
+
+    @Test
     fun missingRequiredArgumentMakesWorkflowNonExecutable() {
         val w = workflow(listOf(WorkflowStep("Write", mapOf("path" to "a.txt"))))
         assertFalse(WorkflowCatalog.isExecutable(w))

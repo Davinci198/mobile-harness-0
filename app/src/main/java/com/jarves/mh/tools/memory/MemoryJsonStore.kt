@@ -26,6 +26,10 @@ class MemoryJsonStore(private val file: File) : MemoryStore {
                     tags = item.optJSONArray("tags").toStringList(),
                     createdAtMillis = item.getLong("createdAtMillis"),
                     updatedAtMillis = item.getLong("updatedAtMillis"),
+                    scope = MemoryScope(
+                        projectId = item.optString("projectId", ""),
+                        agentId = item.optString("agentId", ""),
+                    ),
                 )
             }
             val memoryLinks = (0 until links.length()).map { index ->
@@ -65,7 +69,9 @@ class MemoryJsonStore(private val file: File) : MemoryStore {
                             .put("path", memory.path)
                             .put("tags", JSONArray(memory.tags))
                             .put("createdAtMillis", memory.createdAtMillis)
-                            .put("updatedAtMillis", memory.updatedAtMillis))
+                            .put("updatedAtMillis", memory.updatedAtMillis)
+                            .put("projectId", memory.scope.projectId)
+                            .put("agentId", memory.scope.agentId))
                     }
                 })
                 .put("links", JSONArray().apply {

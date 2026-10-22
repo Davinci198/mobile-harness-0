@@ -17,7 +17,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
+import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.DevStack
+import com.jarves.mh.tools.skill.BundledSkills
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
@@ -347,6 +349,7 @@ class RuntimeInstaller(private val context: Context) {
 
         migrateLegacyClaudeMarker()
         ensureSettingsAndHooks()
+        ensureBundledSkills()
 
         // Node.js and Git are always available in the Core runtime. Python,
         // C/C++, PHP, and Android remain opt-in stacks during onboarding.
@@ -412,6 +415,35 @@ class RuntimeInstaller(private val context: Context) {
     fun ensureAgentWrappers() {
         ensureShWrapper(OPENCODE_GUEST_PATH, OPENCODE2_GUEST_PATH)
         ensureShWrapper(HERMES_GUEST_PATH, HERMES2_GUEST_PATH)
+    }
+
+    /**
+     * Instalează skill-urile livrate în APK în root-urile de skill-uri ale
+     * agenților: `files/skills` pe host, de unde
+     * [com.jarves.mh.tools.skill.SkillLoader] le servește (inclusiv DSH, prin
+     * plugin-ul `mh-skills`), plus câte un root în guest pentru fiecare agent
+     * care își citește singur skill-urile — vezi [AGENT_SKILL_DIRS].
+     *
+     * Idempotent: după prima rulare fiecare root are markerul lui de versiune,
+     * deci apelul de pe căile fierbinți costă o citire de fișier per root.
+     */
+    fun ensureBundledSkills() {
+        val source = BundledSkills.assetSource(context.assets)
+        installBundle(File(context.filesDir, BundledSkills.HOST_DIR), source)
+        if (!rootfs.isDirectory) return
+        AGENT_SKILL_DIRS.values.filterNotNull().forEach { dir ->
+            installBundle(File(rootfs, dir), source)
+        }
+    }
+
+    private fun installBundle(target: File, source: BundledSkills.Source) {
+        val report = runCatching { BundledSkills.ensure(target, source) }.getOrElse { error ->
+            android.util.Log.w("RuntimeInstaller", "Skill bundle install failed for $target", error)
+            return
+        }
+        if (report.skipped) return
+        val stale = if (report.removed.isEmpty()) "" else " (${report.removed.size} stale removed)"
+        android.util.Log.i("RuntimeInstaller", "Installed ${report.installed} bundled skills in $target$stale")
     }
 
     /**
@@ -2831,6 +2863,42 @@ fi
         )
         private const val CLAUDE_BUNDLED_VERSION = "2.1.263"
         private const val CLAUDE_GUEST_PATH = "/usr/local/bin/claude"
+        /**
+         * Root-ul de skill-uri din guest pentru fiecare agent, sau `null` când
+         * agentul e servit pe host prin [com.jarves.mh.tools.skill.SkillLoader].
+         *
+         * Fiecare cale e convenția nativă a agentului, citită din binarul
+         * instalat în guest — nu presupusă:
+         *  - Claude Code — `.claude/skills`: binarul conține `/.claude/skills/`,
+         *    `skillsDirs` și `skillsPaths`;
+         *  - OpenCode — `.config/opencode/skills`: `Global.Path.config` + `skill`
+         *    sau `skills`, iar `~/.config/opencode` e implicitul, pentru că
+         *    aplicația setează `HOME=/root` și nu atinge `XDG_CONFIG_HOME`.
+         *    Citește și `.claude/skills`, însă catalogul iese unic pe id, cu
+         *    precedență pentru sursa ulterioară (`packages/core/test/config/
+         *    skill.test.ts`, cazul `first-source`/`second-source`);
+         *  - Antigravity — `.gemini/config/skills`: documentația din binar dă
+         *    `~/.gemini/config/skills/<name>/SKILL.md` ca rădăcină globală;
+         *  - Hermes — `.hermes/skills`: `get_skills_dir()` = `HERMES_HOME/skills`,
+         *    iar aplicația nu setează `HERMES_HOME`, deci cade pe `$HOME/.hermes`.
+         *    E root-ul `TIER_LOCAL` din ordinea lui de căutare și e scanat
+         *    recursiv, deci ies în catalog și skill-urile plate. Acolo stau deja
+         *    12 categorii ale lui (58 de skill-uri) plus un curator care mută
+         *    skill-uri între activ/învechit/arhivat; verificarea de existență din
+         *    [com.jarves.mh.tools.skill.BundledSkills.ensure] acoperă cazul în care
+         *    un skill de-al nostru e mutat de altcineva.
+         *
+         * DSH nu primește fișiere în guest: canalul lui e plugin-ul `mh-skills`
+         * peste [com.jarves.mh.tools.skill.SkillLoader], iar un `.dsh/skills`
+         * real ar duplica fiecare skill în catalog.
+         */
+        internal val AGENT_SKILL_DIRS: Map<AgentKind, String?> = mapOf(
+            AgentKind.CLAUDE_CODE to "root/.claude/skills",
+            AgentKind.OPENCODE to "root/.config/opencode/skills",
+            AgentKind.ANTIGRAVITY to "root/.gemini/config/skills",
+            AgentKind.HERMES to "root/.hermes/skills",
+            AgentKind.DEEPSEEK_HARNESS to null,
+        )
         private val CLAUDE_BUNDLE = RuntimeBundle(
             label = "Claude Code",
             fileName = "pocketdev-claude-arm64-2026.09.1.tar.zst",

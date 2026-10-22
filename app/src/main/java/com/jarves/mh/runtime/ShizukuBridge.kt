@@ -152,7 +152,7 @@ object ShizukuBridge {
             runCatching { errThread.join(READ_JOIN_MS) }
 
             if (!finished) {
-                Log.w("Files", "shizuku timeout after ${timeoutMs}ms cmd=${command.take(120)}")
+                Log.w("Files", "shizuku command timed out after ${timeoutMs}ms")
             } else {
                 lastFailureLogged = null
             }

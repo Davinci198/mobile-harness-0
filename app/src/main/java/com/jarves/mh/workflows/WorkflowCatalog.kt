@@ -46,20 +46,31 @@ object WorkflowCatalog {
     fun supports(toolName: String): Boolean = toolName in requiredArguments
 
     /** True when every step names a supported tool and carries its required arguments. */
-    fun isExecutable(workflow: AgentWorkflow): Boolean =
-        workflow.steps.isNotEmpty() && workflow.steps.all { step -> isStepExecutable(step) }
+    fun isExecutable(workflow: AgentWorkflow): Boolean = isExecutable(workflow, emptySet())
 
-    fun isStepExecutable(step: WorkflowStep): Boolean {
-        val required = requiredArguments[step.toolName] ?: return false
+    /**
+     * Validate a workflow against built-ins plus dynamically discovered tools.
+     * Plugin schemas are validated by the plugin at execution time; admission
+     * only needs to establish that the host currently knows the tool name.
+     */
+    fun isExecutable(workflow: AgentWorkflow, additionalTools: Set<String>): Boolean =
+        workflow.steps.isNotEmpty() && workflow.steps.all { step -> isStepExecutable(step, additionalTools) }
+
+    fun isStepExecutable(step: WorkflowStep, additionalTools: Set<String> = emptySet()): Boolean {
+        val required = requiredArguments[step.toolName]
+            ?: return step.toolName in additionalTools
         return required.all { key -> !step.arguments[key].isNullOrBlank() }
     }
 
     /** Human-readable reason a workflow cannot run, or null when it can. */
-    fun rejectionReason(workflow: AgentWorkflow): String? {
+    fun rejectionReason(workflow: AgentWorkflow, additionalTools: Set<String> = emptySet()): String? {
         if (workflow.steps.isEmpty()) return "Workflow has no steps"
         workflow.steps.forEachIndexed { index, step ->
-            if (!supports(step.toolName)) return "Step ${index + 1}: unsupported tool '${step.toolName}'"
-            val missing = requiredArguments[step.toolName].orEmpty().filter { step.arguments[it].isNullOrBlank() }
+            if (!supports(step.toolName) && step.toolName !in additionalTools) {
+                return "Step ${index + 1}: unsupported tool '${step.toolName}'"
+            }
+            val missing = requiredArguments[step.toolName].orEmpty()
+                .filter { step.arguments[it].isNullOrBlank() }
             if (missing.isNotEmpty()) return "Step ${index + 1}: missing ${missing.joinToString(", ")}"
         }
         return null

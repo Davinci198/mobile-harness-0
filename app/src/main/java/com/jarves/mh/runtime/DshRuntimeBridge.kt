@@ -83,8 +83,12 @@ class DshRuntimeBridge(
      */
     private fun skillLoader(): com.jarves.mh.tools.skill.SkillLoader? {
         val slug = activeProjectSlug ?: return null
+        val bundled = com.jarves.mh.tools.skill.BundledSkills
+        // Idempotent și ieftin după prima rulare: garantează că root-ul de skill-uri
+        // e populat înainte ca SkillLoader să îl scaneze.
+        installer.ensureBundledSkills()
         return com.jarves.mh.tools.skill.SkillLoader(
-            root = File(context.filesDir, "skills"),
+            root = File(context.filesDir, bundled.HOST_DIR),
             guestRoot = "/workspace/$slug/.mobilharness/skills",
             gate = deviceGate,
         )
@@ -249,7 +253,7 @@ class DshRuntimeBridge(
                 if (sdkResult.completed && !userStopRequested) {
                     val changed = checkpoints.changedFiles(workspace, before)
                     if (changed.isNotEmpty()) {
-                        Log.d("DshBridge", "Changed files: $changed")
+                        Log.d("DshBridge", "Changed files: ${changed.size}")
                         checkpoints.saveChangedPaths(projectId, changed, workspace)
                         val details = checkpoints.buildChangeDetails(projectId, workspace, checkpoints.readChangedPaths(projectId))
                         eventBus.emit(RuntimeEvent.FilesChanged(sessionId, details))
@@ -486,7 +490,7 @@ class DshRuntimeBridge(
             handle(parser.parseLine(it))
         }
         channel.turns++
-        Log.d("DshBridge", "SDK turn done: completed=$completed, failure=${failure.take(120)}")
+        Log.d("DshBridge", "SDK turn done: completed=$completed, failed=${failure.isNotBlank()}")
         return DshSdkRunResult(completed = completed, failure = failure)
     }
 
@@ -725,7 +729,7 @@ class DshRuntimeBridge(
                 if (failure == null) {
                     Log.i("DshBridge", "SDK session prewarmed for $projectSlug")
                 } else {
-                    Log.w("DshBridge", "Prewarm failed (${failure.take(120)}); the turn boots cold")
+                    Log.w("DshBridge", "Prewarm failed; the turn boots cold")
                     closeWarmChannel(channel)
                 }
             }.onFailure { Log.w("DshBridge", "Prewarm skipped", it) }

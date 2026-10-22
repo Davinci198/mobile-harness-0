@@ -76,8 +76,27 @@ class AgentWork(
                     }
                 } catch (error: CancellationException) {
                     throw error
-                } catch (_: Throwable) {
-                    return@launch
+                } catch (error: Throwable) {
+                    // A dead collector must not leave the UI believing that a
+                    // live process is still progressing. Fail every execution
+                    // owned by this driver with a typed terminal event.
+                    handles.values
+                        .filter { it.projectAgent.agent == driver.kind }
+                        .toList()
+                        .forEach { handle ->
+                            if (terminalSessions.add(handle.sessionId)) {
+                                handles.remove(handle.sessionId, handle)
+                                send(
+                                    AgentWorkEvent.Execution(
+                                        driver.kind,
+                                        RuntimeEvent.SessionFailed(
+                                            handle.sessionId,
+                                            "${driver.kind.title} event stream stopped (${error.javaClass.simpleName})",
+                                        ),
+                                    ),
+                                )
+                            }
+                        }
                 }
             }
         }

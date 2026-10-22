@@ -3475,6 +3475,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (ready) {
                     installer.cleanupLegacyWorkspaceScaffolding()
                     installer.ensureAgentWrappers()
+                    installer.ensureBundledSkills()
                 }
             }
         }
@@ -4369,6 +4370,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pluginToolRegistry.registerAll(bindings)
         android.util.Log.i("MHPlugin", "registered ${bindings.size} bindings, ${pluginToolRegistry.summaries().size} tools")
         _state.update { it.copy(pluginTools = pluginToolRegistry.summaries()) }
+    }
+
+    override fun onCleared() {
+        pluginToolRegistry.clear()
+        super.onCleared()
     }
 
     fun setToolPermissionGlobal(level: com.jarves.mh.tools.ToolPermissionLevel) {
@@ -6435,7 +6441,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Returns false when nothing matches so the normal Agent Execution runs.
      */
     private fun tryStartWorkflowReplay(project: Project, prompt: String): Boolean {
-        val workflows = workflowStore.load().filter { com.jarves.mh.workflows.WorkflowCatalog.isExecutable(it) }
+        val pluginToolNames = pluginToolRegistry.tools().map { it.name }.toSet()
+        val workflows = workflowStore.load().filter {
+            com.jarves.mh.workflows.WorkflowCatalog.isExecutable(it, pluginToolNames)
+        }
         if (workflows.isEmpty()) return false
         val workflow = com.jarves.mh.workflows.WorkflowMatcher.match(prompt, workflows) ?: return false
         val sessionId = "wf-${java.util.UUID.randomUUID()}"
@@ -6542,6 +6551,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             memoryTools = com.jarves.mh.tools.memory.MemoryTools(
                 com.jarves.mh.tools.memory.MemoryJsonStore(java.io.File(app.filesDir, "agent-memory.json")),
                 gate,
+                scope = com.jarves.mh.tools.memory.MemoryScope(
+                    projectId = project.id,
+                    agentId = state.value.agentKind.stableId,
+                ),
             ),
             calculateTool = com.jarves.mh.tools.calc.CalculateTool(gate),
             sleepTool = com.jarves.mh.tools.calc.SleepTool(gate),

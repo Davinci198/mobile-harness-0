@@ -207,7 +207,7 @@ internal class HermesWarmSession(
             sawNewOutput(target)?.let { chunk ->
                 if (!bootLogged) {
                     bootLogged = true
-                    Log.i("HermesWarmSession", "tui output: " + chunk.replace('\n', ' ').take(400))
+                    Log.i("HermesWarmSession", "TUI output received")
                 }
                 sawAnyOutput = true
                 lastOutputAt = System.currentTimeMillis()

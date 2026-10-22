@@ -1,6 +1,7 @@
 package com.jarves.mh.plugins
 
 import org.json.JSONObject
+import java.io.Closeable
 
 /** One tool a plugin APK contributes to the agent's tool surface. */
 data class PluginTool(
@@ -18,14 +19,47 @@ sealed class PluginToolResult {
 /**
  * What MH calls inside a plugin APK.
  *
- * The plugin's entry-point [android.app.Service] (the one named by its
- * `com.jarves.mh.plugin.entry_point` meta-data) implements this interface;
- * MH instantiates it through the plugin's own class loader and talks to it
- * across the APK boundary through this interface only.
+ * The host-side adapter for the plugin's entry-point [android.app.Service] (the
+ * one named by its `com.jarves.mh.plugin.entry_point` meta-data) implements this
+ * interface; calls cross the APK boundary through [PluginIpc].
  */
-interface PluginToolHost {
+interface PluginToolHost : Closeable {
     fun listTools(): List<PluginTool>
     suspend fun executeTool(name: String, arguments: JSONObject): PluginToolResult
+
+    override fun close() = Unit
+}
+
+/** Adapts the real cross-APK Messenger contract to the host registry contract. */
+class IpcPluginToolHost(
+    context: android.content.Context,
+    packageName: String,
+    serviceName: String?,
+) : PluginToolHost {
+    private val client = PluginIpcClient(context, packageName, serviceName)
+
+    override fun listTools(): List<PluginTool> = client.listTools().map { declaration ->
+        PluginTool(
+            name = declaration.name,
+            description = declaration.description,
+            inputSchema = declaration.inputSchema(),
+        )
+    }
+
+    override suspend fun executeTool(name: String, arguments: JSONObject): PluginToolResult =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { client.execute(name, arguments).toString() }
+                .fold(
+                    onSuccess = PluginToolResult::Success,
+                    onFailure = { error ->
+                        PluginToolResult.Error(
+                            "${error.javaClass.simpleName}: ${error.message ?: "plugin IPC failed"}",
+                        )
+                    },
+                )
+        }
+
+    override fun close() = client.close()
 }
 
 /**

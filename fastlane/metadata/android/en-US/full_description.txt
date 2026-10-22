@@ -9,7 +9,7 @@ Features:
 • Collapsible file browser with locally stored attachments
 • File diffs, task checkpoints, and rollback controls
 • Browser-style preview for local web servers
-• Guided Ubuntu 20.04 ARM64 runtime setup with live progress
+• Guided Ubuntu 26.04.1 ARM64 runtime setup with live progress
 • Anthropic API and experimental Anthropic-compatible gateways
 • API-key encryption backed by Android Keystore
 
