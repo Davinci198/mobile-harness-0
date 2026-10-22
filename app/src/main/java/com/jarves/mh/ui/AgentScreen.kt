@@ -195,12 +195,14 @@ private fun presetEndpointsFor(kind: ProviderKind): List<PresetEndpoint> = when 
 }
 
 /** Latency badge color: green under 2s, yellow under 5s, red when broken or slower. */
-internal fun latencyColor(model: DiscoveredModel): Color = when {
-    model.isBroken -> Color(0xFFFCA5A5)
-    model.latencyMs == null -> Color(0xFF7A7A86)
-    model.latencyMs!! < 2_000 -> Color(0xFF6EE7B7)
-    model.latencyMs!! < 5_000 -> Color(0xFFFCD34D)
-    else -> Color(0xFFFCA5A5)
+internal fun latencyColor(model: DiscoveredModel): Color {
+    if (model.isBroken) return Color(0xFFFCA5A5)
+    val latency = model.latencyMs ?: return Color(0xFF7A7A86)
+    return when {
+        latency < 2_000 -> Color(0xFF6EE7B7)
+        latency < 5_000 -> Color(0xFFFCD34D)
+        else -> Color(0xFFFCA5A5)
+    }
 }
 
 /** Formats Antigravity model identifiers into clean, human-friendly names. */
