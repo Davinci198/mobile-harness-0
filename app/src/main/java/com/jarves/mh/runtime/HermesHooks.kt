@@ -124,6 +124,14 @@ internal class WarmTurnBoundary(echo: String) {
     }
 
     private fun captureError(line: String) {
+        // The Nous free tier answers a token exchange with a browser check
+        // ("Nous needs to run a quick check before starting your free
+        // session."). The guest has no browser, so the session waits on it
+        // until it is killed; name it instead of timing out silently.
+        if (line.contains(NOUS_CHALLENGE_MARK)) {
+            lastErrorLine = NOUS_CHALLENGE_MESSAGE
+            return
+        }
         // The status bar renders a bare "⚠ " bullet inside a bordered box
         // ("⚠ update available", "⚠ space-bunny-alpha │ ctx 12%"), while a real
         // failure is a standalone emoji line: "⚠️  No usable credentials ...".
@@ -140,3 +148,11 @@ internal class WarmTurnBoundary(echo: String) {
         private val RUNNING_MARKERS = listOf("msg=interrupt", "Ctrl+C cancel")
     }
 }
+
+/** Marker of the Nous free tier's browser check (the guest cannot open a browser). */
+internal const val NOUS_CHALLENGE_MARK = "needs to run a quick check"
+
+/** What the user is told when the Nous free tier asks for that browser check. */
+internal const val NOUS_CHALLENGE_MESSAGE =
+    "The Nous free tier wants a browser check that the guest cannot complete. " +
+        "Pick a keyed provider for Hermes (for example NVIDIA NIM)."
