@@ -49,6 +49,8 @@ class NetworkTools(
     }
 
     private inline fun safely(block: () -> Unit) {
-        try { block() } catch (_: Throwable) { }
+        try { block() } catch (error: Throwable) {
+            android.util.Log.d("NetworkTools", "hook failed: ${error.javaClass.simpleName}: ${error.message}")
+        }
     }
 }

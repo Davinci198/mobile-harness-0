@@ -187,7 +187,12 @@ class SafFileSystem(
     override suspend fun copy(fromPath: String, toPath: String, recursive: Boolean): FsResult<Unit> {
         // SAF has no copy of its own, so a folder is walked and each file is moved across
         // whole. That is slower than a filesystem rename but it is what the contract allows.
+        if (fromPath == toPath) return fsError(FsErrorKind.FAILED, "Source and destination are the same")
         val source = documentUri(fromPath) ?: return fsError(FsErrorKind.FAILED, "Path escapes the folder")
+        val targetUri = documentUri(toPath)
+        if (targetUri != null && targetUri == source) {
+            return fsError(FsErrorKind.FAILED, "Source and destination are the same")
+        }
         val name = FsPaths.nameOf(toPath)
         val mime = column(source, DocumentsContract.Document.COLUMN_MIME_TYPE)
         if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {

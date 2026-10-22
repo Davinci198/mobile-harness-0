@@ -2869,9 +2869,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch(Dispatchers.IO) {
             var moved = 0
-            targets.forEach { target ->
-                val wanted = com.jarves.mh.storage.FsPaths.nameOf(target)
-                val source = board.items.firstOrNull { com.jarves.mh.storage.FsPaths.nameOf(it) == wanted } ?: return@forEach
+            targets.forEachIndexed { index, target ->
+                val source = board.items.getOrNull(index) ?: return@forEachIndexed
                 when (val copied = backend.copy(source, target)) {
                     is com.jarves.mh.storage.FsResult.Ok -> {
                         moved++
@@ -2886,7 +2885,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     is com.jarves.mh.storage.FsResult.Err -> {
                         Log.e("Files", "paste FAILED at item ${copied.error.kind} src=$source dst=$target ${copied.error.message}")
                         _state.update { it.copy(fsStatus = copied.error.message) }
-                        return@forEach
+                        return@forEachIndexed
                     }
                 }
             }

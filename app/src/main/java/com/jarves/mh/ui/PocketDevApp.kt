@@ -7102,7 +7102,7 @@ private fun StudioTab(installer: RuntimeInstaller) {
                         proot = proot.proot,
                         fraction = 0f,
                         onProgress = { progress ->
-                            progressLine = progress.message
+                            android.os.Handler(android.os.Looper.getMainLooper()).post { progressLine = progress.message }
                         },
                     )
                 }
@@ -7320,7 +7320,7 @@ private fun DashboardTab(installer: RuntimeInstaller) {
             val result = runBlocking {
                 runCatching {
                     installer.ensureAgentInstalled(AgentKind.HERMES) { progress ->
-                        progressLine = progress.message
+                        android.os.Handler(android.os.Looper.getMainLooper()).post { progressLine = progress.message }
                     }
                 }
             }
