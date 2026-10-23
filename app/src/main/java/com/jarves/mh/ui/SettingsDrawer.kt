@@ -1103,6 +1103,7 @@ private fun AgentPanel(
             Spacer(Modifier.width(8.dp))
             Text(
                 statusText,
+                modifier = Modifier.weight(1f),
                 fontSize = 11.sp,
                 color = when {
                     signedIn -> PocketGreen
