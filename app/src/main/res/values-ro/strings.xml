@@ -1206,6 +1206,13 @@
     <string name="drawer_models">Modele</string>
     <string name="drawer_api_keys_desc">Adaugă, activează sau elimină chei pentru acest furnizor. Fiecare cerere folosește cheia activă; celelalte rămân pregătite pentru failover.</string>
     <string name="drawer_no_api_keys">Nu există încă chei API salvate pentru acest furnizor.</string>
+    <string name="drawer_keys_endpoints">Chei și endpoint-uri</string>
+    <string name="drawer_key_count">Chei: %1$d</string>
+    <string name="drawer_active_provider">Furnizor activ</string>
+    <string name="drawer_show_hide_key">Arată sau ascunde cheia</string>
+    <string name="drawer_endpoints_desc">Endpoint-uri Custom API salvate. Apasă Folosește pentru a comuta furnizorul activ la acel endpoint.</string>
+    <string name="drawer_endpoint_use">Folosește</string>
+    <string name="drawer_endpoint_key">Cheie: %1$s</string>
     <string name="drawer_installed_count">%1$d din %2$d instalate</string>
     <string name="drawer_antigravity">Google / Antigravity</string>
     <string name="drawer_antigravity_desc">Cont, model, efort de raționament</string>

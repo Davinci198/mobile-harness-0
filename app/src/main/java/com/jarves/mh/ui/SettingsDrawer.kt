@@ -44,9 +44,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BatterySaver
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
@@ -70,6 +72,8 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -123,6 +127,7 @@ import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatSectionsMode
 import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.ProviderKind
+import com.jarves.mh.model.providersForAgent
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.tools.ToolCatalogLocale
@@ -136,6 +141,7 @@ import com.jarves.mh.ui.theme.PocketAccent
 import com.jarves.mh.ui.theme.PocketGreen
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class SettingsCategory { APPEARANCE, AGENT, CONVERSATION, ACCESS, TOOLS, BACKGROUND }
@@ -1164,15 +1170,19 @@ private fun AgentPanel(
         if (state.provider.kind != ProviderKind.FREE) {
             ConnectionValueRow(stringResource(R.string.drawer_active_key), state.activeApiKeyName ?: "—")
         }
+        if (state.customEndpoints.isNotEmpty()) {
+            ConnectionValueRow(
+                stringResource(R.string.agent_endpoints),
+                state.customEndpoints.size.toString(),
+            )
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (state.provider.kind != ProviderKind.FREE) {
-                CompactActionButton(
-                    label = stringResource(R.string.settings_api_keys),
-                    onClick = { showApiKeys = true },
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Default.Key,
-                )
-            }
+            CompactActionButton(
+                label = stringResource(R.string.drawer_keys_endpoints),
+                onClick = { showApiKeys = true },
+                modifier = Modifier.weight(1f),
+                icon = Icons.Default.Key,
+            )
             CompactActionButton(
                 label = stringResource(
                     if (state.apiPingStatus == ApiPingStatus.PINGING) {
@@ -1457,23 +1467,60 @@ private fun ApiKeysDialog(
     viewModel: MainViewModel,
     onDismiss: () -> Unit,
 ) {
-    val kind = state.provider.kind
-    var keys by remember(kind, state.activeApiKeyName) {
-        mutableStateOf(viewModel.getSavedApiKeys(kind))
+    val activeKind = state.provider.kind
+    val availableKinds = remember(state.agentKind) {
+        providersForAgent(state.agentKind)
+            .filter { it != ProviderKind.FREE && it != ProviderKind.CLAUDE }
+            .ifEmpty {
+                ProviderKind.entries.filter { it != ProviderKind.FREE && it != ProviderKind.CLAUDE }
+            }
     }
-    var keyName by rememberSaveable(kind.name) { mutableStateOf("") }
-    var keySecret by rememberSaveable(kind.name) { mutableStateOf("") }
-    var keyVisible by rememberSaveable(kind.name) { mutableStateOf(keys.isEmpty()) }
-    val defaultKeyName = stringResource(R.string.agent_key_for, kind.title)
+    val defaultKind = remember(availableKinds, activeKind) {
+        when {
+            activeKind != ProviderKind.FREE && activeKind in availableKinds -> activeKind
+            ProviderKind.CUSTOM in availableKinds -> ProviderKind.CUSTOM
+            else -> availableKinds.firstOrNull() ?: ProviderKind.CUSTOM
+        }
+    }
+    var selectedKind by remember(defaultKind) { mutableStateOf(defaultKind) }
+    var keys by remember(selectedKind) { mutableStateOf(viewModel.getSavedApiKeys(selectedKind)) }
+    var keyCounts by remember(availableKinds) {
+        mutableStateOf(availableKinds.associateWith { viewModel.getSavedApiKeys(it).size })
+    }
+    var providerMenuExpanded by remember { mutableStateOf(false) }
+    var keySecrets by remember(selectedKind) { mutableStateOf(emptyMap<String, String>()) }
+    var visibleKeyIds by remember(selectedKind) { mutableStateOf<Set<String>>(emptySet()) }
+    var copiedKeyId by remember { mutableStateOf<String?>(null) }
+    var appliedEndpoint by remember { mutableStateOf<String?>(null) }
+    var keyName by rememberSaveable(selectedKind.name) { mutableStateOf("") }
+    var keySecret by rememberSaveable(selectedKind.name) { mutableStateOf("") }
+    var keyVisible by rememberSaveable(selectedKind.name) { mutableStateOf(keys.isEmpty()) }
+    val clipboard = LocalClipboardManager.current
+    val defaultKeyName = stringResource(R.string.agent_key_for, selectedKind.title)
     val activeKey = keys.firstOrNull { it.isActive }
+    val providerSubtitle = if (selectedKind == activeKind) {
+        "${selectedKind.title} · ${stringResource(R.string.drawer_active_provider)}"
+    } else {
+        selectedKind.title
+    }
+
+    LaunchedEffect(selectedKind, keys.size) {
+        keySecrets = viewModel.keyCredentials(selectedKind).associate { it.id to it.secret }
+    }
+    LaunchedEffect(copiedKeyId) {
+        if (copiedKeyId != null) {
+            delay(1500)
+            copiedKeyId = null
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Column {
-                Text(stringResource(R.string.settings_api_keys))
+                Text(stringResource(R.string.drawer_connection))
                 Text(
-                    "${kind.title} · ${state.provider.resolvedBaseUrl}",
+                    providerSubtitle,
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1495,6 +1542,63 @@ private fun ApiKeysDialog(
                     lineHeight = 15.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Text(
+                    stringResource(R.string.settings_provider),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Box {
+                    CompactActionButton(
+                        label = "${selectedKind.title} · ${stringResource(R.string.drawer_key_count, keys.size)}",
+                        onClick = { providerMenuExpanded = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        icon = Icons.Default.Key,
+                    )
+                    DropdownMenu(
+                        expanded = providerMenuExpanded,
+                        onDismissRequest = { providerMenuExpanded = false },
+                    ) {
+                        availableKinds.forEach { provider ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            provider.title,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                        Text(
+                                            "${provider.subtitle} · ${
+                                                stringResource(
+                                                    R.string.drawer_key_count,
+                                                    keyCounts[provider] ?: 0,
+                                                )
+                                            }",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                },
+                                trailingIcon = {
+                                    if (provider == activeKind) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            stringResource(R.string.drawer_active_provider),
+                                            Modifier.size(16.dp),
+                                            tint = PocketGreen,
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedKind = provider
+                                    providerMenuExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
                 ConnectionValueRow(
                     stringResource(R.string.drawer_active_key),
                     activeKey?.name ?: "—",
@@ -1507,15 +1611,19 @@ private fun ApiKeysDialog(
                     )
                 } else {
                     Text(
-                        stringResource(R.string.settings_saved_api_keys),
+                        stringResource(R.string.agent_saved_keys, keys.size),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     keys.forEachIndexed { index, key ->
+                        val secret = keySecrets[key.id]
+                        val revealed = key.id in visibleKeyIds
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clickable { keys = viewModel.activateApiKey(kind, key.id) }
+                                .clickable {
+                                    keys = viewModel.activateApiKey(selectedKind, key.id)
+                                }
                                 .padding(vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -1540,9 +1648,77 @@ private fun ApiKeysDialog(
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        if (revealed && secret != null) secret else "••••••••••••",
+                                        Modifier.weight(1f),
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            visibleKeyIds = if (revealed) {
+                                                visibleKeyIds - key.id
+                                            } else {
+                                                visibleKeyIds + key.id
+                                            }
+                                        },
+                                        enabled = secret != null,
+                                        modifier = Modifier.size(30.dp),
+                                    ) {
+                                        Icon(
+                                            if (revealed) {
+                                                Icons.Default.VisibilityOff
+                                            } else {
+                                                Icons.Default.Visibility
+                                            },
+                                            stringResource(R.string.drawer_show_hide_key),
+                                            Modifier.size(16.dp),
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            if (secret != null) {
+                                                clipboard.setText(AnnotatedString(secret))
+                                                copiedKeyId = key.id
+                                            }
+                                        },
+                                        enabled = secret != null,
+                                        modifier = Modifier.size(30.dp),
+                                    ) {
+                                        Icon(
+                                            if (copiedKeyId == key.id) {
+                                                Icons.Default.Check
+                                            } else {
+                                                Icons.Default.ContentCopy
+                                            },
+                                            stringResource(
+                                                if (copiedKeyId == key.id) {
+                                                    R.string.agent_key_copied
+                                                } else {
+                                                    R.string.agent_key_copy
+                                                },
+                                            ),
+                                            Modifier.size(15.dp),
+                                            tint = if (copiedKeyId == key.id) {
+                                                PocketAccent
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                        )
+                                    }
+                                }
                             }
                             IconButton(
-                                onClick = { keys = viewModel.removeApiKey(kind, key.id) },
+                                onClick = {
+                                    val updated = viewModel.removeApiKey(selectedKind, key.id)
+                                    keys = updated
+                                    keyCounts = keyCounts + (selectedKind to updated.size)
+                                },
                                 modifier = Modifier.size(34.dp),
                             ) {
                                 Icon(
@@ -1557,6 +1733,89 @@ private fun ApiKeysDialog(
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
                             )
                         }
+                    }
+                }
+                if (state.agentKind != AgentKind.ANTIGRAVITY) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+                    Text(
+                        stringResource(R.string.agent_endpoints),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        stringResource(R.string.drawer_endpoints_desc),
+                        fontSize = 10.5.sp,
+                        lineHeight = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (state.customEndpoints.isEmpty()) {
+                        Text(
+                            stringResource(R.string.agent_endpoint_empty),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        state.customEndpoints.forEach { endpoint ->
+                            val endpointKey = if (endpoint.keyName.isBlank()) {
+                                stringResource(R.string.agent_endpoint_current_key)
+                            } else {
+                                endpoint.keyName
+                            }
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        endpoint.label,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        buildString {
+                                            append(hostOnly(endpoint.baseUrl))
+                                            if (endpoint.model.isNotBlank()) {
+                                                append(" · ")
+                                                append(endpoint.model)
+                                            }
+                                        },
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        stringResource(R.string.drawer_endpoint_key, endpointKey),
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                CompactActionButton(
+                                    label = stringResource(R.string.drawer_endpoint_use),
+                                    onClick = {
+                                        viewModel.applyCustomEndpoint(endpoint)
+                                        selectedKind = ProviderKind.CUSTOM
+                                        keys = viewModel.getSavedApiKeys(ProviderKind.CUSTOM)
+                                        appliedEndpoint = endpoint.label
+                                    },
+                                    dense = true,
+                                )
+                            }
+                        }
+                    }
+                    appliedEndpoint?.let { label ->
+                        Text(
+                            stringResource(R.string.agent_endpoint_applied, label),
+                            fontSize = 10.5.sp,
+                            color = PocketGreen,
+                        )
                     }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
@@ -1597,11 +1856,13 @@ private fun ApiKeysDialog(
                 CompactActionButton(
                     label = stringResource(R.string.settings_save_api_key),
                     onClick = {
-                        keys = viewModel.addApiKey(
-                            kind,
+                        val updated = viewModel.addApiKey(
+                            selectedKind,
                             keyName.trim().ifBlank { defaultKeyName },
                             keySecret.trim(),
                         )
+                        keys = updated
+                        keyCounts = keyCounts + (selectedKind to updated.size)
                         keyName = ""
                         keySecret = ""
                         keyVisible = false

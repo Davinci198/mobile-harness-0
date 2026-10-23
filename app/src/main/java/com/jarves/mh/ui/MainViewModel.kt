@@ -3435,6 +3435,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(customEndpoints = next) }
     }
 
+    /**
+     * Switches the active provider to a saved Custom API endpoint and activates
+     * the key it names (keeping the current Custom key when the name is gone).
+     * The drawer uses this instead of [selectProviderAndModel] because the
+     * latter does not refresh [AppUiState.activeApiKeyName] for the new scope.
+     */
+    fun applyCustomEndpoint(endpoint: CustomEndpoint) {
+        if (_state.value.agentKind == AgentKind.ANTIGRAVITY) return
+        val scope = ProviderKind.CUSTOM
+        val namedKey = vault.list(scope.name).firstOrNull { it.name == endpoint.keyName }
+        if (namedKey != null) vault.activate(scope.name, namedKey.id)
+        val updated = ProviderProfile(
+            kind = scope,
+            baseUrl = endpoint.baseUrl,
+            model = endpoint.model,
+            hasSecret = vault.contains(scope.name),
+            dshApi = endpoint.dshApi,
+        )
+        preferences.saveProvider(updated, _state.value.agentKind)
+        _state.update {
+            it.copy(
+                provider = updated,
+                activeApiKeyName = vault.list(scope.name).firstOrNull(ApiKeyInfo::isActive)?.name,
+                apiPingStatus = ApiPingStatus.IDLE,
+                apiPingMessage = null,
+            )
+        }
+    }
+
     private fun refreshActiveApiKey(kind: ProviderKind) {
         if (_state.value.provider.kind != kind) return
         val keys = vault.list(kind.name)

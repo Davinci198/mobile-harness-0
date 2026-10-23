@@ -1206,6 +1206,13 @@
     <string name="drawer_models">Models</string>
     <string name="drawer_api_keys_desc">Add, activate or remove keys for this provider. Every request uses the active key; the rest stay ready for failover.</string>
     <string name="drawer_no_api_keys">No API keys saved for this provider yet.</string>
+    <string name="drawer_keys_endpoints">Keys &amp; endpoints</string>
+    <string name="drawer_key_count">Keys: %1$d</string>
+    <string name="drawer_active_provider">Active provider</string>
+    <string name="drawer_show_hide_key">Show or hide key</string>
+    <string name="drawer_endpoints_desc">Saved Custom API endpoints. Tap Use to switch the active provider to that endpoint.</string>
+    <string name="drawer_endpoint_use">Use</string>
+    <string name="drawer_endpoint_key">Key: %1$s</string>
     <string name="drawer_installed_count">%1$d of %2$d installed</string>
     <string name="drawer_antigravity">Google / Antigravity</string>
     <string name="drawer_antigravity_desc">Account, model, reasoning effort</string>
