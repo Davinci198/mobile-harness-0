@@ -1772,6 +1772,7 @@ internal fun DeveloperDiagnosticsSection(
     onRefresh: () -> Unit,
     onStopInactive: () -> Unit,
     onClearCache: () -> Unit,
+    compact: Boolean = false,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     SettingsAccordion(
@@ -1803,21 +1804,47 @@ internal fun DeveloperDiagnosticsSection(
                 Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onRefresh, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.diag_refresh), fontSize = 12.sp)
+            if (compact) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CompactActionButton(
+                        label = stringResource(R.string.diag_refresh),
+                        onClick = onRefresh,
+                        enabled = !diagnostics.loading,
+                        modifier = Modifier.weight(1f),
+                        dense = true,
+                    )
+                    CompactActionButton(
+                        label = stringResource(R.string.diag_stop),
+                        onClick = onStopInactive,
+                        enabled = !diagnostics.loading,
+                        modifier = Modifier.weight(1f),
+                        dense = true,
+                    )
+                    CompactActionButton(
+                        label = stringResource(R.string.diag_clear),
+                        onClick = onClearCache,
+                        enabled = !diagnostics.loading,
+                        modifier = Modifier.weight(1f),
+                        dense = true,
+                    )
                 }
-                OutlinedButton(onClick = onStopInactive, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.Stop, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.diag_stop), fontSize = 12.sp)
-                }
-                OutlinedButton(onClick = onClearCache, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.DeleteSweep, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.diag_clear), fontSize = 12.sp)
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onRefresh, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.diag_refresh), fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = onStopInactive, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Stop, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.diag_stop), fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = onClearCache, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.DeleteSweep, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.diag_clear), fontSize = 12.sp)
+                    }
                 }
             }
         }

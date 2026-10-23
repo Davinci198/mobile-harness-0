@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -50,6 +51,8 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Mic
@@ -60,7 +63,10 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -86,16 +92,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -440,7 +452,7 @@ private fun SettingsDrawerContent(
                 ) {
                     when (selectedSpec.id) {
                         SettingsCategory.APPEARANCE -> AppearancePanel(state, viewModel)
-                        SettingsCategory.AGENT -> AgentPanel(state, viewModel, onShowClassic)
+                        SettingsCategory.AGENT -> AgentPanel(state, viewModel)
                         SettingsCategory.CONVERSATION -> ConversationPanel()
                         SettingsCategory.ACCESS -> AccessPanel(state, viewModel)
                         SettingsCategory.TOOLS -> ToolsPanel(state, viewModel)
@@ -709,6 +721,139 @@ private fun PanelLabel(text: String) {
     )
 }
 
+/**
+ * Drawer card whose header is a tap target. The settings panels are long on a
+ * phone, so every block can fold down to a one-line summary without leaving
+ * the category.
+ */
+@Composable
+private fun CollapsiblePanelCard(
+    title: String,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    iconTint: Color = PocketAccent,
+    initiallyExpanded: Boolean = true,
+    trailing: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (icon != null) {
+                    DrawerIcon(icon, iconTint, 32.dp)
+                    Spacer(Modifier.width(10.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    if (!subtitle.isNullOrBlank()) {
+                        Text(
+                            subtitle,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                trailing?.invoke()
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = stringResource(
+                        if (expanded) R.string.settings_collapse else R.string.settings_expand,
+                    ),
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            AnimatedVisibility(expanded) {
+                Column(
+                    Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp),
+                    content = content,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Small bordered action used inside the drawer. Material buttons keep a 48 dp
+ * touch target and a 40-52 dp visual height, which made the runtime and
+ * diagnostics blocks feel oversized in the 342 dp panel.
+ */
+@Composable
+internal fun CompactActionButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    icon: ImageVector? = null,
+    loading: Boolean = false,
+    filled: Boolean = false,
+    danger: Boolean = false,
+    dense: Boolean = false,
+) {
+    val shape = RoundedCornerShape(10.dp)
+    val contentColor = when {
+        !enabled && filled -> MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f)
+        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+        filled -> MaterialTheme.colorScheme.onPrimary
+        danger -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Surface(
+        modifier = modifier
+            .heightIn(min = if (dense) 32.dp else 34.dp)
+            .clip(shape)
+            .clickable(enabled = enabled, onClick = onClick),
+        shape = shape,
+        color = when {
+            filled && enabled -> MaterialTheme.colorScheme.primary
+            filled -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+            else -> Color.Transparent
+        },
+        contentColor = contentColor,
+        border = if (filled) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            Modifier.padding(
+                horizontal = if (dense) 4.dp else 9.dp,
+                vertical = if (dense) 5.dp else 6.dp,
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            if (loading) {
+                CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 1.8.dp)
+                Spacer(Modifier.width(5.dp))
+            } else if (icon != null) {
+                Icon(icon, null, Modifier.size(14.dp))
+                Spacer(Modifier.width(5.dp))
+            }
+            Text(
+                label,
+                fontSize = if (dense) 10.sp else 11.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 @Composable
 private fun ConnectionValueRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
@@ -913,45 +1058,52 @@ private fun AppearancePanel(state: AppUiState, viewModel: MainViewModel) {
 private fun AgentPanel(
     state: AppUiState,
     viewModel: MainViewModel,
-    onShowClassic: () -> Unit,
 ) {
+    val clipboard = LocalClipboardManager.current
     var showModelsPicker by remember { mutableStateOf(false) }
     var showAntigravityModels by remember { mutableStateOf(false) }
+    var showAgentPicker by remember { mutableStateOf(false) }
+    var showApiKeys by remember { mutableStateOf(false) }
+    var antigravityCode by rememberSaveable { mutableStateOf("") }
     val model = if (state.agentKind == AgentKind.ANTIGRAVITY) {
         state.antigravityModel
     } else {
         state.provider.model
     }
     val version = state.installedAgentVersions[state.agentKind]
-
-    PanelCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            DrawerIcon(Icons.Default.SmartToy, PocketGreen, 36.dp)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.settings_active_agent),
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(state.agentKind.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-            }
-            if (version != null) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = PocketGreen.copy(alpha = 0.12f),
-                ) {
-                    Text(
-                        "v$version",
-                        Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        fontSize = 10.sp,
-                        color = PocketGreen,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
-            }
+    val auth = state.antigravityAuth
+    val signedIn = auth.status == AntigravityAuthStatus.SIGNED_IN
+    val antigravityStatus = when {
+        signedIn -> auth.accountEmail?.let { stringResource(R.string.settings_connected_as, it) }
+            ?: stringResource(R.string.settings_google_connected)
+        !auth.message.isNullOrBlank() -> auth.message.orEmpty()
+        auth.status == AntigravityAuthStatus.AWAITING_CODE -> stringResource(R.string.drawer_antigravity_awaiting)
+        else -> stringResource(R.string.agent_not_signed_in)
+    }
+    val antigravityStatusColor = when {
+        signedIn -> PocketGreen
+        auth.status == AntigravityAuthStatus.ERROR -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    }
+    val openModelPicker: () -> Unit = {
+        if (state.agentKind == AgentKind.ANTIGRAVITY) {
+            if (state.antigravityModels.isEmpty()) viewModel.refreshAntigravityModels()
+            showAntigravityModels = true
+        } else {
+            viewModel.refreshModelsForPicker()
+            showModelsPicker = true
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    }
+
+    CollapsiblePanelCard(
+        title = stringResource(R.string.settings_active_agent),
+        subtitle = buildString {
+            append(state.agentKind.title)
+            if (version != null) append(" · v$version")
+        },
+        icon = Icons.Default.SmartToy,
+        iconTint = PocketGreen,
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
@@ -977,20 +1129,18 @@ private fun AgentPanel(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            TextButton(
-                onClick = {
-                    if (state.agentKind == AgentKind.ANTIGRAVITY) {
-                        if (state.antigravityModels.isEmpty()) viewModel.refreshAntigravityModels()
-                        showAntigravityModels = true
-                    } else {
-                        viewModel.refreshModelsForPicker()
-                        showModelsPicker = true
-                    }
-                },
-                enabled = state.agentKind != AgentKind.ANTIGRAVITY ||
-                    state.antigravityAuth.status == AntigravityAuthStatus.SIGNED_IN,
-            ) { Text(stringResource(R.string.drawer_change_model)) }
+            CompactActionButton(
+                label = stringResource(R.string.drawer_change_model),
+                onClick = openModelPicker,
+                enabled = state.agentKind != AgentKind.ANTIGRAVITY || signedIn,
+            )
         }
+        CompactActionButton(
+            label = stringResource(R.string.drawer_change_agent),
+            onClick = { showAgentPicker = true },
+            modifier = Modifier.fillMaxWidth(),
+            icon = Icons.Default.SmartToy,
+        )
         Text(
             stringResource(R.string.drawer_agent_switch_note),
             fontSize = 10.5.sp,
@@ -999,50 +1149,38 @@ private fun AgentPanel(
         )
     }
 
-    PanelCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            DrawerIcon(Icons.Default.Key, Color(0xFF38BDF8), 34.dp)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.drawer_connection), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Text(
-                    state.provider.kind.title,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
+    CollapsiblePanelCard(
+        title = stringResource(R.string.drawer_connection),
+        subtitle = buildString {
+            append(state.provider.kind.title)
+            state.activeApiKeyName?.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+        },
+        icon = Icons.Default.Key,
+        iconTint = Color(0xFF38BDF8),
+    ) {
         ConnectionValueRow(stringResource(R.string.settings_base_url), state.provider.resolvedBaseUrl)
         ConnectionValueRow(stringResource(R.string.drawer_protocol), state.provider.dshApi)
         ConnectionValueRow(stringResource(R.string.drawer_active_key), state.activeApiKeyName ?: "—")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onShowClassic, modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.settings_api_keys), fontSize = 12.sp)
-            }
-            if (state.agentKind != AgentKind.ANTIGRAVITY) {
-                OutlinedButton(
-                    onClick = {
-                        viewModel.refreshModelsForPicker()
-                        showModelsPicker = true
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CompactActionButton(
+                label = stringResource(R.string.settings_api_keys),
+                onClick = { showApiKeys = true },
+                modifier = Modifier.weight(1f),
+                icon = Icons.Default.Key,
+            )
+            CompactActionButton(
+                label = stringResource(
+                    if (state.apiPingStatus == ApiPingStatus.PINGING) {
+                        R.string.settings_testing
+                    } else {
+                        R.string.settings_test
                     },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.drawer_models), fontSize = 12.sp)
-                }
-            }
-        }
-        Button(
-            onClick = viewModel::pingApi,
-            enabled = state.apiPingStatus != ApiPingStatus.PINGING,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (state.apiPingStatus == ApiPingStatus.PINGING) {
-                CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                Spacer(Modifier.width(8.dp))
-            }
-            Text(stringResource(R.string.agent_test_connection))
+                ),
+                onClick = viewModel::pingApi,
+                enabled = state.apiPingStatus != ApiPingStatus.PINGING,
+                modifier = Modifier.weight(1f),
+                loading = state.apiPingStatus == ApiPingStatus.PINGING,
+            )
         }
         when (state.apiPingStatus) {
             ApiPingStatus.PINGING -> Text(
@@ -1064,95 +1202,101 @@ private fun AgentPanel(
         }
     }
 
-    PanelCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            DrawerIcon(Icons.Default.Psychology, Color(0xFF34A853), 34.dp)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.drawer_antigravity), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Text(
-                    stringResource(R.string.drawer_antigravity_desc),
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        val auth = state.antigravityAuth
-        val signedIn = auth.status == AntigravityAuthStatus.SIGNED_IN
-        val statusText = when {
-            signedIn -> auth.accountEmail?.let { stringResource(R.string.settings_connected_as, it) }
-                ?: stringResource(R.string.settings_google_connected)
-            !auth.message.isNullOrBlank() -> auth.message.orEmpty()
-            auth.status == AntigravityAuthStatus.AWAITING_CODE -> stringResource(R.string.drawer_antigravity_awaiting)
-            else -> stringResource(R.string.agent_not_signed_in)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    CollapsiblePanelCard(
+        title = stringResource(R.string.drawer_antigravity),
+        subtitle = antigravityStatus,
+        icon = Icons.Default.Psychology,
+        iconTint = Color(0xFF34A853),
+        trailing = {
             Box(
                 Modifier
                     .size(8.dp)
-                    .background(
-                        when {
-                            signedIn -> PocketGreen
-                            auth.status == AntigravityAuthStatus.ERROR -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                        },
-                        CircleShape,
-                    ),
+                    .background(antigravityStatusColor, CircleShape),
             )
             Spacer(Modifier.width(8.dp))
-            Text(
-                statusText,
-                modifier = Modifier.weight(1f),
-                fontSize = 11.sp,
-                color = when {
-                    signedIn -> PocketGreen
-                    auth.status == AntigravityAuthStatus.ERROR -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
-        if (auth.status == AntigravityAuthStatus.STARTING || auth.status == AntigravityAuthStatus.COMPLETING) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-        }
-
-        if (signedIn) {
-            ConnectionValueRow(stringResource(R.string.settings_model), state.antigravityModel.ifBlank { "—" })
-            OutlinedButton(
-                onClick = {
-                    if (state.antigravityModels.isEmpty()) viewModel.refreshAntigravityModels()
-                    showAntigravityModels = true
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.drawer_change_model), fontSize = 12.sp)
+        },
+    ) {
+        when (auth.status) {
+            AntigravityAuthStatus.STARTING, AntigravityAuthStatus.COMPLETING -> {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
             }
-            Text(
-                stringResource(R.string.settings_reasoning_effort),
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("low", "medium", "high").forEach { effort ->
-                    PermissionLevelChoice(
-                        label = stringResource(
-                            when (effort) {
-                                "low" -> R.string.settings_effort_low
-                                "medium" -> R.string.settings_effort_medium
-                                else -> R.string.settings_effort_high
-                            },
-                        ),
-                        selected = state.antigravityEffort == effort,
-                        onClick = { viewModel.setAntigravityEffort(effort) },
-                        modifier = Modifier.weight(1f),
+            AntigravityAuthStatus.AWAITING_CODE -> {
+                auth.authorizationUrl?.let { url ->
+                    CompactActionButton(
+                        label = stringResource(R.string.settings_copy_signin_url),
+                        onClick = { clipboard.setText(AnnotatedString(url)) },
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                OutlinedTextField(
+                    value = antigravityCode,
+                    onValueChange = { antigravityCode = it },
+                    label = { Text(stringResource(R.string.settings_auth_code)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                )
+                CompactActionButton(
+                    label = stringResource(R.string.settings_complete_signin),
+                    onClick = {
+                        viewModel.submitAntigravityCode(antigravityCode.trim())
+                        antigravityCode = ""
+                    },
+                    enabled = antigravityCode.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                    filled = true,
+                )
             }
-            DrawerNote(stringResource(R.string.settings_antigravity_autotool_desc))
-        }
-
-        OutlinedButton(onClick = onShowClassic, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.drawer_manage_account), fontSize = 12.sp)
+            AntigravityAuthStatus.SIGNED_OUT, AntigravityAuthStatus.ERROR -> {
+                CompactActionButton(
+                    label = stringResource(
+                        if (auth.status == AntigravityAuthStatus.ERROR) {
+                            R.string.settings_reconnect_google
+                        } else {
+                            R.string.settings_signin_google
+                        },
+                    ),
+                    onClick = viewModel::startAntigravityLogin,
+                    modifier = Modifier.fillMaxWidth(),
+                    filled = true,
+                )
+            }
+            AntigravityAuthStatus.SIGNED_IN -> {
+                ConnectionValueRow(stringResource(R.string.settings_model), state.antigravityModel.ifBlank { "—" })
+                CompactActionButton(
+                    label = stringResource(R.string.drawer_change_model),
+                    onClick = openModelPicker,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    stringResource(R.string.settings_reasoning_effort),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("low", "medium", "high").forEach { effort ->
+                        PermissionLevelChoice(
+                            label = stringResource(
+                                when (effort) {
+                                    "low" -> R.string.settings_effort_low
+                                    "medium" -> R.string.settings_effort_medium
+                                    else -> R.string.settings_effort_high
+                                },
+                            ),
+                            selected = state.antigravityEffort == effort,
+                            onClick = { viewModel.setAntigravityEffort(effort) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                DrawerNote(stringResource(R.string.settings_antigravity_autotool_desc))
+                CompactActionButton(
+                    label = stringResource(R.string.settings_logout_antigravity),
+                    onClick = viewModel::logoutAntigravity,
+                    modifier = Modifier.fillMaxWidth(),
+                    danger = true,
+                )
+            }
         }
     }
 
@@ -1161,6 +1305,26 @@ private fun AgentPanel(
             state = state,
             onCheck = viewModel::checkAgentUpdates,
             onUpdate = viewModel::updateAgent,
+        )
+    }
+
+    if (showAgentPicker) {
+        AgentPickerDialog(
+            state = state,
+            onSelect = { kind ->
+                if (!state.isRunning) showAgentPicker = false
+                viewModel.selectAgent(kind)
+            },
+            onInstall = viewModel::installAgent,
+            onDismiss = { showAgentPicker = false },
+        )
+    }
+
+    if (showApiKeys) {
+        ApiKeysDialog(
+            state = state,
+            viewModel = viewModel,
+            onDismiss = { showApiKeys = false },
         )
     }
 
@@ -1193,6 +1357,260 @@ private fun AgentPanel(
             onDismiss = { showModelsPicker = false },
         )
     }
+}
+
+@Composable
+private fun AgentPickerDialog(
+    state: AppUiState,
+    onSelect: (AgentKind) -> Unit,
+    onInstall: (AgentKind) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.drawer_select_agent)) },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 380.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                AgentKind.entries.forEach { agent ->
+                    val installed = agent == state.agentKind ||
+                        state.installedAgentVersions.containsKey(agent)
+                    val installing = state.agentInstalling == agent
+                    val version = state.installedAgentVersions[agent]
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = installed && state.agentInstalling == null) {
+                                onSelect(agent)
+                            }
+                            .padding(vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = agent == state.agentKind,
+                            onClick = null,
+                            enabled = installed,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                agent.title,
+                                fontSize = 13.sp,
+                                fontWeight = if (agent == state.agentKind) {
+                                    FontWeight.SemiBold
+                                } else {
+                                    FontWeight.Medium
+                                },
+                            )
+                            Text(
+                                when {
+                                    installing -> {
+                                        val progress = (state.agentProgress * 100).toInt()
+                                        (state.agentMessage ?: stringResource(R.string.agent_installing)) + " · $progress%"
+                                    }
+                                    agent == state.agentKind -> stringResource(R.string.settings_active)
+                                    version != null -> "v$version"
+                                    else -> stringResource(R.string.drawer_agent_not_installed)
+                                },
+                                fontSize = 11.sp,
+                                color = if (installed) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                                },
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (installing) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else if (!installed) {
+                            CompactActionButton(
+                                label = stringResource(R.string.drawer_install_agent),
+                                onClick = { onInstall(agent) },
+                                enabled = state.agentInstalling == null,
+                                dense = true,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
+        },
+    )
+}
+
+@Composable
+private fun ApiKeysDialog(
+    state: AppUiState,
+    viewModel: MainViewModel,
+    onDismiss: () -> Unit,
+) {
+    val kind = state.provider.kind
+    var keys by remember(kind, state.activeApiKeyName) {
+        mutableStateOf(viewModel.getSavedApiKeys(kind))
+    }
+    var keyName by rememberSaveable(kind.name) { mutableStateOf("") }
+    var keySecret by rememberSaveable(kind.name) { mutableStateOf("") }
+    var keyVisible by rememberSaveable(kind.name) { mutableStateOf(keys.isEmpty()) }
+    val defaultKeyName = stringResource(R.string.agent_key_for, kind.title)
+    val activeKey = keys.firstOrNull { it.isActive }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(stringResource(R.string.settings_api_keys))
+                Text(
+                    "${kind.title} · ${state.provider.resolvedBaseUrl}",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.drawer_api_keys_desc),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ConnectionValueRow(
+                    stringResource(R.string.drawer_active_key),
+                    activeKey?.name ?: "—",
+                )
+                if (keys.isEmpty()) {
+                    Text(
+                        stringResource(R.string.drawer_no_api_keys),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        stringResource(R.string.settings_saved_api_keys),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    keys.forEachIndexed { index, key ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { keys = viewModel.activateApiKey(kind, key.id) }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = key.isActive, onClick = null)
+                            Spacer(Modifier.width(4.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(key.name, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    stringResource(
+                                        if (key.isActive) {
+                                            R.string.settings_key_active_now
+                                        } else {
+                                            R.string.settings_key_tap_activate
+                                        },
+                                    ),
+                                    fontSize = 10.sp,
+                                    color = if (key.isActive) {
+                                        PocketAccent
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            IconButton(
+                                onClick = { keys = viewModel.removeApiKey(kind, key.id) },
+                                modifier = Modifier.size(34.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.DeleteSweep,
+                                    stringResource(R.string.settings_remove_key, key.name),
+                                    Modifier.size(17.dp),
+                                )
+                            }
+                        }
+                        if (index != keys.lastIndex) {
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+                Text(
+                    stringResource(R.string.settings_add_key),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                OutlinedTextField(
+                    value = keyName,
+                    onValueChange = { keyName = it },
+                    label = { Text(stringResource(R.string.settings_key_name)) },
+                    placeholder = { Text(stringResource(R.string.settings_key_name_placeholder)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = keySecret,
+                    onValueChange = { keySecret = it },
+                    label = { Text(stringResource(R.string.settings_api_key)) },
+                    singleLine = true,
+                    visualTransformation = if (keyVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { keyVisible = !keyVisible }) {
+                            Icon(
+                                if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                stringResource(R.string.settings_show_hide_key),
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                CompactActionButton(
+                    label = stringResource(R.string.settings_save_api_key),
+                    onClick = {
+                        keys = viewModel.addApiKey(
+                            kind,
+                            keyName.trim().ifBlank { defaultKeyName },
+                            keySecret.trim(),
+                        )
+                        keyName = ""
+                        keySecret = ""
+                        keyVisible = false
+                    },
+                    enabled = keySecret.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp),
+                    filled = true,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
+        },
+    )
 }
 
 @Composable
@@ -1415,6 +1833,16 @@ private fun ToolsPanel(state: AppUiState, viewModel: MainViewModel) {
     var showReliabilityHelp by remember { mutableStateOf(false) }
     var stackPendingRemoval by remember { mutableStateOf<DevStack?>(null) }
     val context = LocalContext.current
+    val installedStacks = DevStack.entries.count {
+        it in state.installedDevStacks || it == DevStack.WEB
+    }
+    val devToolsSubtitle = state.devStackInstalling?.let { stack ->
+        "${stack.label} · ${(state.devStackProgress * 100).toInt()}%"
+    } ?: stringResource(
+        R.string.drawer_installed_count,
+        installedStacks,
+        DevStack.entries.size,
+    )
 
     stackPendingRemoval?.let { stack ->
         AlertDialog(
@@ -1437,8 +1865,12 @@ private fun ToolsPanel(state: AppUiState, viewModel: MainViewModel) {
         )
     }
 
-    PanelCard {
-        PanelLabel(stringResource(R.string.settings_devtools_title))
+    CollapsiblePanelCard(
+        title = stringResource(R.string.settings_devtools_title),
+        subtitle = devToolsSubtitle,
+        icon = Icons.Default.Code,
+        iconTint = Color(0xFFA855F7),
+    ) {
         Text(
             stringResource(R.string.settings_devstack_desc),
             fontSize = 11.sp,
@@ -1449,7 +1881,7 @@ private fun ToolsPanel(state: AppUiState, viewModel: MainViewModel) {
             val installed = stack in state.installedDevStacks
             val installing = state.devStackInstalling == stack
             val removing = installing && state.devStackRemoving
-            Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(stack.label, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     Text(
@@ -1478,18 +1910,19 @@ private fun ToolsPanel(state: AppUiState, viewModel: MainViewModel) {
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    installed -> TextButton(
+                    installed -> CompactActionButton(
+                        label = stringResource(R.string.settings_remove),
                         onClick = { stackPendingRemoval = stack },
                         enabled = state.devStackInstalling == null,
-                        contentPadding = PaddingValues(horizontal = 6.dp),
-                    ) {
-                        Text(stringResource(R.string.settings_remove), color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
-                    }
-                    else -> OutlinedButton(
+                        danger = true,
+                        dense = true,
+                    )
+                    else -> CompactActionButton(
+                        label = stringResource(R.string.settings_add),
                         onClick = { viewModel.installDevStack(stack) },
                         enabled = state.devStackInstalling == null,
-                        contentPadding = PaddingValues(horizontal = 10.dp),
-                    ) { Text(stringResource(R.string.settings_add), fontSize = 11.sp) }
+                        dense = true,
+                    )
                 }
             }
             if (installing) {
@@ -1542,8 +1975,13 @@ private fun ToolsPanel(state: AppUiState, viewModel: MainViewModel) {
         }
     }
 
-    PanelCard {
-        PanelLabel(stringResource(R.string.settings_linux_runtime))
+    CollapsiblePanelCard(
+        title = stringResource(R.string.settings_linux_runtime),
+        subtitle = "Ubuntu 26.04 PRoot · ARM64",
+        icon = Icons.Default.Terminal,
+        iconTint = Color(0xFF60A5FA),
+        initiallyExpanded = false,
+    ) {
         RuntimeInfoRow(stringResource(R.string.settings_architecture), "ARM64 (aarch64)")
         RuntimeInfoRow(stringResource(R.string.settings_environment), "Ubuntu 26.04 PRoot")
         RuntimeInfoRow(
@@ -1566,24 +2004,24 @@ private fun ToolsPanel(state: AppUiState, viewModel: MainViewModel) {
                 }
             }
         }
-        OutlinedButton(
+        CompactActionButton(
+            label = if (terminalCleared) {
+                stringResource(R.string.settings_terminal_cleared)
+            } else {
+                stringResource(R.string.settings_clear_terminal)
+            },
             onClick = {
                 viewModel.clearTerminal()
                 terminalCleared = true
             },
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Icon(Icons.Default.DeleteSweep, null, Modifier.size(16.dp))
-            Spacer(Modifier.width(7.dp))
-            Text(
-                if (terminalCleared) stringResource(R.string.settings_terminal_cleared) else stringResource(R.string.settings_clear_terminal),
-                fontSize = 12.sp,
-            )
-        }
-        OutlinedButton(
+            icon = Icons.Default.DeleteSweep,
+        )
+        CompactActionButton(
+            label = stringResource(R.string.settings_advanced_reliability),
             onClick = { showReliabilityHelp = !showReliabilityHelp },
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.settings_advanced_reliability), fontSize = 12.sp) }
+        )
         AnimatedVisibility(showReliabilityHelp) {
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 Text(
@@ -1592,7 +2030,8 @@ private fun ToolsPanel(state: AppUiState, viewModel: MainViewModel) {
                     lineHeight = 15.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Button(
+                CompactActionButton(
+                    label = stringResource(R.string.settings_open_dev_options),
                     onClick = {
                         runCatching {
                             context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
@@ -1601,7 +2040,8 @@ private fun ToolsPanel(state: AppUiState, viewModel: MainViewModel) {
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(stringResource(R.string.settings_open_dev_options)) }
+                    filled = true,
+                )
             }
         }
     }
@@ -1611,6 +2051,7 @@ private fun ToolsPanel(state: AppUiState, viewModel: MainViewModel) {
         onRefresh = viewModel::refreshDeveloperDiagnostics,
         onStopInactive = viewModel::stopInactiveDeveloperProcesses,
         onClearCache = viewModel::clearDeveloperRuntimeCache,
+        compact = true,
     )
 }
 
