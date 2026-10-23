@@ -3087,7 +3087,7 @@ private fun PremiumSummaryRow(
  * Compact Runtime Updates Card.
  */
 @Composable
-private fun AgentUpdateBlock(
+internal fun AgentUpdateBlock(
     state: AppUiState,
     onCheck: () -> Unit,
     onUpdate: (AgentKind) -> Unit,

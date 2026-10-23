@@ -110,6 +110,7 @@ import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatSectionsMode
 import com.jarves.mh.model.DevStack
+import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.tools.ToolCatalogLocale
 import com.jarves.mh.tools.ToolPermissionLevel
@@ -288,7 +289,7 @@ private fun SettingsDrawerContent(
             SettingsCategory.AGENT,
             stringResource(categoryTitleRes(SettingsCategory.AGENT)),
             stringResource(categorySubtitleRes(SettingsCategory.AGENT)),
-            "agent model provider furnizor chei api keys connection conexiune",
+            "agent model provider furnizor chei api keys connection conexiune antigravity google update actualizari",
             Icons.Default.SmartToy, Color(0xFF22C55E),
         ),
         SettingsCategorySpec(
@@ -709,6 +710,26 @@ private fun PanelLabel(text: String) {
 }
 
 @Composable
+private fun ConnectionValueRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Text(
+            label,
+            Modifier.width(78.dp),
+            fontSize = 10.5.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            value.ifBlank { "—" },
+            Modifier.weight(1f),
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun DrawerChoiceRow(label: String, selected: Boolean, onClick: () -> Unit) {
     Row(
         Modifier
@@ -895,6 +916,7 @@ private fun AgentPanel(
     onShowClassic: () -> Unit,
 ) {
     var showModelsPicker by remember { mutableStateOf(false) }
+    var showAntigravityModels by remember { mutableStateOf(false) }
     val model = if (state.agentKind == AgentKind.ANTIGRAVITY) {
         state.antigravityModel
     } else {
@@ -957,9 +979,16 @@ private fun AgentPanel(
             }
             TextButton(
                 onClick = {
-                    viewModel.refreshModelsForPicker()
-                    showModelsPicker = true
+                    if (state.agentKind == AgentKind.ANTIGRAVITY) {
+                        if (state.antigravityModels.isEmpty()) viewModel.refreshAntigravityModels()
+                        showAntigravityModels = true
+                    } else {
+                        viewModel.refreshModelsForPicker()
+                        showModelsPicker = true
+                    }
                 },
+                enabled = state.agentKind != AgentKind.ANTIGRAVITY ||
+                    state.antigravityAuth.status == AntigravityAuthStatus.SIGNED_IN,
             ) { Text(stringResource(R.string.drawer_change_model)) }
         }
         Text(
@@ -972,12 +1001,12 @@ private fun AgentPanel(
 
     PanelCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            DrawerIcon(Icons.Default.Key, Color(0xFFF28C52), 34.dp)
+            DrawerIcon(Icons.Default.Key, Color(0xFF38BDF8), 34.dp)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.settings_api_keys), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(stringResource(R.string.drawer_connection), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Text(
-                    state.activeApiKeyName ?: "—",
+                    state.provider.kind.title,
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -985,18 +1014,23 @@ private fun AgentPanel(
                 )
             }
         }
-        Text(
-            stringResource(R.string.drawer_api_keys_desc),
-            fontSize = 11.sp,
-            lineHeight = 15.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedButton(onClick = onShowClassic, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.drawer_manage_classic), fontSize = 12.sp)
+        ConnectionValueRow(stringResource(R.string.settings_base_url), state.provider.resolvedBaseUrl)
+        ConnectionValueRow(stringResource(R.string.drawer_protocol), state.provider.dshApi)
+        ConnectionValueRow(stringResource(R.string.drawer_active_key), state.activeApiKeyName ?: "—")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onShowClassic, modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.settings_api_keys), fontSize = 12.sp)
+            }
+            OutlinedButton(
+                onClick = {
+                    viewModel.refreshModelsForPicker()
+                    showModelsPicker = true
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.drawer_models), fontSize = 12.sp)
+            }
         }
-    }
-
-    PanelCard {
         Button(
             onClick = viewModel::pingApi,
             enabled = state.apiPingStatus != ApiPingStatus.PINGING,
@@ -1028,6 +1062,117 @@ private fun AgentPanel(
         }
     }
 
+    PanelCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DrawerIcon(Icons.Default.Psychology, Color(0xFF34A853), 34.dp)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.drawer_antigravity), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(
+                    stringResource(R.string.drawer_antigravity_desc),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        val auth = state.antigravityAuth
+        val signedIn = auth.status == AntigravityAuthStatus.SIGNED_IN
+        val statusText = when {
+            signedIn -> auth.accountEmail?.let { stringResource(R.string.settings_connected_as, it) }
+                ?: stringResource(R.string.settings_google_connected)
+            !auth.message.isNullOrBlank() -> auth.message.orEmpty()
+            auth.status == AntigravityAuthStatus.AWAITING_CODE -> stringResource(R.string.drawer_antigravity_awaiting)
+            else -> stringResource(R.string.agent_not_signed_in)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .background(
+                        when {
+                            signedIn -> PocketGreen
+                            auth.status == AntigravityAuthStatus.ERROR -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        },
+                        CircleShape,
+                    ),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                statusText,
+                fontSize = 11.sp,
+                color = when {
+                    signedIn -> PocketGreen
+                    auth.status == AntigravityAuthStatus.ERROR -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        if (auth.status == AntigravityAuthStatus.STARTING || auth.status == AntigravityAuthStatus.COMPLETING) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+
+        if (signedIn) {
+            ConnectionValueRow(stringResource(R.string.settings_model), state.antigravityModel.ifBlank { "—" })
+            OutlinedButton(
+                onClick = {
+                    if (state.antigravityModels.isEmpty()) viewModel.refreshAntigravityModels()
+                    showAntigravityModels = true
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.drawer_change_model), fontSize = 12.sp)
+            }
+            Text(
+                stringResource(R.string.settings_reasoning_effort),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("low", "medium", "high").forEach { effort ->
+                    PermissionLevelChoice(
+                        label = stringResource(
+                            when (effort) {
+                                "low" -> R.string.settings_effort_low
+                                "medium" -> R.string.settings_effort_medium
+                                else -> R.string.settings_effort_high
+                            },
+                        ),
+                        selected = state.antigravityEffort == effort,
+                        onClick = { viewModel.setAntigravityEffort(effort) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            DrawerNote(stringResource(R.string.settings_antigravity_autotool_desc))
+        }
+
+        OutlinedButton(onClick = onShowClassic, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.drawer_manage_account), fontSize = 12.sp)
+        }
+    }
+
+    PanelCard {
+        AgentUpdateBlock(
+            state = state,
+            onCheck = viewModel::checkAgentUpdates,
+            onUpdate = viewModel::updateAgent,
+        )
+    }
+
+    if (showAntigravityModels) {
+        AntigravityModelDialog(
+            state = state,
+            onPick = { modelId ->
+                showAntigravityModels = false
+                viewModel.setAntigravityModel(modelId)
+            },
+            onRefresh = viewModel::refreshAntigravityModels,
+            onDismiss = { showAntigravityModels = false },
+        )
+    }
+
     if (showModelsPicker) {
         ModelsPickerDialog(
             state = state,
@@ -1045,6 +1190,69 @@ private fun AgentPanel(
             onDismiss = { showModelsPicker = false },
         )
     }
+}
+
+@Composable
+private fun AntigravityModelDialog(
+    state: AppUiState,
+    onPick: (String) -> Unit,
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_antigravity_model_id)) },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                if (state.antigravityModels.isEmpty() && !state.antigravityModelsLoading) {
+                    Text(
+                        stringResource(R.string.drawer_antigravity_no_models),
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                state.antigravityModels.forEach { modelId ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(modelId) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = modelId == state.antigravityModel, onClick = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            modelId,
+                            modifier = Modifier.weight(1f),
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onRefresh, enabled = !state.antigravityModelsLoading) {
+                if (state.antigravityModelsLoading) {
+                    CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(7.dp))
+                } else {
+                    Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(7.dp))
+                }
+                Text(stringResource(R.string.settings_refresh_models))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_cancel)) }
+        },
+    )
 }
 
 @Composable
