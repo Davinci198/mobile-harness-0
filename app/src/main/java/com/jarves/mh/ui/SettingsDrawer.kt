@@ -1021,14 +1021,16 @@ private fun AgentPanel(
             OutlinedButton(onClick = onShowClassic, modifier = Modifier.weight(1f)) {
                 Text(stringResource(R.string.settings_api_keys), fontSize = 12.sp)
             }
-            OutlinedButton(
-                onClick = {
-                    viewModel.refreshModelsForPicker()
-                    showModelsPicker = true
-                },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.drawer_models), fontSize = 12.sp)
+            if (state.agentKind != AgentKind.ANTIGRAVITY) {
+                OutlinedButton(
+                    onClick = {
+                        viewModel.refreshModelsForPicker()
+                        showModelsPicker = true
+                    },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.drawer_models), fontSize = 12.sp)
+                }
             }
         }
         Button(
