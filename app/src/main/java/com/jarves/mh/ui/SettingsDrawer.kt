@@ -122,6 +122,7 @@ import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatSectionsMode
 import com.jarves.mh.model.DevStack
+import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.tools.ToolCatalogLocale
@@ -1160,14 +1161,18 @@ private fun AgentPanel(
     ) {
         ConnectionValueRow(stringResource(R.string.settings_base_url), state.provider.resolvedBaseUrl)
         ConnectionValueRow(stringResource(R.string.drawer_protocol), state.provider.dshApi)
-        ConnectionValueRow(stringResource(R.string.drawer_active_key), state.activeApiKeyName ?: "—")
+        if (state.provider.kind != ProviderKind.FREE) {
+            ConnectionValueRow(stringResource(R.string.drawer_active_key), state.activeApiKeyName ?: "—")
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CompactActionButton(
-                label = stringResource(R.string.settings_api_keys),
-                onClick = { showApiKeys = true },
-                modifier = Modifier.weight(1f),
-                icon = Icons.Default.Key,
-            )
+            if (state.provider.kind != ProviderKind.FREE) {
+                CompactActionButton(
+                    label = stringResource(R.string.settings_api_keys),
+                    onClick = { showApiKeys = true },
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.Key,
+                )
+            }
             CompactActionButton(
                 label = stringResource(
                     if (state.apiPingStatus == ApiPingStatus.PINGING) {
