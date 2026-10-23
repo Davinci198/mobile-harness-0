@@ -1172,7 +1172,7 @@ private fun AgentPanel(
         }
         if (state.customEndpoints.isNotEmpty()) {
             ConnectionValueRow(
-                stringResource(R.string.agent_endpoints),
+                stringResource(R.string.drawer_endpoints),
                 state.customEndpoints.size.toString(),
             )
         }

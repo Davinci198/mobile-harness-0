@@ -1207,6 +1207,7 @@
     <string name="drawer_api_keys_desc">Adaugă, activează sau elimină chei pentru acest furnizor. Fiecare cerere folosește cheia activă; celelalte rămân pregătite pentru failover.</string>
     <string name="drawer_no_api_keys">Nu există încă chei API salvate pentru acest furnizor.</string>
     <string name="drawer_keys_endpoints">Chei și endpoint-uri</string>
+    <string name="drawer_endpoints">Endpoint-uri</string>
     <string name="drawer_key_count">Chei: %1$d</string>
     <string name="drawer_active_provider">Furnizor activ</string>
     <string name="drawer_show_hide_key">Arată sau ascunde cheia</string>
