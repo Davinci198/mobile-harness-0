@@ -1613,23 +1613,49 @@ internal fun PermissionOverrideRow(
     selectedOverride: com.jarves.mh.tools.ToolPermissionLevel?,
     effective: com.jarves.mh.tools.ToolPermissionLevel,
     onSetOverride: (com.jarves.mh.tools.ToolPermissionLevel?) -> Unit,
+    stacked: Boolean = false,
 ) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-            if (!subtitle.isNullOrBlank()) {
-                Text(
-                    subtitle,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+    if (stacked) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            PermissionToolLabel(title, subtitle)
+            Spacer(Modifier.height(4.dp))
+            PermissionChoices(selectedOverride, effective, onSetOverride, Modifier.fillMaxWidth())
         }
+    } else {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PermissionToolLabel(title, subtitle, Modifier.weight(1f))
+            PermissionChoices(selectedOverride, effective, onSetOverride, Modifier.weight(3f))
+        }
+    }
+}
+
+@Composable
+private fun PermissionToolLabel(title: String, subtitle: String?, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(title, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+        if (!subtitle.isNullOrBlank()) {
+            Text(
+                subtitle,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PermissionChoices(
+    selectedOverride: com.jarves.mh.tools.ToolPermissionLevel?,
+    effective: com.jarves.mh.tools.ToolPermissionLevel,
+    onSetOverride: (com.jarves.mh.tools.ToolPermissionLevel?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         PermissionLevelChoice(
             label = stringResource(R.string.settings_allow),
             selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ALLOW &&
@@ -1645,7 +1671,6 @@ internal fun PermissionOverrideRow(
             },
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(4.dp))
         PermissionLevelChoice(
             label = stringResource(R.string.settings_ask),
             selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ASK &&
@@ -1661,7 +1686,6 @@ internal fun PermissionOverrideRow(
             },
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(4.dp))
         PermissionLevelChoice(
             label = stringResource(R.string.settings_forbid),
             selected = effective == com.jarves.mh.tools.ToolPermissionLevel.FORBID &&

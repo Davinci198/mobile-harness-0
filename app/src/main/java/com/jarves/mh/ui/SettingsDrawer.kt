@@ -354,7 +354,11 @@ private fun SettingsDrawerContent(
                     Text(
                         selectedSpec?.title ?: stringResource(R.string.settings_title),
                         fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge,
+                        style = if (selectedSpec == null) {
+                            MaterialTheme.typography.titleLarge
+                        } else {
+                            MaterialTheme.typography.titleMedium
+                        },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -1159,6 +1163,7 @@ private fun AccessPanel(state: AppUiState, viewModel: MainViewModel) {
                 selectedOverride = state.toolPermissionOverrides[tool],
                 effective = state.toolPermissionOverrides[tool] ?: state.toolPermissionGlobal,
                 onSetOverride = { level -> viewModel.setToolPermissionOverride(tool, level) },
+                stacked = true,
             )
         }
         Spacer(Modifier.height(2.dp))
@@ -1186,6 +1191,7 @@ private fun AccessPanel(state: AppUiState, viewModel: MainViewModel) {
                     selectedOverride = state.toolPermissionOverrides[pluginTool.name],
                     effective = state.toolPermissionOverrides[pluginTool.name] ?: state.toolPermissionGlobal,
                     onSetOverride = { level -> viewModel.setToolPermissionOverride(pluginTool.name, level) },
+                    stacked = true,
                 )
             }
         }
