@@ -325,6 +325,16 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val projectsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    val settingsOverlay: @Composable () -> Unit = {
+        SettingsDrawerOverlay(
+            open = settingsOpen,
+            onOpen = { settingsOpen = true },
+            onClose = { settingsOpen = false },
+            state = state,
+            viewModel = viewModel,
+        )
+    }
     LaunchedEffect(state.toastMessage) {
         state.toastMessage?.let { message ->
             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
@@ -479,8 +489,16 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onToggleScreenShare = viewModel::toggleScreenShare,
             onSteerFollowUp = viewModel::steerQueuedFollowUp,
             onRemoveFollowUp = viewModel::removeQueuedFollowUp,
+            onOpenSettings = { settingsOpen = true },
+            settingsOverlay = settingsOverlay,
         )
-        else -> RootScreenHost(state, viewModel, projectsListState)
+        else -> RootScreenHost(
+            state = state,
+            viewModel = viewModel,
+            projectsListState = projectsListState,
+            onOpenSettings = { settingsOpen = true },
+            settingsOverlay = settingsOverlay,
+        )
     }
 }
 
@@ -2151,6 +2169,8 @@ private fun RootScreenHost(
     state: AppUiState,
     viewModel: MainViewModel,
     projectsListState: LazyListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() },
+    onOpenSettings: () -> Unit = {},
+    settingsOverlay: @Composable () -> Unit = {},
 ) {
     var screen by rememberSaveable { mutableStateOf(RootScreen.PROJECTS) }
     var showQuickTerminal by rememberSaveable { mutableStateOf(false) }
@@ -2178,6 +2198,7 @@ private fun RootScreenHost(
         }
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
@@ -2186,8 +2207,10 @@ private fun RootScreenHost(
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     RootScreen.entries.forEach { tab ->
                         NavigationBarItem(
-                            selected = screen == tab,
-                            onClick = { screen = tab },
+                            selected = if (tab == RootScreen.SETTINGS) false else screen == tab,
+                            onClick = {
+                                if (tab == RootScreen.SETTINGS) onOpenSettings() else screen = tab
+                            },
                             icon = { Icon(tab.icon, contentDescription = stringResource(tab.labelRes)) },
                             label = { Text(stringResource(tab.labelRes), fontSize = 11.sp) },
                             colors = NavigationBarItemDefaults.colors(
@@ -2232,7 +2255,7 @@ private fun RootScreenHost(
                     onCloneGitHub = viewModel::cloneGitHubRepository,
                     onRenameProject = viewModel::renameProject,
                     onDeleteProject = viewModel::deleteProject,
-                    onSettings = { screen = RootScreen.SETTINGS },
+                    onSettings = onOpenSettings,
                     onPing = viewModel::pingApi,
                     onToggleTheme = viewModel::toggleTheme,
                     onInstallUpdate = viewModel::installAppUpdate,
@@ -2342,47 +2365,7 @@ private fun RootScreenHost(
                         }
                     },
                 )
-                RootScreen.SETTINGS -> SettingsScreen(
-                    state = state,
-                    onSaveProvider = { profile, key ->
-                        viewModel.updateProvider(profile, key)
-                    },
-                    onDiscoverModels = viewModel::discoverModels,
-                    onValidateProvider = viewModel::validateProvider,
-                    onSetThemeMode = viewModel::setThemeMode,
-                    onSetAccessLevel = viewModel::setAccessLevel,
-                    onRequestShizukuAccess = viewModel::requestShizukuAccess,
-                    onInstallShizuku = viewModel::installBundledShizuku,
-                    onSetColorTheme = viewModel::setColorTheme,
-                    onSetCustomColors = viewModel::setCustomColors,
-                    onResetColorTheme = viewModel::resetColorTheme,
-                    onPing = viewModel::pingApi,
-                    onClearTerminal = viewModel::clearTerminal,
-                    getSavedApiKey = viewModel::getSavedApiKey,
-                    getSavedApiKeys = viewModel::getSavedApiKeys,
-                    onAddApiKey = viewModel::addApiKey,
-                    onActivateApiKey = viewModel::activateApiKey,
-                    onRemoveApiKey = viewModel::removeApiKey,
-                    onInstallDevStack = viewModel::installDevStack,
-                    onRemoveDevStack = viewModel::removeDevStack,
-                    onInstallAgent = viewModel::installAgent,
-                    onCheckAgentUpdates = viewModel::checkAgentUpdates,
-                    onUpdateAgent = viewModel::updateAgent,
-                    onStartAntigravityLogin = viewModel::startAntigravityLogin,
-                    onSubmitAntigravityCode = viewModel::submitAntigravityCode,
-                    onLogoutAntigravity = viewModel::logoutAntigravity,
-                    onRefreshAntigravityModels = viewModel::refreshAntigravityModels,
-                    onSetAntigravityModel = viewModel::setAntigravityModel,
-                    onSetAntigravityEffort = viewModel::setAntigravityEffort,
-                    initialDebugUpdateManifestUrl = viewModel.debugUpdateManifestUrl(),
-                    onSetDebugUpdateManifestUrl = viewModel::setDebugUpdateManifestUrl,
-                    onClearDebugUpdateManifestUrl = viewModel::clearDebugUpdateManifestUrl,
-                    onSetToolPermissionGlobal = viewModel::setToolPermissionGlobal,
-                    onSetToolPermissionOverride = viewModel::setToolPermissionOverride,
-                    onRefreshDiagnostics = viewModel::refreshDeveloperDiagnostics,
-                    onStopInactiveProcesses = viewModel::stopInactiveDeveloperProcesses,
-                    onClearRuntimeCache = viewModel::clearDeveloperRuntimeCache,
-                )
+                RootScreen.SETTINGS -> SettingsScreenFromViewModel(state, viewModel)
             }
         }
     }
@@ -2402,6 +2385,8 @@ private fun RootScreenHost(
                 )
             }
         }
+    }
+        settingsOverlay()
     }
 }
 
@@ -3390,6 +3375,11 @@ private fun ProjectsScreen(
             TopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
                 title = { Row(verticalAlignment = Alignment.CenterVertically) { BrandMark(compact = true); Spacer(Modifier.width(9.dp)); Text("Mobile Harness", fontWeight = FontWeight.Bold) } },
+                actions = {
+                    IconButton(onClick = onSettings) {
+                        Icon(Icons.Default.Settings, stringResource(R.string.nav_settings))
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -4168,6 +4158,8 @@ private fun WorkspaceScreen(
     onToggleScreenShare: () -> Unit,
     onSteerFollowUp: (String) -> Unit,
     onRemoveFollowUp: (String) -> Unit,
+    onOpenSettings: () -> Unit = {},
+    settingsOverlay: @Composable () -> Unit = {},
 ) {
     BackHandler(onBack = onBack)
     val context = LocalContext.current
@@ -4349,6 +4341,7 @@ private fun WorkspaceScreen(
             dismissButton = { TextButton(onClick = onTerminalCancel) { Text(stringResource(R.string.settings_cancel)) } },
         )
     }
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -4403,6 +4396,7 @@ private fun WorkspaceScreen(
                         }
                     }
                     IconButton(onClick = { showChats = true }) { Icon(Icons.Default.History, stringResource(R.string.proj_chats)) }
+                    IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, stringResource(R.string.nav_settings)) }
                     if (state.isRunning) CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -4623,6 +4617,8 @@ private fun WorkspaceScreen(
                 buildPanelDismissed = true
             },
         )
+    }
+        settingsOverlay()
     }
 }
 
@@ -5205,7 +5201,7 @@ private fun WorkspaceEntryMenu(
 
 /** Chat "/models": pick the model the next Agent Execution uses for the active provider. */
 @Composable
-private fun ModelsPickerDialog(
+internal fun ModelsPickerDialog(
     state: AppUiState,
     onPick: (String) -> Unit,
     onPickProviderModel: (ProviderKind, String, String?, String?) -> Unit,
