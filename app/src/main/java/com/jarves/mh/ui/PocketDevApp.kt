@@ -3329,6 +3329,85 @@ private fun ClaudeSubscriptionCredentialsStep(
     }
 }
 
+@Composable
+private fun RuntimeStatusCard(state: AppUiState) {
+    val ready = state.startupStage == StartupStage.READY
+    val failed = state.startupStage == StartupStage.ERROR
+    val agents = state.installedAgentVersions.size
+    val stacks = state.installedDevStacks.size
+    val summary = buildString {
+        append(
+            stringResource(
+                when {
+                    ready -> R.string.home_runtime_ready
+                    failed -> R.string.home_runtime_error
+                    else -> R.string.home_runtime_setup
+                },
+            ),
+        )
+        append(" · ")
+        append(stringResource(R.string.home_runtime_agents, agents))
+        if (stacks > 0) {
+            append(" · ")
+            append(stringResource(R.string.home_runtime_stacks, stacks))
+        }
+    }
+    val badgeColor = when {
+        ready -> PocketGreen
+        failed -> MaterialTheme.colorScheme.error
+        else -> PocketAccent
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = PocketGreen.copy(alpha = 0.12f),
+                modifier = Modifier.size(38.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Memory, null, tint = PocketGreen, modifier = Modifier.size(19.dp))
+                }
+            }
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.home_runtime_status), fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                Text(
+                    summary,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    stringResource(R.string.home_runtime_active_agent, state.agentKind.title),
+                    fontSize = 10.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Surface(shape = RoundedCornerShape(50), color = badgeColor.copy(alpha = 0.13f)) {
+                Text(
+                    stringResource(
+                        when {
+                            ready -> R.string.home_runtime_badge_ready
+                            failed -> R.string.home_runtime_badge_error
+                            else -> R.string.home_runtime_badge_setup
+                        },
+                    ),
+                    Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = badgeColor,
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProjectsScreen(
@@ -3553,6 +3632,7 @@ private fun ProjectsScreen(
                     }
                 }
             }
+            item { RuntimeStatusCard(state) }
             item { Text(stringResource(R.string.home_your_projects), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
             if (projects.isEmpty()) {
                 item {

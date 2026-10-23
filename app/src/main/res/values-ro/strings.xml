@@ -500,6 +500,16 @@
     <string name="home_no_projects">Niciun proiect încă</string>
     <string name="home_no_projects_desc">Creează un proiect cu nume sau pornește instantaneu cu un Proiect rapid.</string>
     <string name="home_quick_project">Proiect rapid</string>
+    <string name="home_runtime_active_agent">Agent activ: %1$s</string>
+    <string name="home_runtime_agents">%1$d agenți instalați</string>
+    <string name="home_runtime_badge_error">EROARE</string>
+    <string name="home_runtime_error">Configurarea necesită atenție</string>
+    <string name="home_runtime_badge_ready">GATA</string>
+    <string name="home_runtime_badge_setup">SETUP</string>
+    <string name="home_runtime_ready">Core pregătit</string>
+    <string name="home_runtime_setup">Configurare în curs</string>
+    <string name="home_runtime_stacks">%1$d pachete dev</string>
+    <string name="home_runtime_status">Status runtime</string>
     <string name="home_signin_repos">Autentifică-te pentru a accesa depozitele tale</string>
     <string name="home_your_projects">Proiectele tale</string>
     <string name="home_zip_git">Fișier ZIP, depozit Git sau GitHub</string>

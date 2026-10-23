@@ -500,6 +500,16 @@
     <string name="home_no_projects">No projects yet</string>
     <string name="home_no_projects_desc">Create a named project or start instantly with a Quick Project.</string>
     <string name="home_quick_project">Quick project</string>
+    <string name="home_runtime_active_agent">Active agent: %1$s</string>
+    <string name="home_runtime_agents">%1$d agents installed</string>
+    <string name="home_runtime_badge_error">ERROR</string>
+    <string name="home_runtime_error">Setup needs attention</string>
+    <string name="home_runtime_badge_ready">READY</string>
+    <string name="home_runtime_badge_setup">SETUP</string>
+    <string name="home_runtime_ready">Core ready</string>
+    <string name="home_runtime_setup">Setup in progress</string>
+    <string name="home_runtime_stacks">%1$d dev stacks</string>
+    <string name="home_runtime_status">Runtime status</string>
     <string name="home_signin_repos">Sign in to access your repositories</string>
     <string name="home_your_projects">Your projects</string>
     <string name="home_zip_git">ZIP file, Git repository, or GitHub</string>
