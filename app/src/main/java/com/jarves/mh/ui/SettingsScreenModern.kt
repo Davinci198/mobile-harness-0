@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
@@ -179,6 +180,7 @@ fun SettingsScreen(
     onRefreshDiagnostics: () -> Unit = {},
     onStopInactiveProcesses: () -> Unit = {},
     onClearRuntimeCache: () -> Unit = {},
+    onBack: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var expanded by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
@@ -247,6 +249,16 @@ fun SettingsScreen(
         topBar = {
             TopAppBar(
                 modifier = Modifier.padding(top = 8.dp),
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = { onBack?.invoke() }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.common_back),
+                            )
+                        }
+                    }
+                },
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
@@ -874,14 +886,67 @@ fun SettingsScreen(
     }
 }
 
-private fun formatTransferMb(bytes: Long): String = "%.1f MB".format(bytes.coerceAtLeast(0L) / 1_048_576.0)
+/**
+ * Hosts the classic settings screen against the live view model. Kept as the
+ * fallback behind the settings drawer so every advanced control stays one tap
+ * away while the new panel is tuned.
+ */
+@Composable
+internal fun SettingsScreenFromViewModel(
+    state: AppUiState,
+    viewModel: MainViewModel,
+    onBack: (() -> Unit)? = null,
+) {
+    SettingsScreen(
+        state = state,
+        onSaveProvider = viewModel::updateProvider,
+        onDiscoverModels = viewModel::discoverModels,
+        onValidateProvider = viewModel::validateProvider,
+        onSetThemeMode = viewModel::setThemeMode,
+        onSetAccessLevel = viewModel::setAccessLevel,
+        onRequestShizukuAccess = viewModel::requestShizukuAccess,
+        onInstallShizuku = viewModel::installBundledShizuku,
+        onSetColorTheme = viewModel::setColorTheme,
+        onSetCustomColors = viewModel::setCustomColors,
+        onResetColorTheme = viewModel::resetColorTheme,
+        onPing = viewModel::pingApi,
+        onClearTerminal = viewModel::clearTerminal,
+        getSavedApiKey = viewModel::getSavedApiKey,
+        getSavedApiKeys = viewModel::getSavedApiKeys,
+        onAddApiKey = viewModel::addApiKey,
+        onActivateApiKey = viewModel::activateApiKey,
+        onRemoveApiKey = viewModel::removeApiKey,
+        onInstallDevStack = viewModel::installDevStack,
+        onRemoveDevStack = viewModel::removeDevStack,
+        onInstallAgent = viewModel::installAgent,
+        onCheckAgentUpdates = viewModel::checkAgentUpdates,
+        onUpdateAgent = viewModel::updateAgent,
+        onStartAntigravityLogin = viewModel::startAntigravityLogin,
+        onSubmitAntigravityCode = viewModel::submitAntigravityCode,
+        onLogoutAntigravity = viewModel::logoutAntigravity,
+        onRefreshAntigravityModels = viewModel::refreshAntigravityModels,
+        onSetAntigravityModel = viewModel::setAntigravityModel,
+        onSetAntigravityEffort = viewModel::setAntigravityEffort,
+        initialDebugUpdateManifestUrl = viewModel.debugUpdateManifestUrl(),
+        onSetDebugUpdateManifestUrl = viewModel::setDebugUpdateManifestUrl,
+        onClearDebugUpdateManifestUrl = viewModel::clearDebugUpdateManifestUrl,
+        onSetToolPermissionGlobal = viewModel::setToolPermissionGlobal,
+        onSetToolPermissionOverride = viewModel::setToolPermissionOverride,
+        onRefreshDiagnostics = viewModel::refreshDeveloperDiagnostics,
+        onStopInactiveProcesses = viewModel::stopInactiveDeveloperProcesses,
+        onClearRuntimeCache = viewModel::clearDeveloperRuntimeCache,
+        onBack = onBack,
+    )
+}
 
-private fun formatTransferSpeed(bytesPerSecond: Long): String = when {
+internal fun formatTransferMb(bytes: Long): String = "%.1f MB".format(bytes.coerceAtLeast(0L) / 1_048_576.0)
+
+internal fun formatTransferSpeed(bytesPerSecond: Long): String = when {
     bytesPerSecond >= 1_048_576L -> "%.1f MB/s".format(bytesPerSecond / 1_048_576.0)
     else -> "%.0f KB/s".format(bytesPerSecond / 1_024.0)
 }
 
-private fun formatTransferEta(downloaded: Long, total: Long, bytesPerSecond: Long): String {
+internal fun formatTransferEta(downloaded: Long, total: Long, bytesPerSecond: Long): String {
     val seconds = ((total - downloaded).coerceAtLeast(0L) / bytesPerSecond.coerceAtLeast(1L)).coerceAtLeast(1L)
     return if (seconds >= 60L) "${seconds / 60}m ${seconds % 60}s" else "${seconds}s"
 }
@@ -1279,7 +1344,7 @@ private fun SelectionDot(selected: Boolean) {
 }
 
 @Composable
-private fun ModernThemeChoice(title: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+internal fun ModernThemeChoice(title: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
@@ -1295,7 +1360,7 @@ private fun ModernThemeChoice(title: String, icon: ImageVector, selected: Boolea
 }
 
 @Composable
-private fun ColorThemeChoice(title: String, swatch: List<Color>, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+internal fun ColorThemeChoice(title: String, swatch: List<Color>, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
@@ -1322,7 +1387,28 @@ private fun ColorThemeChoice(title: String, swatch: List<Color>, selected: Boole
 }
 
 @Composable
-private fun AccessLevelSection(
+internal fun AccessLevelSection(
+    current: AccessLevel,
+    shizuku: com.jarves.mh.runtime.ShizukuStatus,
+    onSelect: (AccessLevel) -> Unit,
+    onRequestAccess: () -> Unit,
+    onInstall: () -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
+    SettingsAccordion(
+        title = stringResource(R.string.settings_access_title),
+        subtitle = stringResource(accessLevelTitleRes(current)),
+        icon = Icons.Default.Security,
+        expanded = expanded,
+        onClick = { expanded = !expanded },
+    ) {
+        AccessLevelContent(current, shizuku, onSelect, onRequestAccess, onInstall)
+    }
+}
+
+@Composable
+internal fun AccessLevelContent(
     current: AccessLevel,
     shizuku: com.jarves.mh.runtime.ShizukuStatus,
     onSelect: (AccessLevel) -> Unit,
@@ -1334,40 +1420,30 @@ private fun AccessLevelSection(
         shizukuRunning = shizuku.running,
         shizukuGranted = shizuku.granted,
     )
-    var expanded by rememberSaveable { mutableStateOf(false) }
-
-    SettingsAccordion(
-        title = stringResource(R.string.settings_access_title),
-        subtitle = stringResource(accessLevelTitleRes(current)),
-        icon = Icons.Default.Security,
-        expanded = expanded,
-        onClick = { expanded = !expanded },
-    ) {
-        Text(
-            stringResource(R.string.settings_access_desc),
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Text(
+        stringResource(R.string.settings_access_desc),
+        fontSize = 12.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(10.dp))
+    AccessLevel.entries.forEach { level ->
+        val status = statuses.getValue(level)
+        AccessLevelRow(
+            level = level,
+            detail = status.detail,
+            active = level == current,
+            enabled = status.available,
+            onClick = { onSelect(level) },
         )
-        Spacer(Modifier.height(10.dp))
-        AccessLevel.entries.forEach { level ->
-            val status = statuses.getValue(level)
-            AccessLevelRow(
-                level = level,
-                detail = status.detail,
-                active = level == current,
-                enabled = status.available,
-                onClick = { onSelect(level) },
-            )
-            Spacer(Modifier.height(8.dp))
-        }
-        val debugger = statuses.getValue(AccessLevel.DEBUGGER)
-        if (debugger.detail == AccessLevelDetail.NEEDS_PERMISSION) {
-            ShizukuActionButton(stringResource(R.string.settings_access_request), onRequestAccess)
-        } else if (debugger.detail == AccessLevelDetail.NOT_RUNNING) {
-            ShizukuActionButton(stringResource(R.string.settings_access_request), onRequestAccess)
-        } else if (debugger.detail == AccessLevelDetail.UNSUPPORTED && !shizuku.installed) {
-            ShizukuActionButton(stringResource(R.string.settings_access_install), onInstall)
-        }
+        Spacer(Modifier.height(8.dp))
+    }
+    val debugger = statuses.getValue(AccessLevel.DEBUGGER)
+    if (debugger.detail == AccessLevelDetail.NEEDS_PERMISSION) {
+        ShizukuActionButton(stringResource(R.string.settings_access_request), onRequestAccess)
+    } else if (debugger.detail == AccessLevelDetail.NOT_RUNNING) {
+        ShizukuActionButton(stringResource(R.string.settings_access_request), onRequestAccess)
+    } else if (debugger.detail == AccessLevelDetail.UNSUPPORTED && !shizuku.installed) {
+        ShizukuActionButton(stringResource(R.string.settings_access_install), onInstall)
     }
 }
 
@@ -1451,7 +1527,7 @@ private fun ShizukuActionButton(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun CustomColorRow(
+internal fun CustomColorRow(
     enabled: Boolean,
     accent: Color,
     background: Color,
@@ -1498,7 +1574,7 @@ private fun CustomColorRow(
 }
 
 @Composable
-private fun RuntimeInfoRow(label: String, value: String) {
+internal fun RuntimeInfoRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
         Text(value, fontWeight = FontWeight.Medium, fontSize = 13.sp)
@@ -1506,7 +1582,7 @@ private fun RuntimeInfoRow(label: String, value: String) {
 }
 
 @Composable
-private fun PermissionLevelChoice(
+internal fun PermissionLevelChoice(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
@@ -1531,29 +1607,55 @@ private fun PermissionLevelChoice(
 
 /** One tool's ALLOW/ASK/FORBID override row; shared by built-in and plugin tools. */
 @Composable
-private fun PermissionOverrideRow(
+internal fun PermissionOverrideRow(
     title: String,
     subtitle: String?,
     selectedOverride: com.jarves.mh.tools.ToolPermissionLevel?,
     effective: com.jarves.mh.tools.ToolPermissionLevel,
     onSetOverride: (com.jarves.mh.tools.ToolPermissionLevel?) -> Unit,
+    stacked: Boolean = false,
 ) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-            if (!subtitle.isNullOrBlank()) {
-                Text(
-                    subtitle,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+    if (stacked) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            PermissionToolLabel(title, subtitle)
+            Spacer(Modifier.height(4.dp))
+            PermissionChoices(selectedOverride, effective, onSetOverride, Modifier.fillMaxWidth())
         }
+    } else {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PermissionToolLabel(title, subtitle, Modifier.weight(1f))
+            PermissionChoices(selectedOverride, effective, onSetOverride, Modifier.weight(3f))
+        }
+    }
+}
+
+@Composable
+private fun PermissionToolLabel(title: String, subtitle: String?, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(title, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+        if (!subtitle.isNullOrBlank()) {
+            Text(
+                subtitle,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PermissionChoices(
+    selectedOverride: com.jarves.mh.tools.ToolPermissionLevel?,
+    effective: com.jarves.mh.tools.ToolPermissionLevel,
+    onSetOverride: (com.jarves.mh.tools.ToolPermissionLevel?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         PermissionLevelChoice(
             label = stringResource(R.string.settings_allow),
             selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ALLOW &&
@@ -1569,7 +1671,6 @@ private fun PermissionOverrideRow(
             },
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(4.dp))
         PermissionLevelChoice(
             label = stringResource(R.string.settings_ask),
             selected = effective == com.jarves.mh.tools.ToolPermissionLevel.ASK &&
@@ -1585,7 +1686,6 @@ private fun PermissionOverrideRow(
             },
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(4.dp))
         PermissionLevelChoice(
             label = stringResource(R.string.settings_forbid),
             selected = effective == com.jarves.mh.tools.ToolPermissionLevel.FORBID &&
@@ -1605,7 +1705,7 @@ private fun PermissionOverrideRow(
 }
 
 @Composable
-private fun DebugUpdateChannelSection(
+internal fun DebugUpdateChannelSection(
     initialUrl: String,
     onSave: (String) -> Unit,
     onClear: () -> Unit,
@@ -1667,11 +1767,12 @@ private fun DebugUpdateChannelSection(
 }
 
 @Composable
-private fun DeveloperDiagnosticsSection(
+internal fun DeveloperDiagnosticsSection(
     diagnostics: DeveloperDiagnostics,
     onRefresh: () -> Unit,
     onStopInactive: () -> Unit,
     onClearCache: () -> Unit,
+    compact: Boolean = false,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     SettingsAccordion(
@@ -1703,21 +1804,47 @@ private fun DeveloperDiagnosticsSection(
                 Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onRefresh, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.diag_refresh), fontSize = 12.sp)
+            if (compact) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CompactActionButton(
+                        label = stringResource(R.string.diag_refresh),
+                        onClick = onRefresh,
+                        enabled = !diagnostics.loading,
+                        modifier = Modifier.weight(1f),
+                        dense = true,
+                    )
+                    CompactActionButton(
+                        label = stringResource(R.string.diag_stop),
+                        onClick = onStopInactive,
+                        enabled = !diagnostics.loading,
+                        modifier = Modifier.weight(1f),
+                        dense = true,
+                    )
+                    CompactActionButton(
+                        label = stringResource(R.string.diag_clear),
+                        onClick = onClearCache,
+                        enabled = !diagnostics.loading,
+                        modifier = Modifier.weight(1f),
+                        dense = true,
+                    )
                 }
-                OutlinedButton(onClick = onStopInactive, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.Stop, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.diag_stop), fontSize = 12.sp)
-                }
-                OutlinedButton(onClick = onClearCache, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.DeleteSweep, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.diag_clear), fontSize = 12.sp)
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onRefresh, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.diag_refresh), fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = onStopInactive, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Stop, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.diag_stop), fontSize = 12.sp)
+                    }
+                    OutlinedButton(onClick = onClearCache, enabled = !diagnostics.loading, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.DeleteSweep, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.diag_clear), fontSize = 12.sp)
+                    }
                 }
             }
         }
