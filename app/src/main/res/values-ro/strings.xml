@@ -1208,6 +1208,8 @@
     <string name="drawer_connection">Conexiune</string>
     <string name="drawer_protocol">Protocol</string>
     <string name="drawer_active_key">Cheie activă</string>
+    <string name="drawer_keyless_provider">Nu e nevoie de cheie — acest furnizor este gratuit.</string>
+    <string name="drawer_keyless_short">fără cheie</string>
     <string name="drawer_models">Modele</string>
     <string name="drawer_api_keys_desc">Adaugă, activează sau elimină chei pentru acest furnizor. Fiecare cerere folosește cheia activă; celelalte rămân pregătite pentru failover.</string>
     <string name="drawer_no_api_keys">Nu există încă chei API salvate pentru acest furnizor.</string>

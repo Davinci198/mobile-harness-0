@@ -400,15 +400,22 @@ class ProviderApiClient(
         val cleanBaseUrl = normalizeBaseUrl(baseUrl)
         val cleanModel = model.trim()
         val freeTier = isNousFreeTier(cleanBaseUrl)
+        // Kilo's free pool rejects every Authorization header and needs none,
+        // so it is probed headerless and never asked for a key.
+        val kiloFree = isKiloFreePool(cleanBaseUrl)
         // The free tier probes with the guest's anonymous Nous token when one
         // exists; the saved key never applies there (FREE.pool is another service).
-        val cleanKey = if (freeTier) nousAccessToken().orEmpty().trim() else sanitizeApiKey(apiKey)
+        val cleanKey = when {
+            freeTier -> nousAccessToken().orEmpty().trim()
+            kiloFree -> ""
+            else -> sanitizeApiKey(apiKey)
+        }
         // A loopback gateway on this device answers without credentials, so a
         // missing key is only an error for remote endpoints. OpenCode Zen's free
         // tier is designed to run without a key, and its catalog answers anonymously.
         // The Hermes Nous endpoint likewise serves its catalog without a key.
         val keyRequired = !isLoopbackBaseUrl(cleanBaseUrl) && !isOpenCodeZen(cleanBaseUrl) &&
-            !freeTier
+            !freeTier && !kiloFree
         if (cleanBaseUrl.isBlank() || cleanModel.isBlank() || (keyRequired && cleanKey.isBlank())) {
             return@withContext ConnectionValidation.Failure("Base URL, model, and API key are required.")
         }
@@ -433,6 +440,7 @@ class ProviderApiClient(
                 response.code in 200..299 -> return@withContext ConnectionValidation.Success(
                     when {
                         freeTier -> "Connected. $cleanModel answered on the Hermes free tier."
+                        kiloFree -> "Connected. Kilo's free pool answered without a key."
                         protocol == ProviderProtocol.ANTHROPIC || protocol == ProviderProtocol.ANTHROPIC_GATEWAY || protocol == ProviderProtocol.OPENROUTER ->
                             "Anthropic Messages endpoint verified. Claude Code settings are ready."
                         else -> "Connection successful. Claude Code settings are ready."
