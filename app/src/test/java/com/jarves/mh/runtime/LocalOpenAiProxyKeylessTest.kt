@@ -3,7 +3,6 @@ package com.jarves.mh.runtime
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import java.io.BufferedInputStream
-import java.io.InputStreamReader
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -111,12 +110,15 @@ class LocalOpenAiProxyKeylessTest {
     fun blankKeyForwardsWithoutAnAuthorizationHeader() {
         val proxy = openProxy("")
 
-        val response = post(proxy.url + "/chat/completions", """{"model":"some-model"}""")
+        val code = post(proxy.url + "/chat/completions", """{"model":"some-model"}""")
 
-        assertTrue(response.startsWith("HTTP/1.1 200 OK"))
+        assertEquals(200, code)
         val (requestLine, headers, body) = parseEchoRequest(upstreams.last().lastRequest.get())
         assertEquals("POST /v1/chat/completions HTTP/1.1", requestLine)
-        assertFalse("Authorization reached the upstream for a keyless profile" + headers, headers.containsKey("authorization"))
+        assertFalse(
+            "Authorization reached the upstream for a keyless profile " + headers,
+            headers.containsKey("authorization"),
+        )
         assertEquals("""{"model":"some-model"}""", body)
     }
 
@@ -124,9 +126,9 @@ class LocalOpenAiProxyKeylessTest {
     fun keyedProfileStillSendsBearer() {
         val proxy = openProxy("sk-test")
 
-        val response = post(proxy.url + "/chat/completions", """{"model":"some-model"}""")
+        val code = post(proxy.url + "/chat/completions", """{"model":"some-model"}""")
 
-        assertTrue(response.startsWith("HTTP/1.1 200 OK"))
+        assertEquals(200, code)
         val (_, headers, _) = parseEchoRequest(upstreams.last().lastRequest.get())
         assertEquals("Bearer sk-test", headers["authorization"])
     }
@@ -144,18 +146,21 @@ class LocalOpenAiProxyKeylessTest {
         return Triple(requestLine, headers, body)
     }
 
-    private fun post(endpoint: String, body: String): String {
+    /** Posts a fixed body; HttpURLConnection exposes the status only via getResponseCode(). */
+    private fun post(endpoint: String, body: String): Int {
         val connection = URL(endpoint).openConnection() as java.net.HttpURLConnection
         connection.requestMethod = "POST"
         connection.doOutput = true
         val bytes = body.toByteArray()
         connection.setFixedLengthStreamingMode(bytes.size)
         connection.outputStream.use { it.write(bytes) }
-        val input = connection.inputStream
-        val statusLine = java.io.BufferedReader(InputStreamReader(input, Charsets.US_ASCII)).readLine().orEmpty()
-        // Drain the body so the echo upstream's socket completes cleanly.
-        input.readAllBytes()
-        input.close()
-        return statusLine
+        return try {
+            val code = connection.responseCode
+            connection.inputStream.use { it.readAllBytes() }
+            code
+        } catch (error: java.io.IOException) {
+            connection.errorStream?.use { it.readAllBytes() }
+            connection.responseCode
+        }
     }
 }
