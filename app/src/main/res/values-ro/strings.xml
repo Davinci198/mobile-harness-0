@@ -511,6 +511,8 @@
     <string name="home_runtime_stacks">%1$d pachete dev</string>
     <string name="home_runtime_status">Status runtime</string>
     <string name="home_signin_repos">Autentifică-te pentru a accesa depozitele tale</string>
+    <string name="home_tools_desc">Ecrane de lucru care rulează fără un proiect deschis.</string>
+    <string name="home_tools_title">Panou și Studio</string>
     <string name="home_your_projects">Proiectele tale</string>
     <string name="home_zip_git">Fișier ZIP, depozit Git sau GitHub</string>
     <string name="nav_agent">Agent</string>
@@ -1179,6 +1181,8 @@
     <string name="drawer_category_agent_sub">Furnizor, Antigravity, actualizări</string>
     <string name="drawer_category_conversation">Conversație și voce</string>
     <string name="drawer_category_conversation_sub">Secțiuni chat, microfon, voce</string>
+    <string name="drawer_category_dashboard_sub">Panou Hermes: status și deschidere pe tot ecranul</string>
+    <string name="drawer_category_studio_sub">Ekko Studio: status și deschidere pe tot ecranul</string>
     <string name="drawer_category_access">Acces și permisiuni</string>
     <string name="drawer_category_access_sub">Nivel de acces, Shizuku, instrumente</string>
     <string name="drawer_category_tools">Instrumente și runtime</string>
@@ -1214,6 +1218,9 @@
     <string name="drawer_endpoints_desc">Endpoint-uri Custom API salvate. Apasă Folosește pentru a comuta furnizorul activ la acel endpoint.</string>
     <string name="drawer_endpoint_use">Folosește</string>
     <string name="drawer_endpoint_key">Cheie: %1$s</string>
+    <string name="drawer_tool_open">Deschide</string>
+    <string name="drawer_tool_running">Rulează</string>
+    <string name="drawer_tool_stopped">Oprit</string>
     <string name="drawer_installed_count">%1$d din %2$d instalate</string>
     <string name="drawer_antigravity">Google / Antigravity</string>
     <string name="drawer_antigravity_desc">Cont, model, efort de raționament</string>

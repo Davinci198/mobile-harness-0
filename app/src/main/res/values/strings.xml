@@ -511,6 +511,8 @@
     <string name="home_runtime_stacks">%1$d dev stacks</string>
     <string name="home_runtime_status">Runtime status</string>
     <string name="home_signin_repos">Sign in to access your repositories</string>
+    <string name="home_tools_desc">Work surfaces that run without an open project.</string>
+    <string name="home_tools_title">Dashboard &amp; Studio</string>
     <string name="home_your_projects">Your projects</string>
     <string name="home_zip_git">ZIP file, Git repository, or GitHub</string>
     <string name="nav_agent">Agent</string>
@@ -1179,6 +1181,8 @@
     <string name="drawer_category_agent_sub">Provider, Antigravity, updates</string>
     <string name="drawer_category_conversation">Conversation &amp; voice</string>
     <string name="drawer_category_conversation_sub">Chat sections, microphone, speech</string>
+    <string name="drawer_category_dashboard_sub">Hermes dashboard: status and full-screen open</string>
+    <string name="drawer_category_studio_sub">Ekko Studio: status and full-screen open</string>
     <string name="drawer_category_access">Access &amp; permissions</string>
     <string name="drawer_category_access_sub">Access level, Shizuku, tools</string>
     <string name="drawer_category_tools">Tools &amp; runtime</string>
@@ -1214,6 +1218,9 @@
     <string name="drawer_endpoints_desc">Saved Custom API endpoints. Tap Use to switch the active provider to that endpoint.</string>
     <string name="drawer_endpoint_use">Use</string>
     <string name="drawer_endpoint_key">Key: %1$s</string>
+    <string name="drawer_tool_open">Open</string>
+    <string name="drawer_tool_running">Running</string>
+    <string name="drawer_tool_stopped">Stopped</string>
     <string name="drawer_installed_count">%1$d of %2$d installed</string>
     <string name="drawer_antigravity">Google / Antigravity</string>
     <string name="drawer_antigravity_desc">Account, model, reasoning effort</string>

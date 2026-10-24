@@ -170,6 +170,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -287,9 +288,11 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlin.concurrent.thread
 
 
@@ -316,6 +319,13 @@ private enum class WorkspaceTab(@StringRes val labelRes: Int, val icon: ImageVec
     STUDIO(R.string.tab_studio, Icons.Default.Dashboard),
 }
 
+/**
+ * Full-screen work surfaces that do not need an open project: the Hermes
+ * dashboard and Ekko Studio. They open from the home screen and from their
+ * settings categories, over whatever screen was underneath.
+ */
+private enum class HomeTool { NONE, DASHBOARD, STUDIO }
+
 /** PLAN-TERMINAL pas 3: true = TerminalView VT real (PtyTerminalScreen),
  * false = ecranul vechi pe linii. Revenire instant la nevoie. */
 private const val USE_PTY_TERMINAL = true
@@ -326,6 +336,18 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
     val context = LocalContext.current
     val projectsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    var homeTool by rememberSaveable { mutableStateOf(HomeTool.NONE) }
+    val openTool: (HomeTool) -> Unit = { tool ->
+        // Opening a surface from a shortcut is an explicit start request, so it
+        // clears the "user stopped it" latch the workspace tabs keep.
+        when (tool) {
+            HomeTool.DASHBOARD -> dashboardUserStopped = false
+            HomeTool.STUDIO -> studioUserStopped = false
+            HomeTool.NONE -> Unit
+        }
+        settingsOpen = false
+        homeTool = tool
+    }
     val settingsOverlay: @Composable () -> Unit = {
         SettingsDrawerOverlay(
             open = settingsOpen,
@@ -333,6 +355,8 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onClose = { settingsOpen = false },
             state = state,
             viewModel = viewModel,
+            onOpenDashboard = { openTool(HomeTool.DASHBOARD) },
+            onOpenStudio = { openTool(HomeTool.STUDIO) },
         )
     }
     LaunchedEffect(state.toastMessage) {
@@ -340,6 +364,10 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             viewModel.consumeToast()
         }
+    }
+    if (homeTool != HomeTool.NONE && state.startupStage == StartupStage.READY) {
+        HomeToolScreen(tool = homeTool, onClose = { homeTool = HomeTool.NONE })
+        return
     }
     when {
         state.startupStage == StartupStage.CHECKING -> StartupLoadingScreen(
@@ -497,6 +525,7 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             viewModel = viewModel,
             projectsListState = projectsListState,
             onOpenSettings = { settingsOpen = true },
+            onOpenTool = openTool,
             settingsOverlay = settingsOverlay,
         )
     }
@@ -2170,6 +2199,7 @@ private fun RootScreenHost(
     viewModel: MainViewModel,
     projectsListState: LazyListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() },
     onOpenSettings: () -> Unit = {},
+    onOpenTool: (HomeTool) -> Unit = {},
     settingsOverlay: @Composable () -> Unit = {},
 ) {
     var screen by rememberSaveable { mutableStateOf(RootScreen.PROJECTS) }
@@ -2256,6 +2286,8 @@ private fun RootScreenHost(
                     onRenameProject = viewModel::renameProject,
                     onDeleteProject = viewModel::deleteProject,
                     onSettings = onOpenSettings,
+                    onOpenDashboard = { onOpenTool(HomeTool.DASHBOARD) },
+                    onOpenStudio = { onOpenTool(HomeTool.STUDIO) },
                     onPing = viewModel::pingApi,
                     onToggleTheme = viewModel::toggleTheme,
                     onInstallUpdate = viewModel::installAppUpdate,
@@ -3408,6 +3440,129 @@ private fun RuntimeStatusCard(state: AppUiState) {
     }
 }
 
+/**
+ * Home shortcut for the two work surfaces that run without a project. The
+ * status dots poll the loopback ports so the card matches what the tabs would
+ * show; tapping the action opens the full-screen surface (and clears the
+ * user-stopped latch, so it starts when it is not running).
+ */
+@Composable
+private fun HomeToolsCard(
+    onOpenDashboard: () -> Unit,
+    onOpenStudio: () -> Unit,
+) {
+    val dashboardUp by produceState(initialValue = false) {
+        while (true) {
+            value = withContext(Dispatchers.IO) { HermesDashboardManager.portOpen() }
+            delay(5_000)
+        }
+    }
+    val studioUp by produceState(initialValue = false) {
+        while (true) {
+            value = withContext(Dispatchers.IO) { StudioServerManager.portOpen() }
+            delay(5_000)
+        }
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    stringResource(R.string.home_tools_title),
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.5.sp,
+                )
+                Text(
+                    stringResource(R.string.home_tools_desc),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HomeToolTile(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.Language,
+                    accent = Color(0xFF14B8A6),
+                    title = stringResource(R.string.tab_dashboard),
+                    running = dashboardUp,
+                    onOpen = onOpenDashboard,
+                )
+                HomeToolTile(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.Dashboard,
+                    accent = Color(0xFFF59E0B),
+                    title = stringResource(R.string.tab_studio),
+                    running = studioUp,
+                    onOpen = onOpenStudio,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeToolTile(
+    modifier: Modifier,
+    icon: ImageVector,
+    accent: Color,
+    title: String,
+    running: Boolean,
+    onOpen: () -> Unit,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = accent.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.30f)),
+    ) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, null, Modifier.size(17.dp), tint = accent)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    title,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(7.dp)
+                        .background(
+                            if (running) PocketGreen else MaterialTheme.colorScheme.outline,
+                            CircleShape,
+                        ),
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    stringResource(
+                        if (running) R.string.drawer_tool_running else R.string.drawer_tool_stopped,
+                    ),
+                    fontSize = 9.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            CompactActionButton(
+                label = stringResource(
+                    if (running) R.string.drawer_tool_open else R.string.server_start,
+                ),
+                onClick = onOpen,
+                modifier = Modifier.fillMaxWidth(),
+                dense = true,
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProjectsScreen(
@@ -3426,6 +3581,8 @@ private fun ProjectsScreen(
     onRenameProject: (String, String) -> Unit,
     onDeleteProject: (String) -> Unit,
     onSettings: () -> Unit,
+    onOpenDashboard: () -> Unit,
+    onOpenStudio: () -> Unit,
     onPing: () -> Unit,
     onToggleTheme: () -> Unit,
     onInstallUpdate: () -> Unit,
@@ -3633,6 +3790,12 @@ private fun ProjectsScreen(
                 }
             }
             item { RuntimeStatusCard(state) }
+            item {
+                HomeToolsCard(
+                    onOpenDashboard = onOpenDashboard,
+                    onOpenStudio = onOpenStudio,
+                )
+            }
             item { Text(stringResource(R.string.home_your_projects), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
             if (projects.isEmpty()) {
                 item {
@@ -7100,6 +7263,52 @@ private fun ServerControlBar(label: String, onStop: () -> Unit) {
             )
             Spacer(Modifier.width(4.dp))
             Text(stringResource(R.string.server_stop), fontSize = 12.sp)
+        }
+    }
+}
+
+/**
+ * Full-screen host for the dashboard and Studio surfaces reached from the home
+ * card or their settings categories. The project workspace stays alive
+ * underneath; closing the tool returns to whatever screen was open.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeToolScreen(tool: HomeTool, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val installer = remember(context) { RuntimeInstaller(context.applicationContext) }
+    BackHandler { onClose() }
+    Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        stringResource(
+                            if (tool == HomeTool.STUDIO) R.string.tab_studio else R.string.tab_dashboard,
+                        ),
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            stringResource(R.string.common_back),
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            when (tool) {
+                HomeTool.DASHBOARD -> DashboardTab(installer)
+                HomeTool.STUDIO -> StudioTab(installer)
+                HomeTool.NONE -> Unit
+            }
         }
     }
 }
