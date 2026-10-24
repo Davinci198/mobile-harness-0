@@ -166,6 +166,20 @@ internal fun openCodeEnvironmentFor(
             environment["OPENCODE_CONFIG_CONTENT"] =
                 openAiCompatibleConfigContent("nvidia", base, "NVIDIA_API_KEY", modelId)
         }
+        // Kilo Free never reaches here through the picker; if a stored profile
+        // does, pin the keyless route (a placeholder key would be sent as an
+        // Authorization header Kilo's free pool rejects).
+        ProviderKind.KILO_FREE -> {
+            val model = provider.model.ifBlank { provider.kind.defaultModel }
+            if (model.isNotBlank()) {
+                environment["OPENCODE_CONFIG_CONTENT"] = openAiCompatibleConfigContent(
+                    providerId = "kilo",
+                    baseUrl = provider.resolvedBaseUrl,
+                    apiKeyEnv = null,
+                    modelId = model,
+                )
+            }
+        }
         ProviderKind.CUSTOM -> {
             val api = provider.dshApi.ifBlank { "anthropic-messages" }
             if (isOpenAiCompatibleApi(api)) {
@@ -221,6 +235,9 @@ internal fun opencodeModelPrefix(kind: ProviderKind): String? = when (kind) {
     // `opencode/<model>`; `opencode-zen/…` resolves to nothing ("Unexpected server error").
     ProviderKind.OPENCODE_ZEN -> "opencode"
     ProviderKind.NVIDIA_NIM -> "nvidia"
+    // Kilo Free only rides DeepSeek Harness; a stored profile picked here
+    // would prefix with its own provider id from OPENCODE_CONFIG_CONTENT.
+    ProviderKind.KILO_FREE -> "kilo"
     ProviderKind.CUSTOM -> null
     ProviderKind.FREE -> null
     ProviderKind.CLAUDE -> null

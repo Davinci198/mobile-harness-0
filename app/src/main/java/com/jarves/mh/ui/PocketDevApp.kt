@@ -2841,6 +2841,7 @@ private fun ProviderChoiceRow(
         ProviderKind.KIMI -> Color(0xFF8B7CF6)
         ProviderKind.OPENCODE_ZEN -> Color(0xFF22C55E)
         ProviderKind.NVIDIA_NIM -> Color(0xFF76B900)
+        ProviderKind.KILO_FREE -> Color(0xFFA855F7)
         ProviderKind.CUSTOM -> PocketAccent
         ProviderKind.FREE -> Color(0xFF34D399)
     }
@@ -2852,6 +2853,7 @@ private fun ProviderChoiceRow(
         ProviderKind.KIMI -> "K"
         ProviderKind.OPENCODE_ZEN -> "Z"
         ProviderKind.NVIDIA_NIM -> "NV"
+        ProviderKind.KILO_FREE -> "KF"
         ProviderKind.CUSTOM -> "<>"
         ProviderKind.FREE -> "H"
     }

@@ -74,6 +74,16 @@ class DshRuntimeBridge(
         deviceGate,
     )
     @Volatile private var approvalServer: DshApprovalServer? = null
+
+    /**
+     * Loopback strip-proxy for Kilo Free, kept alive between turns so a warm
+     * DSH session keeps a reachable base URL (the port is baked into the
+     * route's settings.yaml). Kilo's free pool answers 401 to any request
+     * carrying an Authorization header — even the placeholder key DSH always
+     * sends — so this proxy forwards headerless; null keeps the direct route.
+     */
+    private var kiloProxy: LocalOpenAiProxy? = null
+    private var kiloProxySignature: String? = null
     /**
      * Host-side skill catalog for the guest `mh_skills` helper. Built on
      * demand because the guest root carries the active project slug
@@ -168,8 +178,10 @@ class DshRuntimeBridge(
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         pushForegroundProgress("Starting DeepSeek Harness…")
         val secret = secretFor(provider).orEmpty()
-        // A loopback gateway on this device runs keyless; only remote providers need a key.
-        if (secret.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) {
+        // A loopback gateway on this device runs keyless; only remote providers
+        // need a key. Kilo Free is remote but keyless: its free pool answers
+        // headerless requests only, and [ensureKiloProxy] drops the header.
+        if (secret.isBlank() && provider.kind != ProviderKind.KILO_FREE && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) {
             eventBus.emit(RuntimeEvent.SessionFailed(sessionId, "No API key is saved for ${provider.kind.title}."))
             return@withContext sessionId
         }
@@ -204,7 +216,7 @@ class DshRuntimeBridge(
             val workspace = checkpoints.ensureWorkspace(projectId)
             checkpoints.createCheckpoint(projectId, workspace)
             val before = checkpoints.snapshot(workspace)
-            val route = DshRouteMapper.forProfile(provider)
+            val route = DshRouteMapper.forProfile(provider, ensureKiloProxy(provider)?.url)
             writeDshSettings(installed.rootfs, route, provider)
             val environment = buildEnvironment(route, secret)
             val model = provider.model.ifBlank { route.defaultModel }
@@ -696,7 +708,7 @@ class DshRuntimeBridge(
             Log.d("Prewarm", "enter: activeSessionId=$activeSessionId kind=${provider.kind} secretLen=${secretFor(provider)?.length ?: 0}")
             if (activeSessionId != null) return@withContext
             val secret = secretFor(provider).orEmpty()
-            if (secret.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return@withContext
+            if (secret.isBlank() && provider.kind != ProviderKind.KILO_FREE && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return@withContext
             if (provider.kind == ProviderKind.CLAUDE) return@withContext
             runCatching {
                 if (!installer.isAgentInstalled(AgentKind.DEEPSEEK_HARNESS)) {
@@ -705,7 +717,7 @@ class DshRuntimeBridge(
                 }
                 val installed = installer.installedRuntime()
                 installer.ensureDshAndroidCompatibility()
-                val route = DshRouteMapper.forProfile(provider)
+                val route = DshRouteMapper.forProfile(provider, ensureKiloProxy(provider)?.url)
                 writeDshSettings(installed.rootfs, route, provider)
                 Log.d("Prewarm", "settings.yaml written for ${provider.kind}")
                 val model = provider.model.ifBlank { route.defaultModel }
@@ -811,6 +823,33 @@ class DshRuntimeBridge(
                 },
             ).start().also { approvalServer = it }
         }
+
+    /**
+     * Warm-reuse strip-proxy for Kilo Free: one proxy per provider signature,
+     * re-created only when the provider changes, because a warm DSH session
+     * keeps the proxy's loopback port baked into its settings.yaml route.
+     * RunCatching semantics match [ensureApprovalServer]; a null return keeps
+     * the direct (header-bearing) route, which Kilo rejects — the turn fails
+     * with Kilo's 401 message instead of crashing the bridge.
+     */
+    private fun ensureKiloProxy(provider: ProviderProfile): LocalOpenAiProxy? {
+        if (provider.kind != ProviderKind.KILO_FREE) return null
+        val signature = listOf(
+            provider.kind.name,
+            provider.model,
+            provider.resolvedBaseUrl,
+        ).joinToString("|")
+        kiloProxy?.takeIf { kiloProxySignature == signature }?.let { return it }
+        // Blank key is deliberate: LocalOpenAiProxy skips the Authorization
+        // header entirely when the key is blank.
+        val proxy = runCatching { LocalOpenAiProxy(provider, "").start() }
+            .onFailure { Log.w("DshBridge", "Could not start the Kilo strip-proxy", it) }
+            .getOrNull() ?: return null
+        runCatching { kiloProxy?.close() }
+        kiloProxy = proxy
+        kiloProxySignature = signature
+        return proxy
+    }
 
     /**
      * One guest question: raise the QuestionCard and wait for
@@ -1496,7 +1535,15 @@ internal data class DshRoute(
 internal data class DshCustomRoute(val api: String, val baseUrl: String)
 
 internal object DshRouteMapper {
-    fun forProfile(profile: ProviderProfile): DshRoute {
+    /**
+     * [gatewayUrl] is the loopback strip-proxy URL for Kilo Free (see
+     * [DshRuntimeBridge.ensureKiloProxy]). Kilo's free pool rejects any
+     * Authorization header — even the placeholder key [DshRoute.keyEnv]
+     * exports — so the route only reaches Kilo through that keyless
+     * pass-through. A null gateway keeps the fixed origin, which yields
+     * Kilo's 401 on the wire rather than a silent misroute.
+     */
+    fun forProfile(profile: ProviderProfile, gatewayUrl: String? = null): DshRoute {
         val model = profile.model.ifBlank { profile.kind.defaultModel }
         return when (profile.kind) {
             ProviderKind.DEEPSEEK -> DshRoute(
@@ -1533,6 +1580,15 @@ internal object DshRouteMapper {
                 keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
                 defaultModel = model,
                 custom = DshCustomRoute("openai-completions", profile.resolvedBaseUrl),
+            )
+            ProviderKind.KILO_FREE -> DshRoute(
+                name = "kilo-free",
+                keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
+                defaultModel = model,
+                // The placeholder key still travels to the proxy (DSH guests
+                // refuse an empty key variable); the proxy drops the header,
+                // which is what Kilo's keyless pool wants.
+                custom = DshCustomRoute("openai-completions", gatewayUrl ?: profile.resolvedBaseUrl),
             )
             ProviderKind.CUSTOM -> DshRoute(
                 name = "mh-custom",

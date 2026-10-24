@@ -3822,7 +3822,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (agent == AgentKind.ANTIGRAVITY) return
         if (!preferences.autoScanEnabled(agent) || preferences.autoScanDone(agent)) return
         val key = secret.ifBlank { vault.get(profile.kind.name).orEmpty() }
-        if (key.isBlank() && profile.kind != ProviderKind.FREE) return
+        if (key.isBlank() && profile.kind != ProviderKind.FREE && profile.kind != ProviderKind.KILO_FREE) return
         val generation = ++modelScanGeneration
         modelScanJob = viewModelScope.launch {
             runModelScan(profile, key, models = emptyList(), generation)
