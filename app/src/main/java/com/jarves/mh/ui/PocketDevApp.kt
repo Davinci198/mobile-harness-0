@@ -2204,6 +2204,9 @@ private fun RootScreenHost(
 ) {
     var screen by rememberSaveable { mutableStateOf(RootScreen.PROJECTS) }
     var showQuickTerminal by rememberSaveable { mutableStateOf(false) }
+    var runtimeCollapsed by rememberSaveable { mutableStateOf(false) }
+    var toolsCollapsed by rememberSaveable { mutableStateOf(false) }
+    var projectsCollapsed by rememberSaveable { mutableStateOf(false) }
 
     // The bottom bar is a stack of tabs rather than a set of activities: back leaves the
     // tab you are in and only leaves the app from the first one, the way the Files tab
@@ -2273,6 +2276,12 @@ private fun RootScreenHost(
                 RootScreen.PROJECTS -> ProjectsScreen(
                     state = state,
                     listState = projectsListState,
+                    runtimeCollapsed = runtimeCollapsed,
+                    onToggleRuntime = { runtimeCollapsed = !runtimeCollapsed },
+                    toolsCollapsed = toolsCollapsed,
+                    onToggleTools = { toolsCollapsed = !toolsCollapsed },
+                    projectsCollapsed = projectsCollapsed,
+                    onToggleProjects = { projectsCollapsed = !projectsCollapsed },
                     onOpen = viewModel::openProject,
                     onCreate = viewModel::createProject,
                     onCreateQuickProject = viewModel::createQuickProject,
@@ -3362,7 +3371,11 @@ private fun ClaudeSubscriptionCredentialsStep(
 }
 
 @Composable
-private fun RuntimeStatusCard(state: AppUiState) {
+private fun RuntimeStatusCard(
+    state: AppUiState,
+    collapsed: Boolean,
+    onToggle: () -> Unit,
+) {
     val ready = state.startupStage == StartupStage.READY
     val failed = state.startupStage == StartupStage.ERROR
     val agents = state.installedAgentVersions.size
@@ -3395,7 +3408,12 @@ private fun RuntimeStatusCard(state: AppUiState) {
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
     ) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .clickable(onClick = onToggle)
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = PocketGreen.copy(alpha = 0.12f),
@@ -3408,18 +3426,20 @@ private fun RuntimeStatusCard(state: AppUiState) {
             Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.home_runtime_status), fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
-                Text(
-                    summary,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    stringResource(R.string.home_runtime_active_agent, state.agentKind.title),
-                    fontSize = 10.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (!collapsed) {
+                    Text(
+                        summary,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        stringResource(R.string.home_runtime_active_agent, state.agentKind.title),
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             Surface(shape = RoundedCornerShape(50), color = badgeColor.copy(alpha = 0.13f)) {
                 Text(
@@ -3436,6 +3456,13 @@ private fun RuntimeStatusCard(state: AppUiState) {
                     color = badgeColor,
                 )
             }
+            Spacer(Modifier.width(2.dp))
+            Icon(
+                imageVector = if (collapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -3448,6 +3475,8 @@ private fun RuntimeStatusCard(state: AppUiState) {
  */
 @Composable
 private fun HomeToolsCard(
+    collapsed: Boolean,
+    onToggle: () -> Unit,
     onOpenDashboard: () -> Unit,
     onOpenStudio: () -> Unit,
 ) {
@@ -3470,36 +3499,51 @@ private fun HomeToolsCard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    stringResource(R.string.home_tools_title),
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.5.sp,
-                )
-                Text(
-                    stringResource(R.string.home_tools_desc),
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        stringResource(R.string.home_tools_title),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.5.sp,
+                    )
+                    if (!collapsed) {
+                        Text(
+                            stringResource(R.string.home_tools_desc),
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = if (collapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                HomeToolTile(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Default.Language,
-                    accent = Color(0xFF14B8A6),
-                    title = stringResource(R.string.tab_dashboard),
-                    running = dashboardUp,
-                    onOpen = onOpenDashboard,
-                )
-                HomeToolTile(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Default.Dashboard,
-                    accent = Color(0xFFF59E0B),
-                    title = stringResource(R.string.tab_studio),
-                    running = studioUp,
-                    onOpen = onOpenStudio,
-                )
+            if (!collapsed) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HomeToolTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Default.Language,
+                        accent = Color(0xFF14B8A6),
+                        title = stringResource(R.string.tab_dashboard),
+                        running = dashboardUp,
+                        onOpen = onOpenDashboard,
+                    )
+                    HomeToolTile(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Default.Dashboard,
+                        accent = Color(0xFFF59E0B),
+                        title = stringResource(R.string.tab_studio),
+                        running = studioUp,
+                        onOpen = onOpenStudio,
+                    )
+                }
             }
         }
     }
@@ -3568,6 +3612,12 @@ private fun HomeToolTile(
 private fun ProjectsScreen(
     state: AppUiState,
     listState: LazyListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() },
+    runtimeCollapsed: Boolean = false,
+    onToggleRuntime: () -> Unit = {},
+    toolsCollapsed: Boolean = false,
+    onToggleTools: () -> Unit = {},
+    projectsCollapsed: Boolean = false,
+    onToggleProjects: () -> Unit = {},
     onOpen: (Project) -> Unit,
     onCreate: (String) -> Unit,
     onCreateQuickProject: () -> Unit,
@@ -3789,15 +3839,48 @@ private fun ProjectsScreen(
                     }
                 }
             }
-            item { RuntimeStatusCard(state) }
+            item {
+                RuntimeStatusCard(
+                    state = state,
+                    collapsed = runtimeCollapsed,
+                    onToggle = onToggleRuntime,
+                )
+            }
             item {
                 HomeToolsCard(
+                    collapsed = toolsCollapsed,
+                    onToggle = onToggleTools,
                     onOpenDashboard = onOpenDashboard,
                     onOpenStudio = onOpenStudio,
                 )
             }
-            item { Text(stringResource(R.string.home_your_projects), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
-            if (projects.isEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onToggleProjects)
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.home_your_projects),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        imageVector = if (projectsCollapsed) {
+                            Icons.Default.KeyboardArrowDown
+                        } else {
+                            Icons.Default.KeyboardArrowUp
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (!projectsCollapsed && projects.isEmpty()) {
                 item {
                     Card(
                         modifier = Modifier
@@ -3844,7 +3927,7 @@ private fun ProjectsScreen(
                         }
                     }
                 }
-            } else {
+            } else if (!projectsCollapsed) {
                 items(projects, key = { it.id }) { project ->
                     ProjectCard(
                         project = project,

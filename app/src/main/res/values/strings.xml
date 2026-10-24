@@ -1183,6 +1183,7 @@
     <string name="drawer_category_conversation_sub">Chat sections, microphone, speech</string>
     <string name="drawer_category_dashboard_sub">Hermes dashboard: status and full-screen open</string>
     <string name="drawer_category_studio_sub">Ekko Studio: status and full-screen open</string>
+    <string name="drawer_category_surfaces_sub">Hermes dashboard and Ekko Studio</string>
     <string name="drawer_category_access">Access &amp; permissions</string>
     <string name="drawer_category_access_sub">Access level, Shizuku, tools</string>
     <string name="drawer_category_tools">Tools &amp; runtime</string>

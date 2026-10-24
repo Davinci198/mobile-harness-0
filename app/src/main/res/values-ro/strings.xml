@@ -1183,6 +1183,7 @@
     <string name="drawer_category_conversation_sub">Secțiuni chat, microfon, voce</string>
     <string name="drawer_category_dashboard_sub">Panou Hermes: status și deschidere pe tot ecranul</string>
     <string name="drawer_category_studio_sub">Ekko Studio: status și deschidere pe tot ecranul</string>
+    <string name="drawer_category_surfaces_sub">Panoul Hermes și Ekko Studio</string>
     <string name="drawer_category_access">Acces și permisiuni</string>
     <string name="drawer_category_access_sub">Nivel de acces, Shizuku, instrumente</string>
     <string name="drawer_category_tools">Instrumente și runtime</string>

@@ -157,7 +157,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private enum class SettingsCategory {
-    APPEARANCE, AGENT, CONVERSATION, DASHBOARD, STUDIO, ACCESS, TOOLS, BACKGROUND
+    APPEARANCE, AGENT, CONVERSATION, SURFACES, ACCESS, TOOLS, BACKGROUND
 }
 
 private data class SettingsCategorySpec(
@@ -339,18 +339,11 @@ private fun SettingsDrawerContent(
             Icons.Default.Psychology, Color(0xFF60A5FA),
         ),
         SettingsCategorySpec(
-            SettingsCategory.DASHBOARD,
-            stringResource(categoryTitleRes(SettingsCategory.DASHBOARD)),
-            stringResource(categorySubtitleRes(SettingsCategory.DASHBOARD)),
-            "panou dashboard hermes web ui server pornire start",
-            Icons.Default.Language, Color(0xFF14B8A6),
-        ),
-        SettingsCategorySpec(
-            SettingsCategory.STUDIO,
-            stringResource(categoryTitleRes(SettingsCategory.STUDIO)),
-            stringResource(categorySubtitleRes(SettingsCategory.STUDIO)),
-            "studio ekko web ui server pornire start",
-            Icons.Default.Dashboard, Color(0xFFF59E0B),
+            SettingsCategory.SURFACES,
+            stringResource(categoryTitleRes(SettingsCategory.SURFACES)),
+            stringResource(categorySubtitleRes(SettingsCategory.SURFACES)),
+            "panou dashboard studio hermes ekko web ui server pornire start",
+            Icons.Default.Dashboard, Color(0xFF14B8A6),
         ),
         SettingsCategorySpec(
             SettingsCategory.ACCESS,
@@ -495,8 +488,10 @@ private fun SettingsDrawerContent(
                         SettingsCategory.APPEARANCE -> AppearancePanel(state, viewModel)
                         SettingsCategory.AGENT -> AgentPanel(state, viewModel)
                         SettingsCategory.CONVERSATION -> ConversationPanel()
-                        SettingsCategory.DASHBOARD -> DashboardToolPanel(onOpen = onOpenDashboard)
-                        SettingsCategory.STUDIO -> StudioToolPanel(onOpen = onOpenStudio)
+                        SettingsCategory.SURFACES -> SurfacesPanel(
+                            onOpenDashboard = onOpenDashboard,
+                            onOpenStudio = onOpenStudio,
+                        )
                         SettingsCategory.ACCESS -> AccessPanel(state, viewModel)
                         SettingsCategory.TOOLS -> ToolsPanel(state, viewModel)
                         SettingsCategory.BACKGROUND -> BackgroundPanel(state, viewModel)
@@ -2343,27 +2338,28 @@ private fun AntigravityModelDialog(
 }
 
 @Composable
-private fun DashboardToolPanel(onOpen: () -> Unit) {
-    ServerToolPanel(
-        icon = Icons.Default.Language,
-        accent = Color(0xFF14B8A6),
-        title = stringResource(R.string.tab_dashboard),
-        description = stringResource(R.string.drawer_category_dashboard_sub),
-        checkRunning = { HermesDashboardManager.portOpen() },
-        onOpen = onOpen,
-    )
-}
-
-@Composable
-private fun StudioToolPanel(onOpen: () -> Unit) {
-    ServerToolPanel(
-        icon = Icons.Default.Dashboard,
-        accent = Color(0xFFF59E0B),
-        title = stringResource(R.string.tab_studio),
-        description = stringResource(R.string.drawer_category_studio_sub),
-        checkRunning = { StudioServerManager.portOpen() },
-        onOpen = onOpen,
-    )
+private fun SurfacesPanel(
+    onOpenDashboard: () -> Unit,
+    onOpenStudio: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ServerToolPanel(
+            icon = Icons.Default.Language,
+            accent = Color(0xFF14B8A6),
+            title = stringResource(R.string.tab_dashboard),
+            description = stringResource(R.string.drawer_category_dashboard_sub),
+            checkRunning = { HermesDashboardManager.portOpen() },
+            onOpen = onOpenDashboard,
+        )
+        ServerToolPanel(
+            icon = Icons.Default.Dashboard,
+            accent = Color(0xFFF59E0B),
+            title = stringResource(R.string.tab_studio),
+            description = stringResource(R.string.drawer_category_studio_sub),
+            checkRunning = { StudioServerManager.portOpen() },
+            onOpen = onOpenStudio,
+        )
+    }
 }
 
 /**
@@ -2965,8 +2961,7 @@ private fun categoryTitleRes(id: SettingsCategory): Int = when (id) {
     SettingsCategory.APPEARANCE -> R.string.drawer_category_appearance
     SettingsCategory.AGENT -> R.string.drawer_category_agent
     SettingsCategory.CONVERSATION -> R.string.drawer_category_conversation
-    SettingsCategory.DASHBOARD -> R.string.tab_dashboard
-    SettingsCategory.STUDIO -> R.string.tab_studio
+    SettingsCategory.SURFACES -> R.string.home_tools_title
     SettingsCategory.ACCESS -> R.string.drawer_category_access
     SettingsCategory.TOOLS -> R.string.drawer_category_tools
     SettingsCategory.BACKGROUND -> R.string.drawer_category_background
@@ -2976,8 +2971,7 @@ private fun categorySubtitleRes(id: SettingsCategory): Int = when (id) {
     SettingsCategory.APPEARANCE -> R.string.drawer_category_appearance_sub
     SettingsCategory.AGENT -> R.string.drawer_category_agent_sub
     SettingsCategory.CONVERSATION -> R.string.drawer_category_conversation_sub
-    SettingsCategory.DASHBOARD -> R.string.drawer_category_dashboard_sub
-    SettingsCategory.STUDIO -> R.string.drawer_category_studio_sub
+    SettingsCategory.SURFACES -> R.string.drawer_category_surfaces_sub
     SettingsCategory.ACCESS -> R.string.drawer_category_access_sub
     SettingsCategory.TOOLS -> R.string.drawer_category_tools_sub
     SettingsCategory.BACKGROUND -> R.string.drawer_category_background_sub
