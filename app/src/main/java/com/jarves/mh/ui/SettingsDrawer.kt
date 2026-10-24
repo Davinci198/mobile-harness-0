@@ -43,6 +43,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
@@ -125,9 +126,14 @@ import com.jarves.mh.data.AppLocale
 import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatSectionsMode
+import com.jarves.mh.model.CustomEndpoint
 import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.ProviderKind
+import com.jarves.mh.model.inferredDshApiForUrl
+import com.jarves.mh.model.isHttpScheme
 import com.jarves.mh.model.providersForAgent
+import com.jarves.mh.model.schemeOf
+import com.jarves.mh.model.withDefaultScheme
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.runtime.KeepAliveTracker
 import com.jarves.mh.tools.ToolCatalogLocale
@@ -1492,6 +1498,7 @@ private fun ApiKeysDialog(
     var visibleKeyIds by remember(selectedKind) { mutableStateOf<Set<String>>(emptySet()) }
     var copiedKeyId by remember { mutableStateOf<String?>(null) }
     var appliedEndpoint by remember { mutableStateOf<String?>(null) }
+    var endpointEditorOpen by remember { mutableStateOf(false) }
     var keyName by rememberSaveable(selectedKind.name) { mutableStateOf("") }
     var keySecret by rememberSaveable(selectedKind.name) { mutableStateOf("") }
     var keyVisible by rememberSaveable(selectedKind.name) { mutableStateOf(keys.isEmpty()) }
@@ -1737,11 +1744,20 @@ private fun ApiKeysDialog(
                 }
                 if (state.agentKind != AgentKind.ANTIGRAVITY) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
-                    Text(
-                        stringResource(R.string.agent_endpoints),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.agent_endpoints),
+                            Modifier.weight(1f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        CompactActionButton(
+                            label = stringResource(R.string.agent_endpoint_new),
+                            onClick = { endpointEditorOpen = true },
+                            icon = Icons.Default.Add,
+                            dense = true,
+                        )
+                    }
                     Text(
                         stringResource(R.string.drawer_endpoints_desc),
                         fontSize = 10.5.sp,
@@ -1875,6 +1891,360 @@ private fun ApiKeysDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
+        },
+    )
+
+    if (endpointEditorOpen) {
+        EndpointEditorDialog(
+            viewModel = viewModel,
+            onSave = { endpoint ->
+                endpointEditorOpen = false
+                viewModel.upsertCustomEndpoint(endpoint)
+                viewModel.applyCustomEndpoint(endpoint)
+                selectedKind = ProviderKind.CUSTOM
+                keys = viewModel.getSavedApiKeys(ProviderKind.CUSTOM)
+                keyCounts = keyCounts + (ProviderKind.CUSTOM to keys.size)
+                appliedEndpoint = endpoint.label
+            },
+            onDismiss = { endpointEditorOpen = false },
+        )
+    }
+}
+
+/**
+ * Creates a Custom API endpoint without leaving the Connection manager: name,
+ * base URL, model, gateway protocol and the key the endpoint names. Saving
+ * probes the URL first, like the agent screen editor, and only falls back to
+ * the manual protocol picker when automatic detection fails.
+ */
+@Composable
+private fun EndpointEditorDialog(
+    viewModel: MainViewModel,
+    onSave: (CustomEndpoint) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var label by rememberSaveable { mutableStateOf("") }
+    var url by rememberSaveable { mutableStateOf("") }
+    var model by rememberSaveable { mutableStateOf("") }
+    var protocol by rememberSaveable { mutableStateOf("") }
+    var keyName by rememberSaveable { mutableStateOf("") }
+    var detecting by remember { mutableStateOf(false) }
+    var detectFailed by rememberSaveable { mutableStateOf(false) }
+    var detectNote by rememberSaveable { mutableStateOf("") }
+    var customKeys by remember { mutableStateOf(viewModel.getSavedApiKeys(ProviderKind.CUSTOM)) }
+    var keyEntryOpen by rememberSaveable { mutableStateOf(false) }
+    var newKeyName by rememberSaveable { mutableStateOf("") }
+    var newKeySecret by rememberSaveable { mutableStateOf("") }
+    var newKeyVisible by rememberSaveable { mutableStateOf(false) }
+    val defaultKeyName = stringResource(R.string.agent_key_for, ProviderKind.CUSTOM.title)
+
+    fun persist() {
+        onSave(
+            CustomEndpoint(
+                label = label.trim(),
+                baseUrl = withDefaultScheme(url),
+                model = model.trim(),
+                dshApi = protocol,
+                keyName = keyName,
+            ),
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!detecting) onDismiss() },
+        title = { Text(stringResource(R.string.agent_endpoint_title)) },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text(stringResource(R.string.agent_endpoint_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = {
+                        url = it
+                        // A new URL invalidates the previous probe result and any
+                        // model/protocol inherited from the old endpoint.
+                        detectFailed = false
+                        detectNote = ""
+                        model = ""
+                        protocol = ""
+                    },
+                    label = { Text(stringResource(R.string.settings_base_url)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (url.isNotBlank()) {
+                    if (schemeOf(url).isEmpty()) {
+                        Text(
+                            stringResource(R.string.agent_url_needs_scheme),
+                            fontSize = 10.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else if (!isHttpScheme(url)) {
+                        Text(
+                            stringResource(R.string.agent_url_bad_scheme),
+                            fontSize = 10.5.sp,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    label = { Text(stringResource(R.string.settings_model)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (detecting) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(
+                        stringResource(R.string.agent_endpoint_detecting),
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (detectFailed) {
+                    Text(
+                        stringResource(R.string.agent_endpoint_detect_fail),
+                        fontSize = 10.5.sp,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    if (detectNote.isNotBlank()) {
+                        Text(
+                            detectNote,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        stringResource(R.string.settings_gateway_protocol),
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                    ) {
+                        Column {
+                            listOf(
+                                "anthropic-messages",
+                                "openai-completions",
+                                "openai-responses",
+                            ).forEach { option ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable { protocol = option }
+                                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        option,
+                                        Modifier.weight(1f),
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                    if (protocol == option) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            null,
+                                            Modifier.size(15.dp),
+                                            tint = PocketAccent,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Text(
+                    stringResource(R.string.settings_api_key),
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (keyEntryOpen) {
+                    OutlinedTextField(
+                        value = newKeyName,
+                        onValueChange = { newKeyName = it },
+                        label = { Text(stringResource(R.string.settings_key_name)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = newKeySecret,
+                        onValueChange = { newKeySecret = it },
+                        label = { Text(stringResource(R.string.settings_api_key)) },
+                        singleLine = true,
+                        visualTransformation = if (newKeyVisible) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(onClick = { newKeyVisible = !newKeyVisible }) {
+                                Icon(
+                                    if (newKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    stringResource(R.string.settings_show_hide_key),
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        stringResource(R.string.agent_key_back_saved),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = PocketAccent,
+                        modifier = Modifier
+                            .clickable { keyEntryOpen = false }
+                            .padding(vertical = 2.dp),
+                    )
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                    ) {
+                        Column {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { keyName = "" }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    stringResource(R.string.agent_endpoint_current_key),
+                                    Modifier.weight(1f),
+                                    fontSize = 11.sp,
+                                )
+                                if (keyName.isBlank()) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        null,
+                                        Modifier.size(15.dp),
+                                        tint = PocketAccent,
+                                    )
+                                }
+                            }
+                            customKeys.forEach { key ->
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                                )
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable { keyName = key.name }
+                                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(key.name, Modifier.weight(1f), fontSize = 11.sp)
+                                    if (keyName == key.name) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            null,
+                                            Modifier.size(15.dp),
+                                            tint = PocketAccent,
+                                        )
+                                    }
+                                }
+                            }
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                            )
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { keyEntryOpen = true }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    stringResource(R.string.agent_key_add_new),
+                                    Modifier.weight(1f),
+                                    fontSize = 11.sp,
+                                    color = PocketAccent,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Icon(
+                                    Icons.Default.Add,
+                                    null,
+                                    Modifier.size(15.dp),
+                                    tint = PocketAccent,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    scope.launch {
+                        // A key typed here joins the Custom pool first, so the
+                        // endpoint can reference it by name like any other key.
+                        if (keyEntryOpen && newKeySecret.isNotBlank()) {
+                            val name = newKeyName.trim().ifBlank { defaultKeyName }
+                            customKeys = viewModel.addApiKey(
+                                ProviderKind.CUSTOM,
+                                name,
+                                newKeySecret.trim(),
+                            )
+                            keyName = name
+                            keyEntryOpen = false
+                            newKeyName = ""
+                            newKeySecret = ""
+                            newKeyVisible = false
+                        }
+                        if (detectFailed) {
+                            persist()
+                        } else {
+                            detecting = true
+                            val detected = viewModel.detectCustomEndpoint(
+                                withDefaultScheme(url),
+                                keyName,
+                            )
+                            detecting = false
+                            if (detected.dshApi != null) {
+                                protocol = detected.dshApi
+                                if (model.isBlank()) {
+                                    model = detected.models.firstOrNull()?.id.orEmpty()
+                                }
+                                persist()
+                            } else {
+                                detectFailed = true
+                                detectNote = detected.failure.orEmpty()
+                                if (protocol.isBlank()) protocol = inferredDshApiForUrl(url)
+                                if (model.isBlank()) {
+                                    model = detected.models.firstOrNull()?.id.orEmpty()
+                                }
+                            }
+                        }
+                    }
+                },
+                enabled = label.isNotBlank() && url.isNotBlank() && !detecting &&
+                    (!keyEntryOpen || newKeySecret.isNotBlank()),
+            ) {
+                Text(stringResource(R.string.proj_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !detecting) {
+                Text(stringResource(R.string.settings_cancel))
+            }
         },
     )
 }
