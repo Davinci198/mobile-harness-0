@@ -43,6 +43,16 @@ enum class ProviderKind(
         fixedBaseUrl = true,
         fixedProtocol = true,
     ),
+    KILO_FREE(
+        "Kilo Free",
+        "Free pool of the Kilo gateway, no account",
+        ProviderProtocol.OPENAI_CHAT,
+        "https://api.kilo.ai/api/gateway",
+        "nvidia/nemotron-3.5-lightning:free",
+        experimental = true,
+        fixedBaseUrl = true,
+        fixedProtocol = true,
+    ),
     FREE(
         "Hermes",
         "Free tier, works without an API key",
@@ -113,6 +123,7 @@ val DEEPSEEK_HARNESS_PROVIDERS: Set<ProviderKind> = setOf(
     ProviderKind.KIMI,
     ProviderKind.OPENCODE_ZEN,
     ProviderKind.NVIDIA_NIM,
+    ProviderKind.KILO_FREE,
     ProviderKind.CUSTOM,
 )
 
@@ -120,12 +131,13 @@ val DSH_PROTOCOL_PROVIDERS: Set<ProviderKind> = setOf(
     ProviderKind.KIMI,
     ProviderKind.OPENCODE_ZEN,
     ProviderKind.NVIDIA_NIM,
+    ProviderKind.KILO_FREE,
     ProviderKind.CUSTOM,
 )
 
 fun defaultDshApiForProvider(kind: ProviderKind): String = when (kind) {
     ProviderKind.OPENCODE_ZEN -> "openai-responses"
-    ProviderKind.NVIDIA_NIM -> "openai-completions"
+    ProviderKind.NVIDIA_NIM, ProviderKind.KILO_FREE -> "openai-completions"
     else -> "anthropic-messages"
 }
 
@@ -184,13 +196,22 @@ val OPENCODE_PROVIDERS: Set<ProviderKind> = DEEPSEEK_HARNESS_PROVIDERS + Provide
 /**
  * Provider choices shown for the selected coding agent. The key-free tier
  * (FREE, displayed as "Hermes") belongs to the Hermes agent alone: the other
- * agents route keyless access through their own provider.
+ * agents route keyless access through their own provider. Kilo Free piggybacks
+ * on DeepSeek Harness only: its gateway rejects any Authorization header, so
+ * the turn needs the keyless strip-proxy the other agents' launchers do not
+ * build.
  */
 fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
     AgentKind.DEEPSEEK_HARNESS -> ProviderKind.entries.filter { it in DEEPSEEK_HARNESS_PROVIDERS }
-    AgentKind.OPENCODE -> ProviderKind.entries.filter { it in OPENCODE_PROVIDERS && it != ProviderKind.FREE }
-    AgentKind.HERMES -> ProviderKind.entries.filter { it in OPENCODE_PROVIDERS }
-    AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot { it == ProviderKind.OPENCODE_ZEN || it == ProviderKind.FREE }
+    AgentKind.OPENCODE -> ProviderKind.entries.filter {
+        it in OPENCODE_PROVIDERS && it != ProviderKind.FREE && it != ProviderKind.KILO_FREE
+    }
+    AgentKind.HERMES -> ProviderKind.entries.filter {
+        it in OPENCODE_PROVIDERS && it != ProviderKind.KILO_FREE
+    }
+    AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot {
+        it == ProviderKind.OPENCODE_ZEN || it == ProviderKind.FREE || it == ProviderKind.KILO_FREE
+    }
     AgentKind.ANTIGRAVITY -> emptyList()
 }
 

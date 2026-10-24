@@ -1208,6 +1208,8 @@
     <string name="drawer_connection">Connection</string>
     <string name="drawer_protocol">Protocol</string>
     <string name="drawer_active_key">Active key</string>
+    <string name="drawer_keyless_provider">No key needed — this provider is free.</string>
+    <string name="drawer_keyless_short">no key</string>
     <string name="drawer_models">Models</string>
     <string name="drawer_api_keys_desc">Add, activate or remove keys for this provider. Every request uses the active key; the rest stay ready for failover.</string>
     <string name="drawer_no_api_keys">No API keys saved for this provider yet.</string>

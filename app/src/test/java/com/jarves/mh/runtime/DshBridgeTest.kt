@@ -5,6 +5,7 @@ import com.jarves.mh.model.DEEPSEEK_HARNESS_PROVIDERS
 import com.jarves.mh.model.ProviderKind
 import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.ProviderProtocol
+import com.jarves.mh.model.defaultDshApiForProvider
 import com.jarves.mh.model.inferredDshApiForUrl
 import com.jarves.mh.model.providerProtocolForAgent
 import com.jarves.mh.model.providersForAgent
@@ -475,6 +476,26 @@ class DshRouteMapperTest {
         assertEquals("https://integrate.api.nvidia.com/v1", route.custom?.baseUrl)
     }
 
+    @Test
+    fun kiloFreeRidesTheStripProxyWhenOneIsUp() {
+        val route = DshRouteMapper.forProfile(
+            ProviderProfile(ProviderKind.KILO_FREE),
+            "http://127.0.0.1:40001/api/gateway",
+        )
+        assertEquals("kilo-free", route.name)
+        assertEquals(DshRuntimeBridge.FALLBACK_KEY_ENV, route.keyEnv)
+        assertEquals("openai-completions", route.custom?.api)
+        assertEquals("http://127.0.0.1:40001/api/gateway", route.custom?.baseUrl)
+    }
+
+    @Test
+    fun kiloFreeWithoutProxyKeepsTheFixedOrigin() {
+        val route = DshRouteMapper.forProfile(ProviderProfile(ProviderKind.KILO_FREE))
+        assertEquals("kilo-free", route.name)
+        assertEquals("openai-completions", route.custom?.api)
+        assertEquals("https://api.kilo.ai/api/gateway", route.custom?.baseUrl)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun claudeSubscriptionIsRejected() {
         DshRouteMapper.forProfile(ProviderProfile(ProviderKind.CLAUDE))
@@ -519,6 +540,22 @@ class AgentProviderPresetTest {
     }
 
     @Test
+    fun kiloFreePresetIsLocked() {
+        val kilo = ProviderKind.KILO_FREE
+        assertEquals("https://api.kilo.ai/api/gateway", kilo.defaultBaseUrl)
+        assertEquals("nvidia/nemotron-3.5-lightning:free", kilo.defaultModel)
+        assertTrue(kilo.fixedBaseUrl)
+        assertTrue(kilo.fixedProtocol)
+        assertEquals("https://api.kilo.ai/api/gateway", ProviderProfile(kilo).resolvedBaseUrl)
+        // Kilo speaks plain OpenAI chat completions; the DSH wire is pinned too.
+        assertEquals(
+            ProviderProtocol.OPENAI_CHAT,
+            providerProtocolForAgent(ProviderProfile(kilo), AgentKind.DEEPSEEK_HARNESS),
+        )
+        assertEquals("openai-completions", defaultDshApiForProvider(kilo))
+    }
+
+    @Test
     fun storedDriftCannotOverrideFixedUrl() {
         val profile = ProviderProfile(ProviderKind.OPENCODE_ZEN, baseUrl = "https://evil.example/", model = "x")
         assertEquals("https://opencode.ai/zen/v1", profile.resolvedBaseUrl)
@@ -537,13 +574,23 @@ class AgentProviderPresetTest {
         assertTrue(ProviderKind.OPENCODE_ZEN in DEEPSEEK_HARNESS_PROVIDERS)
         assertTrue(ProviderKind.DEEPSEEK in DEEPSEEK_HARNESS_PROVIDERS)
         assertTrue(ProviderKind.NVIDIA_NIM in DEEPSEEK_HARNESS_PROVIDERS)
-        assertEquals(7, DEEPSEEK_HARNESS_PROVIDERS.size)
+        assertTrue(ProviderKind.KILO_FREE in DEEPSEEK_HARNESS_PROVIDERS)
+        assertEquals(8, DEEPSEEK_HARNESS_PROVIDERS.size)
     }
 
     @Test
     fun openCodeZenIsOnlyShownForDeepSeekHarness() {
         assertTrue(ProviderKind.OPENCODE_ZEN in providersForAgent(AgentKind.DEEPSEEK_HARNESS))
         assertFalse(ProviderKind.OPENCODE_ZEN in providersForAgent(AgentKind.CLAUDE_CODE))
+    }
+
+    @Test
+    fun kiloFreeIsOnlyShownForDeepSeekHarness() {
+        assertTrue(ProviderKind.KILO_FREE in providersForAgent(AgentKind.DEEPSEEK_HARNESS))
+        assertFalse(ProviderKind.KILO_FREE in providersForAgent(AgentKind.OPENCODE))
+        assertFalse(ProviderKind.KILO_FREE in providersForAgent(AgentKind.HERMES))
+        assertFalse(ProviderKind.KILO_FREE in providersForAgent(AgentKind.CLAUDE_CODE))
+        assertFalse(ProviderKind.KILO_FREE in providersForAgent(AgentKind.ANTIGRAVITY))
     }
 
     @Test
@@ -573,6 +620,24 @@ class DshHomePatchTest {
         assertTrue(patch.contains("api: openai-completions"))
         assertTrue(patch.contains("baseURL: 'https://integrate.api.nvidia.com/v1'"))
         assertTrue(patch.contains("- id: 'meta/llama-3.2-11b-vision-instruct'"))
+    }
+
+    @Test
+    fun kiloFreeRouteWritesTheLoopbackStripProxyPatch() {
+        val route = DshRoute(
+            name = "kilo-free",
+            keyEnv = DshRuntimeBridge.FALLBACK_KEY_ENV,
+            defaultModel = "nvidia/nemotron-3.5-lightning:free",
+            custom = DshCustomRoute("openai-completions", "http://127.0.0.1:43126/api/gateway"),
+        )
+        val patch = dshHomePatch(route, "nvidia/nemotron-3.5-lightning:free")
+
+        assertTrue(patch.contains("- id: llm-pi-ai"))
+        assertTrue(patch.contains("kilo-free:"))
+        assertTrue(patch.contains("apiKeyEnv: MH_DSH_API_KEY"))
+        assertTrue(patch.contains("api: openai-completions"))
+        assertTrue(patch.contains("baseURL: 'http://127.0.0.1:43126/api/gateway'"))
+        assertTrue(patch.contains("- id: 'nvidia/nemotron-3.5-lightning:free'"))
     }
 
     @Test

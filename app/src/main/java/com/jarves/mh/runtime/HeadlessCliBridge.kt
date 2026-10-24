@@ -290,7 +290,9 @@ internal abstract class HeadlessCliBridge(
      * proxy that is closed with the turn.
      */
     private fun openAiProxyFor(provider: ProviderProfile, secret: String): LocalOpenAiProxy? {
-        if (secret.isBlank() || !provider.routesThroughOpenAiProxy()) return null
+        // Kilo Free is keyless by design: the proxy drops the Authorization
+        // header (blank key), which is exactly what its free pool wants.
+        if ((secret.isBlank() && provider.kind != ProviderKind.KILO_FREE) || !provider.routesThroughOpenAiProxy()) return null
         val warm = supportsWarmSession()
         val signature = listOf(
             provider.kind.name,
@@ -802,12 +804,14 @@ internal abstract class HeadlessCliBridge(
 
 /**
  * True when a blank secret must stop the session: remote providers need a saved
- * key. FREE and OpenCode Zen are keyless by design (the guest falls back to its
- * bundled free-tier credentials), and a loopback gateway ignores the header.
+ * key. FREE, OpenCode Zen and Kilo Free are keyless by design (the guest falls
+ * back to its bundled free-tier credentials), and a loopback gateway ignores
+ * the header.
  */
 internal fun requiresSavedSecret(provider: ProviderProfile): Boolean =
     provider.kind != ProviderKind.FREE &&
         provider.kind != ProviderKind.OPENCODE_ZEN &&
+        provider.kind != ProviderKind.KILO_FREE &&
         !isLoopbackBaseUrl(provider.resolvedBaseUrl)
 
 private data class CliRunResult(

@@ -131,6 +131,7 @@ import com.jarves.mh.model.ChatSectionsMode
 import com.jarves.mh.model.CustomEndpoint
 import com.jarves.mh.model.DevStack
 import com.jarves.mh.model.ProviderKind
+import com.jarves.mh.model.ProviderProfile
 import com.jarves.mh.model.inferredDshApiForUrl
 import com.jarves.mh.model.isHttpScheme
 import com.jarves.mh.model.providersForAgent
@@ -1198,7 +1199,14 @@ private fun AgentPanel(
     ) {
         ConnectionValueRow(stringResource(R.string.settings_base_url), state.provider.resolvedBaseUrl)
         ConnectionValueRow(stringResource(R.string.drawer_protocol), state.provider.dshApi)
-        if (state.provider.kind != ProviderKind.FREE) {
+        if (state.provider.kind == ProviderKind.KILO_FREE) {
+            Text(
+                stringResource(R.string.drawer_keyless_provider),
+                fontSize = 10.5.sp,
+                lineHeight = 14.sp,
+                color = PocketGreen,
+            )
+        } else if (state.provider.kind != ProviderKind.FREE) {
             ConnectionValueRow(stringResource(R.string.drawer_active_key), state.activeApiKeyName ?: "—")
         }
         if (state.customEndpoints.isNotEmpty()) {
@@ -1514,6 +1522,7 @@ private fun ApiKeysDialog(
         }
     }
     var selectedKind by remember(defaultKind) { mutableStateOf(defaultKind) }
+    val keyless = selectedKind == ProviderKind.KILO_FREE
     var keys by remember(selectedKind) { mutableStateOf(viewModel.getSavedApiKeys(selectedKind)) }
     var keyCounts by remember(availableKinds) {
         mutableStateOf(availableKinds.associateWith { viewModel.getSavedApiKeys(it).size })
@@ -1581,7 +1590,11 @@ private fun ApiKeysDialog(
                 )
                 Box {
                     CompactActionButton(
-                        label = "${selectedKind.title} · ${stringResource(R.string.drawer_key_count, keys.size)}",
+                        label = if (keyless) {
+                            "${selectedKind.title} · ${stringResource(R.string.drawer_keyless_short)}"
+                        } else {
+                            "${selectedKind.title} · ${stringResource(R.string.drawer_key_count, keys.size)}"
+                        },
                         onClick = { providerMenuExpanded = true },
                         modifier = Modifier.fillMaxWidth(),
                         icon = Icons.Default.Key,
@@ -1600,12 +1613,16 @@ private fun ApiKeysDialog(
                                             fontWeight = FontWeight.Medium,
                                         )
                                         Text(
-                                            "${provider.subtitle} · ${
-                                                stringResource(
-                                                    R.string.drawer_key_count,
-                                                    keyCounts[provider] ?: 0,
-                                                )
-                                            }",
+                                            if (provider == ProviderKind.KILO_FREE) {
+                                                provider.subtitle
+                                            } else {
+                                                "${provider.subtitle} · ${
+                                                    stringResource(
+                                                        R.string.drawer_key_count,
+                                                        keyCounts[provider] ?: 0,
+                                                    )
+                                                }"
+                                            },
                                             fontSize = 10.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1,
@@ -1631,17 +1648,35 @@ private fun ApiKeysDialog(
                         }
                     }
                 }
-                ConnectionValueRow(
-                    stringResource(R.string.drawer_active_key),
-                    activeKey?.name ?: "—",
-                )
-                if (keys.isEmpty()) {
+                if (keyless) {
+                    Text(
+                        stringResource(R.string.drawer_keyless_provider),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        color = PocketGreen,
+                    )
+                    CompactActionButton(
+                        label = stringResource(R.string.drawer_endpoint_use),
+                        onClick = {
+                            viewModel.updateProvider(ProviderProfile(kind = selectedKind), "")
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp),
+                        filled = true,
+                    )
+                } else {
+                    ConnectionValueRow(
+                        stringResource(R.string.drawer_active_key),
+                        activeKey?.name ?: "—",
+                    )
+                }
+                if (!keyless && keys.isEmpty()) {
                     Text(
                         stringResource(R.string.drawer_no_api_keys),
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else {
+                } else if (!keyless) {
                     Text(
                         stringResource(R.string.agent_saved_keys, keys.size),
                         fontSize = 12.sp,
@@ -1859,59 +1894,61 @@ private fun ApiKeysDialog(
                         )
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
-                Text(
-                    stringResource(R.string.settings_add_key),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                OutlinedTextField(
-                    value = keyName,
-                    onValueChange = { keyName = it },
-                    label = { Text(stringResource(R.string.settings_key_name)) },
-                    placeholder = { Text(stringResource(R.string.settings_key_name_placeholder)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = keySecret,
-                    onValueChange = { keySecret = it },
-                    label = { Text(stringResource(R.string.settings_api_key)) },
-                    singleLine = true,
-                    visualTransformation = if (keyVisible) {
-                        VisualTransformation.None
-                    } else {
-                        PasswordVisualTransformation()
-                    },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    trailingIcon = {
-                        IconButton(onClick = { keyVisible = !keyVisible }) {
-                            Icon(
-                                if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                stringResource(R.string.settings_show_hide_key),
+                if (!keyless) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+                    Text(
+                        stringResource(R.string.settings_add_key),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    OutlinedTextField(
+                        value = keyName,
+                        onValueChange = { keyName = it },
+                        label = { Text(stringResource(R.string.settings_key_name)) },
+                        placeholder = { Text(stringResource(R.string.settings_key_name_placeholder)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = keySecret,
+                        onValueChange = { keySecret = it },
+                        label = { Text(stringResource(R.string.settings_api_key)) },
+                        singleLine = true,
+                        visualTransformation = if (keyVisible) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(onClick = { keyVisible = !keyVisible }) {
+                                Icon(
+                                    if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    stringResource(R.string.settings_show_hide_key),
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    CompactActionButton(
+                        label = stringResource(R.string.settings_save_api_key),
+                        onClick = {
+                            val updated = viewModel.addApiKey(
+                                selectedKind,
+                                keyName.trim().ifBlank { defaultKeyName },
+                                keySecret.trim(),
                             )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                CompactActionButton(
-                    label = stringResource(R.string.settings_save_api_key),
-                    onClick = {
-                        val updated = viewModel.addApiKey(
-                            selectedKind,
-                            keyName.trim().ifBlank { defaultKeyName },
-                            keySecret.trim(),
-                        )
-                        keys = updated
-                        keyCounts = keyCounts + (selectedKind to updated.size)
-                        keyName = ""
-                        keySecret = ""
-                        keyVisible = false
-                    },
-                    enabled = keySecret.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp),
-                    filled = true,
-                )
+                            keys = updated
+                            keyCounts = keyCounts + (selectedKind to updated.size)
+                            keyName = ""
+                            keySecret = ""
+                            keyVisible = false
+                        },
+                        enabled = keySecret.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp),
+                        filled = true,
+                    )
+                }
             }
         },
         confirmButton = {
