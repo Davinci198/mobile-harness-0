@@ -175,6 +175,33 @@ class ProviderApiClientTest {
     }
 
     @Test
+    fun kiloFreePoolEndpointIsRecognizedByHost() {
+        val client = ProviderApiClient()
+
+        assertTrue(client.isKiloFreePool("https://api.kilo.ai/api/gateway"))
+        assertTrue(client.isKiloFreePool("https://api.kilo.ai/api/gateway/"))
+        assertTrue(client.isKiloFreePool("https://api.kilo.ai/api/gateway/models"))
+        assertTrue(client.isKiloFreePool("http://api.kilo.ai/api/gateway"))
+        assertFalse(client.isKiloFreePool("https://api.kilo.ai.evil.example/api/gateway"))
+        assertFalse(client.isKiloFreePool("https://opencode.ai/zen/v1"))
+        assertFalse(client.isKiloFreePool(""))
+    }
+
+    @Test
+    fun kiloCatalogProbesGatewayModelsFirst() {
+        assertEquals(
+            listOf(
+                "https://api.kilo.ai/api/gateway/models",
+                "https://api.kilo.ai/api/gateway/v1/models",
+            ),
+            ProviderApiClient().modelEndpoints(
+                "https://api.kilo.ai/api/gateway",
+                ProviderProtocol.OPENAI_CHAT,
+            ),
+        )
+    }
+
+    @Test
     fun nousFreeTierCatalogProbesV1ModelsAndIgnoresTheDoubledPath() {
         assertEquals(
             listOf(

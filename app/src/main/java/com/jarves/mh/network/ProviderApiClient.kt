@@ -134,7 +134,13 @@ class ProviderApiClient(
         val cleanBaseUrl = normalizeBaseUrl(baseUrl)
         // The Hermes free tier (Nous inference) serves its catalog anonymously:
         // drop any account-scoped saved key so it never shrinks the list.
-        val cleanKey = if (isNousFreeTier(baseUrl)) "" else sanitizeApiKey(apiKey)
+        // Kilo's free pool goes further: ANY Authorization header is a 401,
+        // so a saved (or junk) key must never ride discovery either.
+        val cleanKey = when {
+            isNousFreeTier(baseUrl) -> ""
+            isKiloFreePool(cleanBaseUrl) -> ""
+            else -> sanitizeApiKey(apiKey)
+        }
         if (cleanBaseUrl.isBlank()) {
             return@withContext ModelDiscoveryResult.Failure("Enter a base URL first.")
         }
@@ -155,7 +161,13 @@ class ProviderApiClient(
                     lastProviderMessage = providerErrorMessage(response.body)
                 }
                 response.code in 200..299 -> {
-                    val models = ModelResponseParser.parse(response.body)
+                    val models = ModelResponseParser.parse(response.body).let { parsed ->
+                        // Kilo's gateway lists its paid catalog too, but only
+                        // isFree rows answer keyless — everything else is a
+                        // 401. The Kilo Free provider therefore shows free ids
+                        // only; every other provider keeps its full list.
+                        if (isKiloFreePool(cleanBaseUrl)) parsed.filter(DiscoveredModel::isFree) else parsed
+                    }
                     if (models.isNotEmpty()) return@withContext ModelDiscoveryResult.Success(models, endpoint)
                     lastMessage = "The provider replied, but its model list was empty or unsupported."
                 }
@@ -248,7 +260,14 @@ class ProviderApiClient(
         val freeTier = isNousFreeTier(cleanBaseUrl)
         // Free-tier probes authenticate with the guest's anonymous Nous token,
         // never with a saved key (FREE.pool keys belong to a different service).
-        val cleanKey = if (freeTier) nousAccessToken().orEmpty().trim() else sanitizeApiKey(apiKey)
+        // Kilo's free pool rejects every Authorization header, so health probes
+        // must go out headerless too — a saved junk key would mark the whole
+        // pool broken.
+        val cleanKey = when {
+            freeTier -> nousAccessToken().orEmpty().trim()
+            isKiloFreePool(cleanBaseUrl) -> ""
+            else -> sanitizeApiKey(apiKey)
+        }
         if (cleanBaseUrl.isBlank() || models.isEmpty()) return@withContext emptyList()
         // Zen gates completion probes to the OpenCode client, so every chat probe
         // would fail there; health instead means "listed in the live catalog".
@@ -381,15 +400,22 @@ class ProviderApiClient(
         val cleanBaseUrl = normalizeBaseUrl(baseUrl)
         val cleanModel = model.trim()
         val freeTier = isNousFreeTier(cleanBaseUrl)
+        // Kilo's free pool rejects every Authorization header and needs none,
+        // so it is probed headerless and never asked for a key.
+        val kiloFree = isKiloFreePool(cleanBaseUrl)
         // The free tier probes with the guest's anonymous Nous token when one
         // exists; the saved key never applies there (FREE.pool is another service).
-        val cleanKey = if (freeTier) nousAccessToken().orEmpty().trim() else sanitizeApiKey(apiKey)
+        val cleanKey = when {
+            freeTier -> nousAccessToken().orEmpty().trim()
+            kiloFree -> ""
+            else -> sanitizeApiKey(apiKey)
+        }
         // A loopback gateway on this device answers without credentials, so a
         // missing key is only an error for remote endpoints. OpenCode Zen's free
         // tier is designed to run without a key, and its catalog answers anonymously.
         // The Hermes Nous endpoint likewise serves its catalog without a key.
         val keyRequired = !isLoopbackBaseUrl(cleanBaseUrl) && !isOpenCodeZen(cleanBaseUrl) &&
-            !freeTier
+            !freeTier && !kiloFree
         if (cleanBaseUrl.isBlank() || cleanModel.isBlank() || (keyRequired && cleanKey.isBlank())) {
             return@withContext ConnectionValidation.Failure("Base URL, model, and API key are required.")
         }
@@ -414,6 +440,7 @@ class ProviderApiClient(
                 response.code in 200..299 -> return@withContext ConnectionValidation.Success(
                     when {
                         freeTier -> "Connected. $cleanModel answered on the Hermes free tier."
+                        kiloFree -> "Connected. Kilo's free pool answered without a key."
                         protocol == ProviderProtocol.ANTHROPIC || protocol == ProviderProtocol.ANTHROPIC_GATEWAY || protocol == ProviderProtocol.OPENROUTER ->
                             "Anthropic Messages endpoint verified. Claude Code settings are ready."
                         else -> "Connection successful. Claude Code settings are ready."
@@ -698,6 +725,20 @@ class ProviderApiClient(
         return host == "inference-api.nousresearch.com"
     }
 
+    /**
+     * True when this base URL serves the Kilo free pool. Its keyless catalog
+     * endpoint answers `isFree` rows only; the paid catalog shares the path
+     * with the free pool, so discovery filters to [DiscoveredModel.isFree] rows.
+     */
+    internal fun isKiloFreePool(baseUrl: String): Boolean {
+        val host = normalizeBaseUrl(baseUrl)
+            .substringAfter("://", baseUrl)
+            .substringBefore("/")
+            .substringBefore(":")
+            .lowercase()
+        return host == "api.kilo.ai"
+    }
+
     private fun sanitizeApiKey(raw: String): String =
         raw.trim().removePrefix("Bearer ").removePrefix("bearer ").trim()
 
@@ -849,11 +890,19 @@ object ModelResponseParser {
                         if (id.isNotBlank()) {
                             val label = item.optString("display_name").ifBlank { item.optString("displayName") }.ifBlank { id }
                             val pricing = item.optJSONObject("pricing")
-                            val free = id.endsWith(":free", ignoreCase = true) || pricing?.let {
-                                listOf("prompt", "completion", "request").all { field ->
-                                    it.optString(field, "0").toDoubleOrNull() == 0.0
-                                }
-                            } == true
+                            // An explicit isFree row flag wins: paid rows can
+                            // carry all-zero pricing on other fields (Kilo's
+                            // music models), which the heuristic below would
+                            // misread as free.
+                            val free = if (item.has("isFree")) {
+                                item.optBoolean("isFree")
+                            } else {
+                                id.endsWith(":free", ignoreCase = true) || pricing?.let {
+                                    listOf("prompt", "completion", "request").all { field ->
+                                        it.optString(field, "0").toDoubleOrNull() == 0.0
+                                    }
+                                } == true
+                            }
                             add(DiscoveredModel(id, label, free))
                         }
                     }

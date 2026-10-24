@@ -17,6 +17,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** True when this profile's OpenAI-compatible traffic can ride the loopback proxy. */
 internal fun ProviderProfile.routesThroughOpenAiProxy(): Boolean = when (kind) {
     ProviderKind.NVIDIA_NIM -> true
+    // Kilo Free is always keyless but is routed through the proxy anyway:
+    // its gateway answers 401 to any request that carries an Authorization
+    // header, and the guest agents always send their placeholder key to a
+    // custom base URL — the proxy is what drops the header (blank key).
+    ProviderKind.KILO_FREE -> true
     ProviderKind.CUSTOM -> dshApi.ifBlank { "anthropic-messages" } == "openai-completions"
     else -> false
 }
@@ -108,7 +113,12 @@ internal class LocalOpenAiProxy(
         connection.connectTimeout = 20_000
         connection.readTimeout = 180_000
         connection.instanceFollowRedirects = false
-        connection.setRequestProperty("Authorization", "Bearer $apiKey")
+        // Keyless providers (Kilo Free's pool rejects any Authorization header,
+        // even a placeholder, with a 401) ride the proxy with a blank key: the
+        // proxy then forwards the request without the header entirely.
+        if (apiKey.isNotBlank()) {
+            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+        }
         for ((name, value) in headers) {
             when (name) {
                 "host", "content-length", "connection", "expect", "accept-encoding",

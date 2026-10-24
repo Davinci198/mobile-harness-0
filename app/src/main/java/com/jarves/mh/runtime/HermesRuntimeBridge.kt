@@ -78,6 +78,10 @@ internal fun hermesProviderName(provider: ProviderProfile): String = when (provi
     ProviderKind.LLM_ROUTER -> "openrouter"
     ProviderKind.OPENCODE_ZEN -> "openai"
     ProviderKind.NVIDIA_NIM -> "nvidia"
+    // Kilo Free is a DeepSeek Harness provider (providersForAgent keeps it out
+    // of the Hermes picker); if a stored profile ever lands here, its gateway
+    // speaks plain OpenAI-compatible.
+    ProviderKind.KILO_FREE -> "openai"
     ProviderKind.CUSTOM -> {
         val api = provider.dshApi.ifBlank { "anthropic-messages" }
         if (api == "openai-completions" || api == "openai-responses") "openai" else "anthropic"
@@ -162,6 +166,13 @@ internal fun hermesEnvironmentFor(
             environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
             environment["NVIDIA_API_KEY"] = key
             environment["NVIDIA_BASE_URL"] = provider.resolvedBaseUrl
+        }
+        // Kilo Free never reaches here through the picker; if a stored profile
+        // does, dial it directly with the keyless placeholder pair (Kilo
+        // rejects placeholders, so the turn fails visibly rather than silently).
+        ProviderKind.KILO_FREE -> {
+            environment["OPENAI_API_KEY"] = key
+            environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl
         }
         ProviderKind.CUSTOM -> {
             val api = provider.dshApi.ifBlank { "anthropic-messages" }

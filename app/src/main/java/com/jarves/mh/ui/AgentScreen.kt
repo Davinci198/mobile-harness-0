@@ -446,11 +446,11 @@ fun AgentScreen(
                     statusOk = true
                     statusProviderMessage = null
                     showModels = true
-                    // The keyless Zen and Hermes catalogs list mostly paid
-                    // models; probe them right away so broken entries surface
-                    // without a second tap — but only when the user left the
-                    // model scan enabled.
-                    if ((kind == ProviderKind.FREE || kind == ProviderKind.OPENCODE_ZEN) && state.autoScanEnabled) {
+                    // The keyless Zen, Hermes and Kilo catalogs list mostly
+                    // paid models; probe them right away so broken entries
+                    // surface without a second tap — but only when the user
+                    // left the model scan enabled.
+                    if ((kind == ProviderKind.FREE || kind == ProviderKind.OPENCODE_ZEN || kind == ProviderKind.KILO_FREE) && state.autoScanEnabled) {
                         onScanModels(profile, effectiveKey, result.models)
                     }
                 }
@@ -1965,9 +1965,10 @@ fun AgentScreen(
                             scope.launch {
                                 isValidating = true
                                 val kind = selectedKind
-                                // The free tier has no credential UI: report its
-                                // result as the section status, not per-key chips.
-                                val activeKeyId = if (kind == ProviderKind.FREE) {
+                                // The free tiers have no credential UI: report
+                                // their result as the section status, not
+                                // per-key chips.
+                                val activeKeyId = if (kind == ProviderKind.FREE || kind == ProviderKind.KILO_FREE) {
                                     null
                                 } else {
                                     savedKeys.firstOrNull { it.isActive }?.id
@@ -3367,6 +3368,11 @@ fun defaultModelsForProvider(kind: ProviderKind): List<DiscoveredModel> = when (
     )
     ProviderKind.NVIDIA_NIM -> listOf(
         DiscoveredModel(ProviderKind.NVIDIA_NIM.defaultModel, "Qwen 2.5 Coder 32B"),
+    )
+    ProviderKind.KILO_FREE -> listOf(
+        DiscoveredModel(ProviderKind.KILO_FREE.defaultModel, "Nemotron 3.5 Lightning (Kilo Free)"),
+        DiscoveredModel("kilo-auto/free", "Kilo Auto (free pool)"),
+        DiscoveredModel("poolside/laguna-s-2.1:free", "Laguna S 2.1 (Kilo Free)"),
     )
     ProviderKind.ANTHROPIC -> listOf(
         DiscoveredModel("claude-3-7-sonnet-20250219", "Claude 3.7 Sonnet (Hybrid)"),
