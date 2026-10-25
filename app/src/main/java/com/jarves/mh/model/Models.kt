@@ -190,27 +190,25 @@ fun dshApiForProtocol(protocol: ProviderProtocol): String = when (protocol) {
     else -> "anthropic-messages"
 }
 
-/** Providers usable with OpenCode and Hermes: the same keyed set as DeepSeek Harness plus a key-free option. */
+/** Providers usable with OpenCode and Hermes: the DeepSeek set plus Hermes' key-free tier. */
 val OPENCODE_PROVIDERS: Set<ProviderKind> = DEEPSEEK_HARNESS_PROVIDERS + ProviderKind.FREE
 
 /**
- * Provider choices shown for the selected coding agent. The key-free tier
- * (FREE, displayed as "Hermes") belongs to the Hermes agent alone: the other
- * agents route keyless access through their own provider. Kilo Free piggybacks
- * on DeepSeek Harness only: its gateway rejects any Authorization header, so
- * the turn needs the keyless strip-proxy the other agents' launchers do not
- * build.
+ * Provider choices shown for the selected coding agent. The key-free tiers
+ * (FREE, displayed as "Hermes", and KILO_FREE) are available wherever the
+ * corresponding runtime bridge can route them. Antigravity remains account
+ * backed and does not use this provider picker.
  */
 fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
     AgentKind.DEEPSEEK_HARNESS -> ProviderKind.entries.filter { it in DEEPSEEK_HARNESS_PROVIDERS }
     AgentKind.OPENCODE -> ProviderKind.entries.filter {
-        it in OPENCODE_PROVIDERS && it != ProviderKind.FREE && it != ProviderKind.KILO_FREE
+        it in OPENCODE_PROVIDERS && it != ProviderKind.FREE
     }
     AgentKind.HERMES -> ProviderKind.entries.filter {
-        it in OPENCODE_PROVIDERS && it != ProviderKind.KILO_FREE
+        it in OPENCODE_PROVIDERS
     }
     AgentKind.CLAUDE_CODE -> ProviderKind.entries.filterNot {
-        it == ProviderKind.OPENCODE_ZEN || it == ProviderKind.FREE || it == ProviderKind.KILO_FREE
+        it == ProviderKind.OPENCODE_ZEN || it == ProviderKind.FREE
     }
     AgentKind.ANTIGRAVITY -> emptyList()
 }

@@ -115,8 +115,9 @@ class ClaudeRuntimeBridge(
         eventBus.emit(RuntimeEvent.SessionStarted(sessionId))
         pushForegroundProgress("Starting Claude Code…")
         val secret = secretFor(provider).orEmpty()
-        // A loopback gateway on this device runs keyless; only remote providers need a saved secret.
-        if (secret.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) {
+        // A loopback gateway on this device runs keyless; Kilo Free is a remote
+        // keyless gateway whose local format bridge strips Authorization.
+        if (secret.isBlank() && provider.kind != ProviderKind.KILO_FREE && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) {
             val message = if (provider.kind == ProviderKind.CLAUDE) {
                 "No Claude subscription token is saved. Add one from Agent → AI provider."
             } else {
@@ -154,7 +155,7 @@ class ClaudeRuntimeBridge(
             formatGateway = if (providerProtocolForAgent(provider, AgentKind.CLAUDE_CODE) in setOf(
                     com.jarves.mh.model.ProviderProtocol.OPENAI_CHAT,
                     com.jarves.mh.model.ProviderProtocol.OPENAI_RESPONSES,
-                )) LocalFormatGateway(provider, credential).start() else null
+                )) LocalFormatGateway(provider, if (provider.kind == ProviderKind.KILO_FREE) "" else credential).start() else null
             val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = credential, localGatewayUrl = formatGateway?.url)
             Log.d("ClaudeBridge", "Provider: ${provider.kind}, Model: ${provider.model}, BaseUrl: ${provider.baseUrl}")
             Log.d("ClaudeBridge", "Launch environment keys: ${launch.environment.keys}")
