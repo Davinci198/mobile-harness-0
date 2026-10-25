@@ -1321,6 +1321,7 @@ private fun ConnectionSettings(
     Button(
         onClick = onValidate,
         enabled = (selectedKind == ProviderKind.FREE ||
+            selectedKind == ProviderKind.KILO_FREE ||
             (baseUrl.isNotBlank() && model.isNotBlank() && apiKey.isNotBlank())) &&
             !isDiscovering && !isValidating,
         modifier = Modifier.fillMaxWidth().height(52.dp),
