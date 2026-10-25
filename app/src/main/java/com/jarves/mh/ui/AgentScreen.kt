@@ -412,7 +412,10 @@ fun AgentScreen(
         val effectiveKey = apiKey.trim().ifBlank { newApiKey.trim() }
         val supportsPublicDiscovery = selectedKind == ProviderKind.LLM_ROUTER ||
             selectedKind == ProviderKind.OPENCODE_ZEN ||
-            selectedKind == ProviderKind.FREE
+            selectedKind == ProviderKind.FREE ||
+            // Kilo Free answers keyless (any Authorization header is a 401),
+            // so its catalog is publicly discoverable like Zen/Hermes.
+            selectedKind == ProviderKind.KILO_FREE
         // A loopback gateway on this device serves its model list without credentials.
         val loopbackTarget = isLoopbackBaseUrl(if (selectedKind.fixedBaseUrl) selectedKind.defaultBaseUrl else baseUrl)
         if (effectiveKey.isBlank() && !supportsPublicDiscovery && !loopbackTarget) {
@@ -2814,7 +2817,21 @@ private fun AgentProviderCard(
                 }
             }
 
-            if (selectedKind != ProviderKind.FREE) {
+            if (selectedKind == ProviderKind.KILO_FREE) {
+                // Kilo Free is keyless by design: show the keyless notice where
+                // other providers list their credential rows (parity with the
+                // settings drawer).
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                Text(
+                    stringResource(R.string.drawer_keyless_provider),
+                    fontSize = 10.5.sp,
+                    lineHeight = 14.sp,
+                    color = Color(0xFF2E9D72),
+                    modifier = Modifier.padding(start = 21.dp, top = 10.dp, bottom = 10.dp),
+                )
+            }
+
+            if (selectedKind != ProviderKind.FREE && selectedKind != ProviderKind.KILO_FREE) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
 
                 PremiumSummaryRow(
@@ -2996,9 +3013,11 @@ private fun AgentProviderCard(
     SecondaryActionButton(
         onClick = onValidate,
         enabled = (apiKey.isNotBlank() || loopbackEndpoint || selectedKind == ProviderKind.OPENCODE_ZEN ||
-            selectedKind == ProviderKind.FREE) &&
+            selectedKind == ProviderKind.FREE ||
+            selectedKind == ProviderKind.KILO_FREE) &&
             !isDiscovering && !isValidating &&
             (selectedKind == ProviderKind.CLAUDE || selectedKind == ProviderKind.FREE ||
+                selectedKind == ProviderKind.KILO_FREE ||
                 (baseUrl.isNotBlank() && model.isNotBlank())),
         modifier = Modifier.fillMaxWidth().height(48.dp),
     ) {

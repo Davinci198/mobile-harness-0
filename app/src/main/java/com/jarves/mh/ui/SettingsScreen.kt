@@ -514,9 +514,9 @@ private fun LegacySettingsScreen(
                                 when (val result = onDiscoverModels(profile, apiKey.trim())) {
                                     is ModelDiscoveryResult.Success -> {
                                         discoveredModels = result.models
-                                        // The free tier keeps its keyless default model
+                                        // The free tiers keep their keyless default model
                                         // instead of swapping to the first catalog entry.
-                                        if (selectedKind != ProviderKind.FREE) {
+                                        if (selectedKind != ProviderKind.FREE && selectedKind != ProviderKind.KILO_FREE) {
                                             result.models.firstOrNull()?.let { model = it.id }
                                         }
                                         validationStatus = "Discovered ${result.models.size} models. Selected ${model}."
@@ -545,8 +545,8 @@ private fun LegacySettingsScreen(
                 }
                 Spacer(Modifier.height(10.dp))
 
-                // The Hermes free tier is keyless: no credential field.
-                if (selectedKind != ProviderKind.FREE) {
+                // The keyless tiers (Hermes free, Kilo Free) have no credential field.
+                if (selectedKind != ProviderKind.FREE && selectedKind != ProviderKind.KILO_FREE) {
                     // API Key with eye toggle
                     OutlinedTextField(
                         value = apiKey,
@@ -630,9 +630,11 @@ private fun LegacySettingsScreen(
                         }
                     },
                     enabled = (selectedKind == ProviderKind.FREE ||
+                        selectedKind == ProviderKind.KILO_FREE ||
                         (baseUrl.isNotBlank() && model.isNotBlank())) &&
                         (apiKey.isNotBlank() || selectedKind == ProviderKind.OPENCODE_ZEN ||
-                            selectedKind == ProviderKind.FREE) &&
+                            selectedKind == ProviderKind.FREE ||
+                            selectedKind == ProviderKind.KILO_FREE) &&
                         !isDiscovering && !isValidating,
                     modifier = Modifier
                         .fillMaxWidth()

@@ -2964,7 +2964,10 @@ private fun ProviderCredentialsStep(
     val hasKey = apiKey.isNotBlank() || hasStoredSecret
     val loopbackTarget = isLoopbackBaseUrl(if (provider.fixedBaseUrl) provider.defaultBaseUrl else baseUrl)
     val canUseEndpoint = hasKey || loopbackTarget || provider == ProviderKind.OPENCODE_ZEN ||
-        provider == ProviderKind.FREE
+        provider == ProviderKind.FREE ||
+        // Kilo Free answers keyless: its gateway rejects any Authorization
+        // header, so discovery and validation run headerless like Zen/Hermes.
+        provider == ProviderKind.KILO_FREE
     val requestPreview = remember(provider, baseUrl, model, dshApi, agentKind) {
         if (provider.fixedBaseUrl) ""
         else ProviderApiClient().requestPreviewUrl(
@@ -3175,8 +3178,8 @@ private fun ProviderCredentialsStep(
                     if (provider in DSH_PROTOCOL_PROVIDERS && !provider.fixedProtocol) {
                         DshApiProtocolPicker(selected = dshApi, onSelected = { onDshApi(it); status = null })
                     }
-                    // The Hermes free tier is keyless: no credential field.
-                    if (provider != ProviderKind.FREE) {
+                    // The keyless tiers (Hermes free, Kilo Free) have no credential field.
+                    if (provider != ProviderKind.FREE && provider != ProviderKind.KILO_FREE) {
                         OutlinedTextField(
                             apiKey,
                             { onApiKey(it); status = null; statusDetails = null },
