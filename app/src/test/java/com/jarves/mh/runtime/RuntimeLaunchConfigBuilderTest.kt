@@ -89,6 +89,19 @@ class RuntimeLaunchConfigBuilderTest {
     }
 
     @Test
+    fun kiloFreeUsesTheLocalFormatGatewayWithoutAStoredKey() {
+        val config = RuntimeLaunchConfigBuilder.build(
+            ProviderProfile(ProviderKind.KILO_FREE),
+            authToken = "loopback",
+            localGatewayUrl = "http://127.0.0.1:12345",
+        )
+
+        assertEquals("http://127.0.0.1:12345", config.environment["ANTHROPIC_BASE_URL"])
+        assertEquals("loopback", config.environment["ANTHROPIC_AUTH_TOKEN"])
+        assertEquals("loopback", config.environment["ANTHROPIC_API_KEY"])
+    }
+
+    @Test
     fun customGatewayWithTrailingV1IsNormalizedForClaudeCode() {
         val config = RuntimeLaunchConfigBuilder.build(
             ProviderProfile(ProviderKind.CUSTOM, "https://gateway.example/v1/", "custom-model", true),

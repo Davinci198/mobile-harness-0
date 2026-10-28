@@ -84,7 +84,7 @@ internal fun openCodeEnvironmentFor(
     // OpenCode Zen's free tier is keyless too (its catalog answers
     // anonymously), so it must not be blocked by the missing-key guard.
     if (rawKey.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl) &&
-        kind != ProviderKind.OPENCODE_ZEN
+        kind != ProviderKind.OPENCODE_ZEN && kind != ProviderKind.KILO_FREE
     ) {
         return environment
     }
@@ -105,6 +105,22 @@ internal fun openCodeEnvironmentFor(
                 val modelId = nvidiaApiModelId(provider.model.ifBlank { provider.kind.defaultModel })
                 environment["OPENCODE_CONFIG_CONTENT"] =
                     openAiCompatibleConfigContent("nvidia", gatewayUrl, "NVIDIA_API_KEY", modelId)
+            }
+            ProviderKind.KILO_FREE -> {
+                // The guest gets a placeholder only to satisfy OpenCode's
+                // startup checks. The loopback proxy receives a blank key and
+                // removes Authorization before forwarding to Kilo.
+                environment["OPENAI_API_KEY"] = key
+                environment["OPENAI_BASE_URL"] = gatewayUrl
+                val model = provider.model.ifBlank { provider.kind.defaultModel }
+                if (model.isNotBlank()) {
+                    environment["OPENCODE_CONFIG_CONTENT"] = openAiCompatibleConfigContent(
+                        providerId = "kilo",
+                        baseUrl = gatewayUrl,
+                        apiKeyEnv = null,
+                        modelId = model,
+                    )
+                }
             }
             else -> {
                 environment["OPENAI_API_KEY"] = key
@@ -166,9 +182,8 @@ internal fun openCodeEnvironmentFor(
             environment["OPENCODE_CONFIG_CONTENT"] =
                 openAiCompatibleConfigContent("nvidia", base, "NVIDIA_API_KEY", modelId)
         }
-        // Kilo Free never reaches here through the picker; if a stored profile
-        // does, pin the keyless route (a placeholder key would be sent as an
-        // Authorization header Kilo's free pool rejects).
+        // Kilo Free is keyless: pin the route without an API-key environment
+        // entry so the strip-proxy can remove Authorization on the wire.
         ProviderKind.KILO_FREE -> {
             val model = provider.model.ifBlank { provider.kind.defaultModel }
             if (model.isNotBlank()) {
@@ -235,8 +250,7 @@ internal fun opencodeModelPrefix(kind: ProviderKind): String? = when (kind) {
     // `opencode/<model>`; `opencode-zen/…` resolves to nothing ("Unexpected server error").
     ProviderKind.OPENCODE_ZEN -> "opencode"
     ProviderKind.NVIDIA_NIM -> "nvidia"
-    // Kilo Free only rides DeepSeek Harness; a stored profile picked here
-    // would prefix with its own provider id from OPENCODE_CONFIG_CONTENT.
+    // Kilo Free has its own pinned provider entry in OPENCODE_CONFIG_CONTENT.
     ProviderKind.KILO_FREE -> "kilo"
     ProviderKind.CUSTOM -> null
     ProviderKind.FREE -> null
@@ -252,6 +266,9 @@ internal fun opencodeModelArg(provider: ProviderProfile, gatewayUrl: String?, mo
         // nvidia/nvidia/nemotron-… for an nvidia/… key, or
         // nvidia/google/gemma-4-31b-it for a google/… key.
         "nvidia/${nvidiaApiModelId(model)}"
+    }
+    provider.kind == ProviderKind.KILO_FREE -> {
+        if (!model.startsWith("kilo/")) "kilo/$model" else model
     }
     provider.isOpenAiCompatibleCustom() -> "openai/$model"
     else -> {

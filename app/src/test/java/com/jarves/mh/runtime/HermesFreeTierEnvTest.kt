@@ -55,4 +55,17 @@ class HermesFreeTierEnvTest {
         assertEquals(setOf("HOME", "HERMES_GUEST_ONBOARDING"), env.keys)
         assertTrue(env.values.none { it == "stale-key" })
     }
+
+    @Test
+    fun kiloFreeUsesTheOpenAiProxyWithoutAStoredKey() {
+        val env = hermesEnvironmentFor(
+            ProviderProfile(kind = ProviderKind.KILO_FREE),
+            secret = null,
+            gatewayUrl = "http://127.0.0.1:43125/api/gateway",
+        )
+
+        assertEquals("loopback", env["OPENAI_API_KEY"])
+        assertEquals("http://127.0.0.1:43125/api/gateway", env["OPENAI_BASE_URL"])
+        assertFalse(env.containsKey("HERMES_GUEST_ONBOARDING"))
+    }
 }

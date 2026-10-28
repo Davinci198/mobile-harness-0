@@ -168,7 +168,7 @@ internal class LocalFormatGateway(
         // Accept bases with or without a trailing /v1: users paste both
         // "https://host/v1" and "https://host". Prefer the exact base, then
         // the /v1-joined variant, and keep the first non-404 answer.
-        val base = profile.baseUrl.trim().trimEnd('/')
+        val base = profile.resolvedBaseUrl.trim().trimEnd('/')
         val endpoints = buildList {
             if (base.endsWith("/v1")) {
                 add("$base/chat/completions")
@@ -195,7 +195,9 @@ internal class LocalFormatGateway(
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("User-Agent", "MobileHarness/1.0 (Android)")
-            connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            if (apiKey.isNotBlank()) {
+                connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            }
             connection.outputStream.use { it.write(body.toString().toByteArray()) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream

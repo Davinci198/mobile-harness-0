@@ -78,9 +78,7 @@ internal fun hermesProviderName(provider: ProviderProfile): String = when (provi
     ProviderKind.LLM_ROUTER -> "openrouter"
     ProviderKind.OPENCODE_ZEN -> "openai"
     ProviderKind.NVIDIA_NIM -> "nvidia"
-    // Kilo Free is a DeepSeek Harness provider (providersForAgent keeps it out
-    // of the Hermes picker); if a stored profile ever lands here, its gateway
-    // speaks plain OpenAI-compatible.
+    // Kilo Free speaks plain OpenAI-compatible through the keyless strip-proxy.
     ProviderKind.KILO_FREE -> "openai"
     ProviderKind.CUSTOM -> {
         val api = provider.dshApi.ifBlank { "anthropic-messages" }
@@ -123,7 +121,7 @@ internal fun hermesEnvironmentFor(
     val rawKey = secret.orEmpty()
     // A loopback gateway on this device runs keyless: keep the guest pointed
     // at it instead of falling back to the provider's public endpoint.
-    if (rawKey.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return environment
+    if (rawKey.isBlank() && !isLoopbackBaseUrl(provider.resolvedBaseUrl) && kind != ProviderKind.KILO_FREE) return environment
     // Guest CLIs refuse to boot with an empty key variable, while a loopback
     // gateway ignores the header — send a placeholder instead of nothing.
     val key = rawKey.ifBlank { "loopback" }
@@ -167,9 +165,8 @@ internal fun hermesEnvironmentFor(
             environment["NVIDIA_API_KEY"] = key
             environment["NVIDIA_BASE_URL"] = provider.resolvedBaseUrl
         }
-        // Kilo Free never reaches here through the picker; if a stored profile
-        // does, dial it directly with the keyless placeholder pair (Kilo
-        // rejects placeholders, so the turn fails visibly rather than silently).
+        // Kilo Free is routed through the strip-proxy above, which removes the
+        // placeholder Authorization header before dialing the remote gateway.
         ProviderKind.KILO_FREE -> {
             environment["OPENAI_API_KEY"] = key
             environment["OPENAI_BASE_URL"] = provider.resolvedBaseUrl

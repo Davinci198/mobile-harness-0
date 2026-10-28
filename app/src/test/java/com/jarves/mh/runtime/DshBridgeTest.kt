@@ -585,11 +585,11 @@ class AgentProviderPresetTest {
     }
 
     @Test
-    fun kiloFreeIsOnlyShownForDeepSeekHarness() {
+    fun kiloFreeIsShownForAllKeylessCapableAgents() {
         assertTrue(ProviderKind.KILO_FREE in providersForAgent(AgentKind.DEEPSEEK_HARNESS))
-        assertFalse(ProviderKind.KILO_FREE in providersForAgent(AgentKind.OPENCODE))
-        assertFalse(ProviderKind.KILO_FREE in providersForAgent(AgentKind.HERMES))
-        assertFalse(ProviderKind.KILO_FREE in providersForAgent(AgentKind.CLAUDE_CODE))
+        assertTrue(ProviderKind.KILO_FREE in providersForAgent(AgentKind.OPENCODE))
+        assertTrue(ProviderKind.KILO_FREE in providersForAgent(AgentKind.HERMES))
+        assertTrue(ProviderKind.KILO_FREE in providersForAgent(AgentKind.CLAUDE_CODE))
         assertFalse(ProviderKind.KILO_FREE in providersForAgent(AgentKind.ANTIGRAVITY))
     }
 

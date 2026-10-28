@@ -43,6 +43,21 @@ class OpenCodeZenKeylessTest {
     }
 
     @Test
+    fun kiloFreeRunsWithoutAKeyThroughItsKeylessProxyRoute() {
+        val kilo = ProviderProfile(ProviderKind.KILO_FREE)
+
+        assertFalse(requiresSavedSecret(kilo))
+        assertEquals(
+            "kilo/nvidia/nemotron-3.5-lightning:free",
+            opencodeModelArg(kilo, gatewayUrl = "http://127.0.0.1:43125/api/gateway", model = kilo.model),
+        )
+        val environment = openCodeEnvironmentFor(kilo, secret = null, gatewayUrl = "http://127.0.0.1:43125/api/gateway")
+        assertTrue(environment.containsKey("OPENCODE_CONFIG_CONTENT"))
+        assertTrue(environment.getValue("OPENCODE_CONFIG_CONTENT").contains("\"kilo\""))
+        assertFalse(environment.getValue("OPENCODE_CONFIG_CONTENT").contains("apiKey"))
+    }
+
+    @Test
     fun zenBaseUrlIsRecognizedWithOrWithoutTrailingSlash() {
         val client = ProviderApiClient()
         assertTrue(client.isOpenCodeZen("https://opencode.ai/zen/v1"))
