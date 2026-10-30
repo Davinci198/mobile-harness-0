@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mobile Harness — What's New</title>
+<style>
+  :root {
+    --bg: #0e1014;
+    --bg-soft: #15181f;
+    --bg-card: #1a1e27;
+    --border: #262c38;
+    --border-soft: #1f242e;
+    --text: #e6e9ef;
+    --text-dim: #9aa3b2;
+    --text-faint: #6b7484;
+    --orange: #f28c52;
+    --blue: #5b8def;
+    --purple: #8b7cf6;
+    --green: #3ddc84;
+    --red: #ef5f5f;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 0 24px 120px;
+  }
+
+  /* ---------- hero ---------- */
+  header.hero {
+    padding: 72px 0 48px;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 56px;
+  }
+
+  .eyebrow {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--orange);
+    border: 1px solid rgba(242, 140, 82, 0.35);
+    background: rgba(242, 140, 82, 0.08);
+    padding: 5px 11px;
+    border-radius: 999px;
+    margin-bottom: 22px;
+  }
+
+  h1 {
+    font-size: clamp(34px, 6vw, 52px);
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    margin: 0 0 18px;
+    font-weight: 700;
+  }
+
+  h1 .accent {
+    background: linear-gradient(100deg, var(--orange), var(--purple) 70%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .lede {
+    font-size: 18px;
+    color: var(--text-dim);
+    max-width: 660px;
+    margin: 0 0 32px;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px;
+    margin-top: 36px;
+  }
+
+  .stat {
+    background: var(--bg-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+
+  .stat .num {
+    font-family: var(--mono);
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.2;
+    display: block;
+  }
+
+  .stat .label {
+    font-size: 12px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-top: 4px;
+    display: block;
+  }
+
+  /* ---------- sections ---------- */
+  section { margin-bottom: 64px; scroll-margin-top: 24px; }
+
+  h2 {
+    font-size: 13px;
+    font-family: var(--mono);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+
+  h3 {
+    font-size: 24px;
+    letter-spacing: -0.015em;
+    margin: 0 0 6px;
+    font-weight: 650;
+  }
+
+  .section-head { margin-bottom: 28px; }
+
+  .section-head p {
+    color: var(--text-dim);
+    margin: 0;
+    max-width: 680px;
+    font-size: 15px;
+  }
+
+  /* ---------- feature cards ---------- */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 22px 20px;
+    position: relative;
+    transition: border-color 0.18s ease, transform 0.18s ease;
+  }
+
+  .card:hover {
+    border-color: #333b4a;
+    transform: translateY(-1px);
+  }
+
+  .card h4 {
+    font-size: 16.5px;
+    margin: 0 0 8px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+
+  .card p {
+    margin: 0;
+    font-size: 14.5px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  .card ul {
+    margin: 12px 0 0;
+    padding-left: 18px;
+    font-size: 14px;
+    color: var(--text-dim);
+  }
+
+  .card ul li { margin-bottom: 5px; }
+  .card ul li:last-child { margin-bottom: 0; }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 7px;
+    border-radius: 5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .tag.new   { color: var(--green);  background: rgba(61, 220, 132, 0.12); border: 1px solid rgba(61, 220, 132, 0.28); }
+  .tag.improved { color: var(--blue); background: rgba(91, 141, 239, 0.12); border: 1px solid rgba(91, 141, 239, 0.28); }
+  .tag.fixed { color: var(--orange); background: rgba(242, 140, 82, 0.12); border: 1px solid rgba(242, 140, 82, 0.28); }
+  .tag.removed { color: var(--red); background: rgba(239, 95, 95, 0.12); border: 1px solid rgba(239, 95, 95, 0.28); }
+
+  /* ---------- timeline ---------- */
+  .timeline {
+    border-left: 1px solid var(--border);
+    margin-left: 6px;
+    padding-left: 28px;
+  }
+
+  .tl-item {
+    position: relative;
+    padding-bottom: 30px;
+  }
+
+  .tl-item:last-child { padding-bottom: 0; }
+
+  .tl-item::before {
+    content: "";
+    position: absolute;
+    left: -34px;
+    top: 7px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--border);
+  }
+
+  .tl-item.hot::before {
+    border-color: var(--orange);
+    background: var(--orange);
+    box-shadow: 0 0 0 4px rgba(242, 140, 82, 0.14);
+  }
+
+  .tl-date {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .tl-title {
+    font-size: 16.5px;
+    font-weight: 650;
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+  }
+
+  .tl-body {
+    font-size: 14.5px;
+    color: var(--text-dim);
+    margin: 0;
+  }
+
+  .tl-body code, p code, li code {
+    font-family: var(--mono);
+    font-size: 0.87em;
+    background: #232833;
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: #d5dae4;
+  }
+
+  /* ---------- table ---------- */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-card);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    min-width: 560px;
+  }
+
+  thead th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    font-weight: 600;
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-soft);
+    white-space: nowrap;
+  }
+
+  tbody td {
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text-dim);
+    vertical-align: top;
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  tbody td:first-child {
+    color: var(--text);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .check { color: var(--green); font-weight: 700; }
+
+  /* ---------- callout ---------- */
+  .callout {
+    border-left: 3px solid var(--orange);
+    background: rgba(242, 140, 82, 0.06);
+    border-radius: 0 10px 10px 0;
+    padding: 16px 20px;
+    margin: 24px 0 0;
+    font-size: 14.5px;
+    color: var(--text-dim);
+  }
+
+  .callout strong { color: var(--text); }
+
+  .callout.blue {
+    border-left-color: var(--blue);
+    background: rgba(91, 141, 239, 0.06);
+  }
+
+  /* ---------- footer ---------- */
+  footer {
+    margin-top: 80px;
+    padding-top: 28px;
+    border-top: 1px solid var(--border-soft);
+    font-size: 13px;
+    color: var(--text-faint);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  footer a { color: var(--text-dim); text-decoration: none; border-bottom: 1px solid var(--border); }
+  footer a:hover { color: var(--orange); border-bottom-color: var(--orange); }
+
+  @media (max-width: 620px) {
+    .wrap { padding: 0 18px 80px; }
+    header.hero { padding: 48px 0 36px; }
+    .grid { grid-template-columns: 1fr; }
+    .timeline { padding-left: 22px; }
+    .tl-item::before { left: -28px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="eyebrow">Changelog &middot; v1.0.12</span>
+    <h1>What's new in <span class="accent">Mobile Harness</span></h1>
+    <p class="lede">
+      A month of hardening. New settings drawer, a plugin system, on-device Android builds,
+      keyless free providers, and 47 bundled agent skills &mdash; all inside the same
+      PRoot-isolated Ubuntu workspace on your phone.
+    </p>
+
+    <div class="stats">
+      <div class="stat"><span class="num">263</span><span class="label">Commits / 30 days</span></div>
+      <div class="stat"><span class="num">62</span><span class="label">Features</span></div>
+      <div class="stat"><span class="num">104</span><span class="label">Fixes</span></div>
+      <div class="stat"><span class="num">47</span><span class="label">Bundled skills</span></div>
+      <div class="stat"><span class="num">5</span><span class="label">Coding agents</span></div>
+    </div>
+  </header>
+
+  <!-- ============ HIGHLIGHTS ============ -->
+  <section id="highlights">
+    <div class="section-head">
+      <h2>Highlights</h2>
+      <h3>The five things worth knowing about</h3>
+      <p>If you only read one section, read this one.</p>
+    </div>
+
+    <div class="grid">
+
+      <div class="card">
+        <h4>mtop, the htop replacement <span class="tag new">New</span></h4>
+        <p>
+          htop cannot run in the guest and no distro fixes that, so Mobile Harness ships
+          its own process monitor. Reads <code>/proc</code> directly, standard library
+          Python only, no <code>ps</code> and no <code>/proc/stat</code>.
+        </p>
+        <ul>
+          <li>Sort, tree view, zoom, live search, signals, export</li>
+          <li>Simple mode (<code>s</code>) gives a minimal htop-style table</li>
+          <li>Ships with a full README, installed into the guest</li>
+          <li>Fourth quick-command chip in the terminal</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Model scanner: latency + working/broken <span class="tag new">New</span></h4>
+        <p>
+          Every discovered model gets probed with a real tiny completion, and the result is
+          a three-way verdict you can act on: it works, it is broken, or it timed out &mdash;
+          plus the latency it took to answer.
+        </p>
+        <ul>
+          <li>Status filter pills: All / Working / Broken / Free</li>
+          <li>Working / Broken / Avg latency summary card</li>
+          <li>Latency badge: green under 2s, amber under 5s, red above or broken</li>
+          <li>Terminal-style live scan log with per-model progress</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Settings drawer, edge swipe <span class="tag new">New</span></h4>
+        <p>
+          Settings moved out of the tab bar and into an overlaid drawer. Swipe in from the
+          left edge &mdash; a 22 dp strip that follows your finger and opens once you pass
+          32% &mdash; or open it from anywhere. Collapsible sections, inline API-key
+          controls, and a connection card that shows what is actually saved.
+        </p>
+        <ul>
+          <li>Create Custom API endpoints straight from the connection manager</li>
+          <li>Keyless free providers hide the key field entirely</li>
+          <li>Permission editor stays readable inside the drawer</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Plugin APK system <span class="tag new">New</span></h4>
+        <p>
+          A real extension surface. Plugins ship as APKs with a manifest contract, talk to
+          the app over IPC, and register their tools into the agent's tool registry.
+        </p>
+        <ul>
+          <li>Manifest validation and package management</li>
+          <li>Tools appear to the agent like any built-in tool</li>
+          <li>Settings UI for discovery and enable/disable</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>On-device Android builds <span class="tag new">New</span></h4>
+        <p>
+          Build, install, and launch an APK on the phone itself. No USB, no wireless ADB,
+          no pairing code. The debug APK goes straight to Android's package installer.
+        </p>
+        <ul>
+          <li>Build | Health screen with compile-SDK repair</li>
+          <li>Live build progress panel with stage tracking</li>
+          <li>Uninstall via Shizuku or PackageInstaller</li>
+          <li>Logcat tab, once <code>READ_LOGS</code> is granted</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Kilo Free, keyless <span class="tag new">New</span></h4>
+        <p>
+          A sixth provider tier that needs no account and no key. Kilo's free pool rejects
+          every <code>Authorization</code> header, so Mobile Harness strips it and keeps a
+          loopback proxy alive between turns.
+        </p>
+        <ul>
+          <li>Works across Claude Code, DSH, and the other agents</li>
+          <li>Only free-tier model IDs are shown, not the paid catalog</li>
+          <li>Health probe reports "connected without a key"</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>47 bundled skills <span class="tag new">New</span></h4>
+        <p>
+          A curated set of agent skills now ships inside the APK and installs into each
+          agent's own guest skill root, so every agent sees the same library.
+        </p>
+        <ul>
+          <li>Per-agent guest roots, with reinstall if one vanishes</li>
+          <li>Completion and failure sections parsed from skill files</li>
+          <li>Risk labels translated in the i18n catalog</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Risk-graded approvals <span class="tag improved">Improved</span></h4>
+        <p>
+          Tool calls are now graded by risk before they run. Approvals show a masked card,
+          and a temporary approval stays sticky until the workflow step actually completes.
+        </p>
+        <ul>
+          <li>Offline workflow replay through the same permission gate</li>
+          <li>Masked approval card for sensitive arguments</li>
+          <li>Mid-turn prompt injection while an agent is running</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ TIMELINE ============ -->
+  <section id="timeline">
+    <div class="section-head">
+      <h2>Timeline</h2>
+      <h3>How the month actually went</h3>
+      <p>Grouped by ship date, newest first.</p>
+    </div>
+
+    <div class="timeline">
+
+      <div class="tl-item hot">
+        <div class="tl-date">28 Oct 2026</div>
+        <div class="tl-title">Kilo Free reaches every agent</div>
+        <p class="tl-body">
+          What started as a DeepSeek Harness provider became a general keyless tier.
+          The UI now connects it without asking for a key, and the provider list stops
+          offering the paid catalog that would only 401.
+        </p>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-date">23&ndash;24 Oct 2026</div>
+        <div class="tl-title">The settings drawer rewrite</div>
+        <p class="tl-body">
+          Nine commits in two days. Panou and Studio settings merged into one surface with
+          collapsible sections, Dashboard and Studio became reachable from the home card,
+          and the project list started showing live runtime status. The drawer itself opens
+          from a 22 dp strip at the left edge: it tracks your finger, commits past 32%, and
+          snaps back below it.
+        </p>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-date">22 Oct 2026</div>
+        <div class="tl-title">Hardening pass</div>
+        <p class="tl-body">
+          Plugin and agent execution paths hardened. A same-path guard landed in the SAF
+          file system (cut-and-paste into the same folder could delete a file), plus
+          network hook logging, main-thread Compose state, and a paste-matching fix.
+          Hermes now publishes the NVIDIA credential on the proxy path and surfaces its
+          own error line instead of a generic failure.
+        </p>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-date">17 Oct 2026</div>
+        <div class="tl-title">Skills get their own roots</div>
+        <p class="tl-body">
+          The 48 curated skills were vendored into the APK and installed into both the app
+          root and a per-agent guest root. One skill (<code>gateguard</code>) was dropped
+          because its manifest exceeded the loader limit. OmniRush was removed entirely
+          the same day.
+        </p>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-date">13 Oct 2026</div>
+        <div class="tl-title">Plugins, accessibility tools, mid-turn injection</div>
+        <p class="tl-body">
+          Plugin APK system landed with manifest contract, IPC, tool registry, and settings
+          UI. The chat agent gained accessibility UI tools (read the UI tree, tap a node),
+          and DSH sessions accepted a prompt injected mid-turn instead of queueing it.
+        </p>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-date">11&ndash;12 Oct 2026</div>
+        <div class="tl-title">Android build parity</div>
+        <p class="tl-body">
+          The original build / install / run / logcat / records flow was ported over, with a
+          phase-and-stage pipeline, a progress panel, and a Health screen that repairs a
+          missing compile SDK. Same window: a JetBrains Mono dev theme, camera capture in
+          the attach menu, and risk-graded approvals.
+        </p>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-date">10 Oct 2026</div>
+        <div class="tl-title">Model scanner earns its badges</div>
+        <p class="tl-body">
+          The <code>/models</code> picker gained provider selection and search, and the scan
+          behind it grew teeth: real per-model health probes, measured latency, a working /
+          broken / free filter row, and a live terminal-style log. Discover now scans the
+          provider you are browsing rather than only the active one, and a wedged scan
+          reports progress instead of hanging.
+        </p>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-date">9&ndash;10 Oct 2026</div>
+        <div class="tl-title">Chat gets a real command surface</div>
+        <p class="tl-body">
+          A <code>/models</code> palette with provider selector, search, and health scanning.
+          A slash-command palette wired to real app commands. Live reasoning-token progress,
+          tap-to-reveal message actions, and auto-collapsing sections. The DSH SDK process
+          now stays alive across turns, skipping the 8&ndash;12 second cold boot.
+        </p>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-date">2 Oct 2026</div>
+        <div class="tl-title">mtop replaces htop</div>
+        <p class="tl-body">
+          <code>htop</code> and <code>w</code> were proven dead in the guest: SELinux denies
+          <code>proc_stat</code> to the app's domain and PRoot hides host <code>/proc</code>
+          with <code>hidepid=invisible</code>. Rather than ship a broken button, the existing
+          <code>2procwatch.py</code> monitor was bundled into the APK, installed to
+          <code>usr/local/bin/mtop</code> behind a self-healing marker, and exposed as a
+          fourth quick-command chip &mdash; with its README shipped to <code>/root</code>.
+        </p>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-date">1&ndash;5 Oct 2026</div>
+        <div class="tl-title">Free tier and a new base image</div>
+        <p class="tl-body">
+          Hermes shipped as the keyless free provider, routed through the Nous inference
+          endpoint with truth probes and warm prewarm. The base image migrated to
+          Ubuntu 26.04.1 LTS. The files tab gained create, copy, move, and long-press menus.
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ MODEL SCANNER ============ -->
+  <section id="scanner">
+    <div class="section-head">
+      <h2>Model scanner</h2>
+      <h3>Which models actually answer, and how fast</h3>
+      <p>
+        Discovery and health are two different things. Discovery lists what an endpoint
+        <em>claims</em> to serve; the scanner proves which of those models actually answer a
+        completion, and how long they take.
+      </p>
+    </div>
+
+    <div class="grid">
+
+      <div class="card">
+        <h4>Five verdicts per model <span class="tag new">New</span></h4>
+        <p>
+          Each probe returns a status, the measured latency, the HTTP code, and an optional
+          detail line. Anything other than <code>OK</code> counts as broken.
+        </p>
+        <ul>
+          <li><code>OK</code> &mdash; answered a real completion</li>
+          <li><code>FAIL</code> &mdash; refused or not in the live catalog</li>
+          <li><code>TIMEOUT</code> &mdash; no answer inside the probe window</li>
+          <li><code>ERROR</code> &mdash; transport or protocol failure</li>
+          <li><code>INSUFFICIENT_CREDITS</code> &mdash; key works, wallet does not</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Scan survives a rediscovery <span class="tag improved">Improved</span></h4>
+        <p>
+          Re-listing a provider does not throw away what the last scan learned. Prior
+          latency, HTTP code, and health carry over to any model ID that still exists, so
+          a refresh does not reset every badge to grey.
+        </p>
+      </div>
+
+      <div class="card">
+        <h4>Kind to free tiers <span class="tag improved">Improved</span></h4>
+        <p>
+          The free pools get gentler treatment, because probing them carelessly burns shared
+          quota that live agent turns need.
+        </p>
+        <ul>
+          <li>Probes run two at a time on a free tier, not five</li>
+          <li>No 429 retries there &mdash; the retry window is minutes long</li>
+          <li>Paid models on a guest endpoint are recorded as not served, never probed</li>
+          <li>An all-401 batch is treated as an expired token, not a dead catalog</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Providers that cannot be probed <span class="tag improved">Improved</span></h4>
+        <p>
+          Two gateways block completion probes on purpose. Rather than paint the whole
+          catalog red, health there means "listed in the live catalog".
+        </p>
+        <ul>
+          <li><strong>OpenCode Zen</strong> gates probes to its own client</li>
+          <li><strong>Nous free tier</strong> without a guest token falls back to the catalog</li>
+          <li>A failed catalog fetch reports nothing, not everything broken</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Read the results at a glance <span class="tag new">New</span></h4>
+        <p>
+          A three-up summary card counts working and broken models and averages the probe
+          latency. Filter pills narrow the list to what you care about, and autoscan can
+          re-run the whole thing when you open the list.
+        </p>
+        <ul>
+          <li>Pills: All / Working / Broken / Free, plus an autoscan toggle</li>
+          <li>Latency label formatted per model, e.g. <code>1.4s</code></li>
+          <li>Terminal-style live log, colour-coded per result</li>
+        </ul>
+      </div>
+
+    </div>
+
+    <div class="callout blue">
+      <strong>Concurrency is capped at five</strong> for normal providers and at two for free
+      tiers, under a semaphore that never exceeds ten. Probes use a 12 s connect and 30 s
+      read timeout, so a hung model cannot stall the whole batch.
+    </div>
+  </section>
+
+  <!-- ============ MTOP ============ -->
+  <section id="mtop">
+    <div class="section-head">
+      <h2>mtop</h2>
+      <h3>Because htop cannot work here</h3>
+      <p>
+        This is not a preference. <code>htop</code> fails inside the guest for reasons no
+        userland change can fix, so the monitor had to be written from scratch.
+      </p>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h4>Why htop fails <span class="tag fixed">Constraint</span></h4>
+      <p>
+        <code>/proc/stat</code> passes DAC but SELinux denies <code>proc_stat</code> to the
+        app's own domain &mdash; the AVC denial reports <code>permissive=0</code>, so there is
+        no workaround. On top of that, PRoot binds the host <code>/proc</code> with
+        <code>hidepid=invisible</code> while the fake root carries no capabilities. Two
+        independent blockers, both outside the app's control.
+      </p>
+      <ul>
+        <li>Result: <code>htop</code> dies with <code>Cannot open /proc/stat</code></li>
+        <li><code>w</code> fails for the same reason</li>
+        <li>No distro, userland, or htop version gets around it</li>
+      </ul>
+    </div>
+
+    <div class="grid">
+
+      <div class="card">
+        <h4>How mtop gets around it <span class="tag new">New</span></h4>
+        <p>
+          Instead of the global counters, it reads only what the app UID is actually allowed
+          to see: per-process <code>/proc/PID/stat</code>, status, and IO. That is enough for
+          a real process table, minus the machine-wide CPU total.
+        </p>
+        <ul>
+          <li>Zero external dependencies &mdash; standard library Python 3 only</li>
+          <li>CPU% is per process and relative to one core (100% = one full core)</li>
+          <li>Installed to <code>/usr/local/bin/mtop</code> in the guest</li>
+          <li>Self-healing marker (<code>2procwatch-3</code>) rewrites it when the script changes</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Interactive mode <span class="tag new">New</span></h4>
+        <p>
+          A full curses interface, sized to the terminal. Columns slide in progressively on
+          narrow screens, and the command line takes the remaining space without wrapping.
+        </p>
+        <ul>
+          <li>Sort by CPU, memory, threads, IO, PID, or name</li>
+          <li>Tree view with <code>&#9492;&#9472;</code> indentation, plus subtree zoom</li>
+          <li>Live search across command, name, and PID</li>
+          <li>SIGTERM / SIGKILL with two-key confirmation</li>
+          <li>Sparklines for CPU% and RSS on the selected process</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Simple mode: closest to htop <span class="tag new">New</span></h4>
+        <p>
+          Press <code>s</code> for a stripped table &mdash; PID, CPU%, RAM, and name &mdash;
+          with the selected process's full command in the detail pane. Press it again for the
+          full table.
+        </p>
+      </div>
+
+      <div class="card">
+        <h4>Remote via adb <span class="tag new">New</span></h4>
+        <p>
+          <code>mtop --adb</code> monitors a phone's <code>/proc</code> from a computer, and
+          it is also the fourth quick-command chip in the terminal screen.
+        </p>
+        <ul>
+          <li>Auto-detects a Shizuku server: reads <code>.mh-shizuku-port</code>, then scans 20000&ndash;20006</li>
+          <li>Each candidate gets a 0.5 s TCP probe, so a closed port is skipped instantly</li>
+          <li>Falls back to classic adb when nothing answers</li>
+          <li>One sample costs two adb calls; details come in one more, cached 2 s</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Observation tooling <span class="tag new">New</span></h4>
+        <p>
+          Beyond watching, it records. Every sample can be exported or logged as JSONL for
+          later analysis.
+        </p>
+        <ul>
+          <li>Export a snapshot as JSON or CSV (<code>e</code>)</li>
+          <li>Continuous JSONL log (<code>l</code>) with process rows per sample</li>
+          <li>Config via <code>~/.procwatchrc</code> (INI), CLI wins over config</li>
+          <li>Copy a process's full command, plus its environ (<code>y</code> / <code>Y</code>)</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h4>Reads the weird cases <span class="tag new">New</span></h4>
+        <p>
+          On Android there is always something odd in the process list. mtop colours what
+          matters instead of leaving you to guess.
+        </p>
+        <ul>
+          <li>Red: above CPU or RSS alert threshold</li>
+          <li>Yellow: zombie &nbsp;&middot;&nbsp; Green: orphan</li>
+          <li>Purple: very long commands, the usual PRoot wrappers</li>
+          <li>Zombie and orphan counters in the summary</li>
+        </ul>
+      </div>
+
+    </div>
+
+    <div class="callout blue">
+      <strong>Full README ships with it.</strong> The app installs 
+      <code>README_procwatch.md</code> into the guest alongside the script, so the key map,
+      the JSONL format, the config file, and the Android limitations are readable on the
+      device itself, offline.
+    </div>
+  </section>
+
+  <!-- ============ PROVIDERS ============ -->
+  <section id="providers">
+    <div class="section-head">
+      <h2>Providers</h2>
+      <h3>Six ways in, two of them free</h3>
+      <p>Keyless tiers need no account. Keyed tiers store credentials in Android Keystore.</p>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th>Auth</th>
+            <th>Agents</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Anthropic</td>
+            <td>API key</td>
+            <td>Claude Code</td>
+            <td>Recommended</td>
+          </tr>
+          <tr>
+            <td>Kilo Free</td>
+            <td>None</td>
+            <td>All supported</td>
+            <td><span class="check">&#10003;</span> New</td>
+          </tr>
+          <tr>
+            <td>Hermes / Nous</td>
+            <td>None</td>
+            <td>Hermes</td>
+            <td><span class="check">&#10003;</span> Free tier</td>
+          </tr>
+          <tr>
+            <td>NVIDIA NIM</td>
+            <td>API key</td>
+            <td>Claude Code, OpenCode, Hermes</td>
+            <td>Supported</td>
+          </tr>
+          <tr>
+            <td>OpenRouter</td>
+            <td>API key</td>
+            <td>Via gateway</td>
+            <td>Supported</td>
+          </tr>
+          <tr>
+            <td>DeepSeek / Kimi</td>
+            <td>API key</td>
+            <td>Anthropic-compatible</td>
+            <td>Supported</td>
+          </tr>
+          <tr>
+            <td>Custom API</td>
+            <td>Endpoint override</td>
+            <td>Any</td>
+            <td>Experimental</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout blue">
+      <strong>Antigravity</strong> is separate: it signs in through the official <code>agy</code> CLI
+      OAuth flow. Mobile Harness never reads or copies those tokens &mdash; they stay in the
+      CLI's own persistent Linux home.
+    </div>
+  </section>
+
+  <!-- ============ FIXES ============ -->
+  <section id="fixes">
+    <div class="section-head">
+      <h2>Fixes</h2>
+      <h3>The unglamorous half</h3>
+      <p>104 fixes in 30 days. These are the ones that changed behaviour you could feel.</p>
+    </div>
+
+    <div class="grid">
+
+      <div class="card">
+        <h4>Data loss in the file manager <span class="tag fixed">Fixed</span></h4>
+        <p>
+          Cut-and-paste into the same folder could delete the file. The local file system had
+          a canonical-path guard; the SAF path did not. Both are guarded now, and the
+          clipboard clears when you switch storage roots.
+        </p>
+      </div>
+
+      <div class="card">
+        <h4>Cold boots and warm sessions <span class="tag fixed">Fixed</span></h4>
+        <p>
+          DSH prewarms the open project so the first turn is not a cold boot, and the warm
+          SDK channel survives token rotations and provider overloads. Transient overloads
+          retry with backoff instead of failing the turn.
+        </p>
+      </div>
+
+      <div class="card">
+        <h4>Hermes credentials <span class="tag fixed">Fixed</span></h4>
+        <p>
+          The NVIDIA credential is now published on the proxy path, and Hermes' own error
+          line is surfaced instead of a generic failure. A missing <code>config.yaml</code>
+          is created on demand, and a corrupted uv cache is cleared.
+        </p>
+      </div>
+
+      <div class="card">
+        <h4>Memory and ANR guards <span class="tag fixed">Fixed</span></h4>
+        <p>
+          Checkpoint reads are capped and <code>.git</code> is skipped, so cloning a large
+          repository can no longer OOM the app. Stream ANR guards were ported alongside.
+        </p>
+      </div>
+
+      <div class="card">
+        <h4>Android build state <span class="tag fixed">Fixed</span></h4>
+        <p>
+          The installed state is now truthful, the previous build log survives a skipped
+          Gradle run, and <code>gradlew</code> gets its executable bit. Uninstall works
+          through Shizuku or PackageInstaller.
+        </p>
+      </div>
+
+      <div class="card">
+        <h4>Model discovery <span class="tag fixed">Fixed</span></h4>
+        <p>
+          <code>/models</code> Discover scans the provider you are browsing, not just the
+          active one, and shows live scan progress instead of hanging on a wedged scan.
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ REMOVED ============ -->
+  <section id="removed">
+    <div class="section-head">
+      <h2>Removed</h2>
+      <h3>What went away</h3>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h4>OmniRush provider <span class="tag removed">Removed</span></h4>
+        <p>
+          Added on 14 Oct, reverted on 17 Oct. The loopback-proxy integration never held up
+          against the gateway's config contract, so it was dropped entirely rather than
+          shipped half-working.
+        </p>
+      </div>
+
+      <div class="card">
+        <h4>gateguard skill <span class="tag removed">Removed</span></h4>
+        <p>
+          Dropped from the bundled set because its manifest exceeded the loader limit. The
+          other 47 skills install normally.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ KNOWN LIMITS ============ -->
+  <section id="limits">
+    <div class="section-head">
+      <h2>Known limits</h2>
+      <h3>Still true</h3>
+    </div>
+
+    <div class="callout">
+      <strong>PRoot is not a security boundary.</strong> It isolates the Linux userspace from
+      other apps through normal Android sandbox permissions, but it is not virtualization and
+      not a hardened jail. Run only projects and dependencies you trust.
+    </div>
+
+    <div class="callout">
+      <strong>Antigravity runs with <code>--dangerously-skip-permissions</code>.</strong> The
+      official agent can execute tools without per-call approval. Quotas and service limits
+      still apply; signing in does not mean unlimited usage.
+    </div>
+
+    <div class="callout">
+      <strong>ARM64 Android 9+ only.</strong> No x86 builds, no root required, no Termux
+      required &mdash; but also no desktop-class CPU, so heavy Gradle builds are slow.
+    </div>
+  </section>
+
+  <footer>
+    <span>Mobile Harness &middot; v1.0.12 &middot; changelog covering 1&ndash;30 Oct 2026</span>
+    <span>
+      <a href="https://github.com/Davinci198/mobile-harness-0">Repository</a> &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Davinci198/mobile-harness-0/releases">Releases</a> &nbsp;&middot;&nbsp;
+      <a href="https://github.com/Davinci198/mobile-harness-0/blob/main/README.md">README</a>
+    </span>
+  </footer>
+
+</div>
+</body>
+</html>
