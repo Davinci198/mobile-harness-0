@@ -2869,6 +2869,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch(Dispatchers.IO) {
             var moved = 0
+            val failed = mutableListOf<String>()
+            var lastError: String? = null
             targets.forEachIndexed { index, target ->
                 val source = board.items.getOrNull(index) ?: return@forEachIndexed
                 when (val copied = backend.copy(source, target)) {
@@ -2883,19 +2885,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     is com.jarves.mh.storage.FsResult.Err -> {
+                        lastError = copied.error.message.ifBlank { "Could not paste" }
                         Log.e("Files", "paste FAILED at item ${copied.error.kind} src=$source dst=$target ${copied.error.message}")
-                        _state.update { it.copy(fsStatus = copied.error.message) }
-                        return@forEachIndexed
+                        // Keep the source staged: a partial failure must not drop the
+                        // rest from the clipboard (and a CUT must not lose the source
+                        // of an item the paste never managed to write).
+                        failed += source
                     }
                 }
             }
-            Log.d("Files", "paste done transferred=$moved of ${targets.size} operation=${board.operation} path=$path")
-            _state.update {
-                it.copy(
-                    fsClipboard = com.jarves.mh.storage.FsClipboard(),
-                    fsSelection = emptySet(),
-                    fsStatus = "$moved transferuri",
-                )
+            Log.d("Files", "paste done transferred=$moved of ${targets.size} operation=${board.operation} path=$path failed=${failed.size}")
+            if (failed.isEmpty()) {
+                _state.update {
+                    it.copy(
+                        fsClipboard = com.jarves.mh.storage.FsClipboard(),
+                        fsSelection = emptySet(),
+                        fsStatus = "$moved transferuri",
+                    )
+                }
+            } else {
+                // The error must stay visible and the unfinished cut items must not be
+                // dropped: re-stage the failures so a paste into another folder (or a
+                // retry after fixing the target) can finish them.
+                val kept = com.jarves.mh.storage.FsClipboardRules.put(failed, board.operation)
+                val movedCount = moved
+                _state.update {
+                    it.copy(
+                        fsClipboard = kept,
+                        fsSelection = emptySet(),
+                        fsStatus = if (movedCount > 0) {
+                            "$movedCount transferuri · ${failed.size} rămân în clipboard · $lastError"
+                        } else {
+                            "Nu s-a putut lipi: $lastError"
+                        },
+                    )
+                }
             }
             loadDirectory(path)
         }
