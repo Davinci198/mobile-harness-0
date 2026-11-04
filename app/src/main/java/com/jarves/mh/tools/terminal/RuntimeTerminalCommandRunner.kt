@@ -34,7 +34,7 @@ class RuntimeTerminalCommandRunner(
                 if (System.nanoTime() >= deadline) {
                     timedOut = true
                     process.destroyForcibly()
-                    process.waitFor()
+                    exitCode = process.waitFor()
                     break
                 }
                 outputFile?.let { file ->
@@ -51,7 +51,10 @@ class RuntimeTerminalCommandRunner(
                 }
                 Thread.sleep(50)
             }
-            val exitCode = process.waitFor()
+            // Assign the outer var, not a new local: a block-scoped `val exitCode`
+            // here shadowed it and every run reported exit code 0, so a failed
+            // workflow command looked like a success.
+            exitCode = process.waitFor()
             outputFile?.let { file ->
                 if (file.length() > offset) {
                     RandomAccessFile(file, "r").use { input ->
