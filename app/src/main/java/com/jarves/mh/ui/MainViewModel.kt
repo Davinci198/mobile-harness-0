@@ -38,7 +38,9 @@ import com.jarves.mh.model.ToolRequest
 import com.jarves.mh.model.WorkspaceEntry
 import com.jarves.mh.model.projectSlug
 import com.jarves.mh.model.generateQuickChatIdentity
+import com.jarves.mh.model.inferredDshApiForUrl
 import com.jarves.mh.model.providerProtocolForAgent
+import com.jarves.mh.model.withDefaultScheme
 import com.jarves.mh.network.ConnectionValidation
 import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.EndpointDetection
@@ -3421,6 +3423,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             vault.credentials(scopeId).firstOrNull { it.name == keyName }?.secret ?: vault.get(scopeId)
         }
         return providerApi.detectEndpoint(baseUrl, secret.orEmpty())
+    }
+
+    /**
+     * Sends one tiny request per model so a custom endpoint can be ranked by how fast it answers before it is saved.
+     * [api] is the endpoint's wire protocol ("anthropic-messages", "openai-completions", "openai-responses");
+     * an empty one falls back to the usual URL inference. Only the models that answer are worth ranking, so probes
+     * run a few at a time and each result is reported as soon as it lands.
+     */
+    suspend fun probeCustomEndpointLatency(
+        baseUrl: String,
+        keyName: String,
+        api: String,
+        models: List<DiscoveredModel>,
+    ): List<ModelHealth> {
+        if (baseUrl.isBlank() || models.isEmpty()) return emptyList()
+        val scopeId = ProviderKind.CUSTOM.name
+        val secret = if (keyName.isBlank()) {
+            vault.get(scopeId)
+        } else {
+            vault.credentials(scopeId).firstOrNull { it.name == keyName }?.secret ?: vault.get(scopeId)
+        }
+        val profile = ProviderProfile(
+            ProviderKind.CUSTOM,
+            withDefaultScheme(baseUrl),
+            models.first().id,
+            dshApi = api.ifBlank { inferredDshApiForUrl(baseUrl) },
+        )
+        return providerApi.validateModels(
+            baseUrl = profile.baseUrl,
+            apiKey = secret.orEmpty(),
+            protocol = providerProtocolForAgent(profile, _state.value.agentKind),
+            models = models,
+            concurrency = 3,
+        )
     }
 
     fun addApiKey(kind: ProviderKind, name: String, secret: String): List<ApiKeyInfo> {

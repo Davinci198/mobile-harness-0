@@ -132,6 +132,8 @@ import com.jarves.mh.network.DiscoveredModel
 import com.jarves.mh.network.EndpointDetection
 import com.jarves.mh.network.EndpointModelCatalog
 import com.jarves.mh.network.ModelDiscoveryResult
+import com.jarves.mh.network.ModelHealth
+import com.jarves.mh.network.ModelHealthStatus
 import com.jarves.mh.network.ProviderApiClient
 import com.jarves.mh.runtime.AntigravityAuthStatus
 import com.jarves.mh.ui.theme.PocketAccent
@@ -205,6 +207,14 @@ internal fun latencyColor(model: DiscoveredModel): Color {
     }
 }
 
+/** Probe badge color: green while an answer stays under 2s, amber under 5s, red otherwise. */
+private fun probeColor(health: ModelHealth): Color = when {
+    health.status != ModelHealthStatus.OK -> Color(0xFFFCA5A5)
+    health.latencyMs < 2_000 -> Color(0xFF6EE7B7)
+    health.latencyMs < 5_000 -> Color(0xFFFCD34D)
+    else -> Color(0xFFFCA5A5)
+}
+
 /** Formats Antigravity model identifiers into clean, human-friendly names. */
 internal fun formatAntigravityModelName(id: String): String = when (id) {
     "gemini-3.8-flash-high" -> "Gemini 3.8 Flash (High)"
@@ -261,6 +271,8 @@ fun AgentScreen(
     onDetectEndpoint: suspend (String, String) -> EndpointDetection = { _, _ ->
         EndpointDetection(null, emptyList(), null)
     },
+    onProbeEndpointModels: suspend (String, String, String, List<DiscoveredModel>) -> List<ModelHealth> =
+        { _, _, _, _ -> emptyList() },
     onSelectAgent: (AgentKind) -> Unit = {},
     onInstallAgent: (AgentKind) -> Unit = {},
     onCheckAgentUpdates: () -> Unit = {},
@@ -322,6 +334,10 @@ fun AgentScreen(
     var endpointDetecting by remember { mutableStateOf(false) }
     var endpointDetectFailed by rememberSaveable { mutableStateOf(false) }
     var endpointDetectNote by rememberSaveable { mutableStateOf("") }
+    // Models the detection found: they can be probed for latency before the endpoint is saved.
+    var endpointModels by remember { mutableStateOf<List<DiscoveredModel>>(emptyList()) }
+    var endpointProbes by remember { mutableStateOf<Map<String, ModelHealth>>(emptyMap()) }
+    var endpointProbing by remember { mutableStateOf(false) }
     var pendingDeleteEndpointId by rememberSaveable { mutableStateOf("") }
     // Inline key entry inside the endpoint dialog, so a key can be added
     // without leaving the endpoint being created.
@@ -673,6 +689,8 @@ fun AgentScreen(
                             endpointDetectNote = ""
                             endpointModel = ""
                             endpointDsh = ""
+                            endpointModels = emptyList()
+                            endpointProbes = emptyMap()
                         },
                         label = { Text(stringResource(R.string.settings_base_url)) },
                         singleLine = true,
@@ -702,6 +720,126 @@ fun AgentScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                     )
+                    if (endpointModels.isNotEmpty()) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                stringResource(R.string.agent_endpoint_latency),
+                                Modifier.weight(1f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (endpointProbing) {
+                                CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp, color = PocketAccent)
+                            }
+                        }
+                        Text(
+                            stringResource(R.string.agent_endpoint_latency_hint),
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            stringResource(
+                                if (endpointProbing) R.string.agent_endpoint_latency_running else R.string.agent_endpoint_latency_run,
+                            ),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (endpointProbing) MaterialTheme.colorScheme.onSurfaceVariant else PocketAccent,
+                            modifier = Modifier
+                                .clickable(enabled = !endpointProbing) {
+                                    scope.launch {
+                                        endpointProbing = true
+                                        endpointProbes = emptyMap()
+                                        val results = onProbeEndpointModels(
+                                            withDefaultScheme(endpointUrl),
+                                            endpointKeyName,
+                                            endpointDsh,
+                                            endpointModels,
+                                        )
+                                        endpointProbes = results.associateBy(ModelHealth::modelId)
+                                        endpointProbing = false
+                                        val fastest = results
+                                            .filter { it.status == ModelHealthStatus.OK }
+                                            .minByOrNull(ModelHealth::latencyMs)
+                                        if (fastest != null && endpointProbes[endpointModel]?.status != ModelHealthStatus.OK) {
+                                            endpointModel = fastest.modelId
+                                        }
+                                    }
+                                }
+                                .padding(vertical = 4.dp),
+                        )
+                        if (endpointProbes.isNotEmpty()) {
+                            val sorted = endpointProbes.values.sortedWith(
+                                compareBy({ it.status != ModelHealthStatus.OK }, ModelHealth::latencyMs),
+                            )
+                            val answered = sorted.count { it.status == ModelHealthStatus.OK }
+                            val fastestMs = sorted.firstOrNull { it.status == ModelHealthStatus.OK }?.latencyMs
+                            val fastestId = sorted.firstOrNull { it.status == ModelHealthStatus.OK }?.modelId
+                            Text(
+                                if (fastestMs == null) {
+                                    stringResource(R.string.agent_endpoint_latency_none)
+                                } else {
+                                    stringResource(R.string.agent_endpoint_latency_summary, answered, sorted.size, fastestMs)
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (fastestMs == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            sorted.forEach { health ->
+                                val label = when (health.status) {
+                                    ModelHealthStatus.OK -> "${health.latencyMs} ms"
+                                    ModelHealthStatus.TIMEOUT -> "timeout"
+                                    ModelHealthStatus.INSUFFICIENT_CREDITS -> "402"
+                                    ModelHealthStatus.FAIL -> "HTTP ${health.httpCode}".trim()
+                                    ModelHealthStatus.ERROR -> "error"
+                                }
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable { endpointModel = health.modelId }
+                                        .padding(vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            health.modelId,
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (health.status != ModelHealthStatus.OK) {
+                                            Text(
+                                                health.detail?.takeIf { it.isNotBlank() } ?: label,
+                                                fontSize = 10.sp,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                    if (health.status == ModelHealthStatus.OK && health.modelId == fastestId) {
+                                        Text(
+                                            stringResource(R.string.agent_endpoint_latency_fastest),
+                                            fontSize = 9.sp,
+                                            color = PocketAccent,
+                                            modifier = Modifier.padding(end = 6.dp),
+                                        )
+                                    }
+                                    Text(
+                                        label,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = probeColor(health),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    AgentSelectionDot(endpointModel == health.modelId)
+                                }
+                            }
+                        }
+                    }
                     if (endpointDetecting) {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                         Text(
@@ -886,6 +1024,7 @@ fun AgentScreen(
                                 endpointDetecting = true
                                 val detected = onDetectEndpoint(withDefaultScheme(endpointUrl), endpointKeyName)
                                 endpointDetecting = false
+                                endpointModels = detected.models
                                 if (detected.dshApi != null) {
                                     endpointDsh = detected.dshApi
                                     if (endpointModel.isBlank()) {
@@ -1938,6 +2077,12 @@ fun AgentScreen(
                             endpointKeyName = savedKeys.firstOrNull { it.isActive }?.name ?: ""
                             endpointDetectFailed = false
                             endpointDetectNote = ""
+                            // A catalog of this URL that is already on disk can be probed right away.
+                            endpointModels = state.modelCatalogs
+                                .find { it.matches(ProviderKind.CUSTOM.name, withDefaultScheme(baseUrl)) }
+                                ?.models
+                                .orEmpty()
+                            endpointProbes = emptyMap()
                             endpointKeyNew = false
                             endpointNewKeyName = ""
                             endpointNewKeySecret = ""
@@ -1953,6 +2098,11 @@ fun AgentScreen(
                             endpointKeyName = ep.keyName
                             endpointDetectFailed = false
                             endpointDetectNote = ""
+                            endpointModels = state.modelCatalogs
+                                .find { it.matches(ProviderKind.CUSTOM.name, ep.baseUrl) }
+                                ?.models
+                                .orEmpty()
+                            endpointProbes = emptyMap()
                             endpointKeyNew = false
                             endpointNewKeyName = ""
                             endpointNewKeySecret = ""

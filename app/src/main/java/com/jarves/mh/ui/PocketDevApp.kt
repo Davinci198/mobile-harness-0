@@ -2318,6 +2318,7 @@ private fun RootScreenHost(
                     onUpsertCustomEndpoint = viewModel::upsertCustomEndpoint,
                     onDeleteCustomEndpoint = viewModel::deleteCustomEndpoint,
                     onDetectEndpoint = viewModel::detectCustomEndpoint,
+                    onProbeEndpointModels = viewModel::probeCustomEndpointLatency,
                     onSelectAgent = viewModel::selectAgent,
                     onInstallAgent = viewModel::installAgent,
                     onCheckAgentUpdates = viewModel::checkAgentUpdates,
