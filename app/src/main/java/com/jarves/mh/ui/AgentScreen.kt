@@ -752,14 +752,18 @@ fun AgentScreen(
                                     scope.launch {
                                         endpointProbing = true
                                         endpointProbes = emptyMap()
-                                        val results = onProbeEndpointModels(
-                                            withDefaultScheme(endpointUrl),
-                                            endpointKeyName,
-                                            endpointDsh,
-                                            endpointModels,
-                                        )
-                                        endpointProbes = results.associateBy(ModelHealth::modelId)
+                                        // A dead endpoint, a broken JSON body or a cancelled
+                                        // scope must not leave the button stuck on "measuring".
+                                        val results = runCatching {
+                                            onProbeEndpointModels(
+                                                withDefaultScheme(endpointUrl),
+                                                endpointKeyName,
+                                                endpointDsh,
+                                                endpointModels,
+                                            )
+                                        }.getOrDefault(emptyList())
                                         endpointProbing = false
+                                        endpointProbes = results.associateBy(ModelHealth::modelId)
                                         val fastest = results
                                             .filter { it.status == ModelHealthStatus.OK }
                                             .minByOrNull(ModelHealth::latencyMs)
@@ -871,7 +875,11 @@ fun AgentScreen(
                             Column {
                                 listOf("anthropic-messages", "openai-completions", "openai-responses").forEach { option ->
                                     Row(
-                                        Modifier.fillMaxWidth().clickable { endpointDsh = option }.padding(horizontal = 12.dp, vertical = 9.dp),
+                                        Modifier.fillMaxWidth().clickable {
+                                            // Another protocol means another payload: earlier probe times no longer apply.
+                                            endpointDsh = option
+                                            endpointProbes = emptyMap()
+                                        }.padding(horizontal = 12.dp, vertical = 9.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Text(option, Modifier.weight(1f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
