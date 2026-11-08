@@ -386,6 +386,7 @@
     <string name="pal_models_scanning">Scanning models…</string>
     <string name="pal_model_broken">Broken</string>
     <string name="pal_model_ok">OK</string>
+    <string name="err_model_not_found">The provider no longer serves this model (404/410). Catalogs often keep listing retired ids — run the model scan and pick one marked as working. Detail:</string>
     <string name="pal_provider">Provider</string>
     <string name="pal_search_models">Search models…</string>
     <string name="pal_no_models_found">No models match "%1$s"</string>
