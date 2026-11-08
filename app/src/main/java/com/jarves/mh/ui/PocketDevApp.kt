@@ -5807,6 +5807,21 @@ internal fun ModelsPickerDialog(
                                     Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
+                                    // Health at a glance from the last scan: green =
+                                    // probed OK, red = broken, grey = never scanned.
+                                    Box(
+                                        Modifier
+                                            .padding(end = 9.dp)
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                when {
+                                                    option.isBroken -> MaterialTheme.colorScheme.error
+                                                    option.health != null -> PocketGreen
+                                                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                                                },
+                                            ),
+                                    )
                                     Column(Modifier.weight(1f)) {
                                         Text(
                                             option.displayName,
