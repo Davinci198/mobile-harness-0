@@ -29,7 +29,7 @@ jobs:
       STUDIO_VERSION: ${{ github.event.inputs.studio_version || '0.7.32' }}
     steps:
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
 
@@ -50,9 +50,17 @@ jobs:
       - name: Install production dependencies
         working-directory: studio-src
         run: |
-          # The npm tarball ships no package-lock.json (files: bin/ + dist/),
-          # so npm ci cannot be used here.
-          npm install --omit=dev --no-audit --no-fund
+          # The npm tarball ships no package-lock.json (files: bin/ + dist/), so
+          # the pinned snapshot for this version is committed under studio/ and
+          # copied in here. npm ci then installs exactly those resolved versions
+          # instead of re-resolving ranges on every run.
+          LOCK="$GITHUB_WORKSPACE/studio/hermes-web-ui-${STUDIO_VERSION}.lock"
+          if [ ! -f "$LOCK" ]; then
+            echo "::error::No committed lockfile at studio/hermes-web-ui-${STUDIO_VERSION}.lock — add one so the release is reproducible."
+            exit 1
+          fi
+          cp "$LOCK" package-lock.json
+          npm ci --omit=dev --no-audit --no-fund
           # node-pty ships prebuilds for darwin/win32 only, so linux needs the
           # node-gyp build; some npm versions no longer run dependency install
           # scripts unless approved. Rebuild only when the binary is missing.
@@ -155,7 +163,7 @@ jobs:
           stat -c '%s' "pocketdev-studio-arm64-${STUDIO_VERSION}.tar.zst"
 
       - name: Upload bundle artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pocketdev-studio-arm64-${{ env.STUDIO_VERSION }}
           path: |
@@ -164,7 +172,7 @@ jobs:
 
       - name: Attach to runtime-studio release
         if: ${{ github.event.inputs.upload_release == 'true' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: runtime-studio-${{ env.STUDIO_VERSION }}
           name: Studio runtime ${{ env.STUDIO_VERSION }}
