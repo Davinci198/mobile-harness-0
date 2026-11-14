@@ -32,6 +32,9 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
+          # This job publishes release assets, so it must not consume GitHub
+          # Actions cache state that another workflow could have poisoned.
+          package-manager-cache: false
 
       - name: Fetch hermes-web-ui package
         run: |
@@ -71,8 +74,11 @@ jobs:
           # the guest (aarch64 Ubuntu). npm resolves it via optionalDependencies
           # on the arm64 runner; pinned to the installed sharp version because
           # the platform packages are published in lockstep (0.35.4 == sharp).
+          # Added with an exact version and --package-lock-only so the resolution
+          # comes from the committed snapshot rather than a fresh range resolve.
           sharp_version="$(node -p "require('./node_modules/sharp/package.json').version")"
-          npm install --no-save --no-audit --no-fund "@img/sharp-linux-arm64@$sharp_version" || true
+          npm install --save-exact --no-audit --no-fund --package-lock-only "@img/sharp-linux-arm64@${sharp_version}"
+          npm ci --omit=dev --no-audit --no-fund
 
       - name: Prune node_modules to esbuild runtime externals
         working-directory: studio-src
