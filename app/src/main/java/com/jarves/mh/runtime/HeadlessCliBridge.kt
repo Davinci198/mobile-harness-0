@@ -2,6 +2,7 @@ package com.jarves.mh.runtime
 
 import android.content.Context
 import android.util.Log
+import com.jarves.mh.R
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.DevStack
@@ -618,6 +619,16 @@ internal abstract class HeadlessCliBridge(
                 "The provider rejected the saved API key."
             message.contains("missing_credential", true) ->
                 "No API key reached ${kind.title}. Re-save the provider key in Settings."
+            // NVIDIA NIM (and similar catalogs) keep advertising retired model
+            // ids that answer 404 "Function …: Not found" at inference time, and
+            // retired models answer 410 — the request itself was fine, so point
+            // the user at the health scan instead of the raw status.
+            message.contains("404") || message.contains("410") ||
+                (
+                    message.contains("not found", true) &&
+                        (message.contains("model", true) || message.contains("function", true))
+                    ) ->
+                context.getString(R.string.err_model_not_found) + "\n" + message.take(240)
             message.contains("not installed", true) -> message.take(300)
             message.isBlank() -> "${kind.title} could not start."
             else -> message.take(500)

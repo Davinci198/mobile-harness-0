@@ -39,7 +39,11 @@ enum class ProviderKind(
         "OpenAI-compatible models hosted by NVIDIA",
         ProviderProtocol.OPENAI_CHAT,
         "https://integrate.api.nvidia.com/v1",
-        "qwen/qwen2.5-coder-32b-instruct",
+        // The old default (qwen/qwen2.5-coder-32b-instruct) is retired: NVIDIA
+        // answers HTTP 410 for it, so every fresh chat on this provider died
+        // before the first token. Verified live on 2026-11-08 against
+        // /v1/chat/completions; this id answered 200.
+        "nvidia/nemotron-3.5-super-vl-120b-a12b",
         fixedBaseUrl = true,
         fixedProtocol = true,
     ),

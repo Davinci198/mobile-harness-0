@@ -53,7 +53,7 @@ class HermesNousRoutingTest {
     fun nvidiaNimRoutesToTheNvidiaProvider() {
         assertEquals("nvidia", hermesProviderName(ProviderProfile(kind = ProviderKind.NVIDIA_NIM)))
         assertEquals(
-            listOf("--provider", "nvidia", "--model", "qwen/qwen2.5-coder-32b-instruct"),
+            listOf("--provider", "nvidia", "--model", "nvidia/nemotron-3.5-super-vl-120b-a12b"),
             hermesProviderOptions(ProviderProfile(kind = ProviderKind.NVIDIA_NIM)),
         )
     }
