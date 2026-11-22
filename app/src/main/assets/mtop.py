@@ -63,6 +63,7 @@ import json
 import os
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -284,13 +285,126 @@ def device_cpu_count() -> int:
 
 ADB_DELIMITER = "\n__PROCWATCH_EOF__\n"
 
+# Porturile pe care căutăm un server adb local când binarul `adb` lipsește:
+# 5037 = adb clasic, 5040 = serverul din Termux de pe acest telefon,
+# 5555 = adbd TCP, 20000-20006 = serverele Shizuku.
+ADB_SOCKET_PORTS: Sequence[int] = (5037, 5040, 5555) + tuple(range(20000, 20007))
+
+# ------------------------------------------------- client adb fără binar `adb`
+# Pe Android (PRoot) nu există întotdeauna un binar `adb` în PATH, dar poate
+# exista un server adb local pe loopback (Termux ascultă pe alt port decât
+# 5037, Shizuku pe 20000+). Protocolul host<->server e mic, deci vorbim cu el
+# direct din Python: CNXN, apoi OPEN `host:devices` / `host:transport:<serial>`,
+# apoi `shell:<comandă>`.
+
+# Protocolul „smart socket” al serverului adb: fiecare cerere e un payload
+# prefixat cu lungimea lui în 4 cifre hexazecimale, iar după `OKAY` serverul
+# vorbește fie tot cu astfel de cadre (`host:devices`), fie brut (`shell:`).
+# Transportul se fixează o singură dată pe conexiune prin `host:tport:...`,
+# care întoarce un id binar de 8 octeți (ignorat de noi).
+
+
+class SocketAdb:
+    """Client minim al serverului adb, direct pe socket (fără binar `adb`)."""
+
+    def __init__(self, port: int, serial: Optional[str] = None) -> None:
+        self.port = port
+        self.serial = serial
+
+    # ---- io ------------------------------------------------------------
+    @staticmethod
+    def _recv_exact(sock: socket.socket, size: int) -> bytes:
+        buffer = b""
+        while len(buffer) < size:
+            chunk = sock.recv(size - len(buffer))
+            if not chunk:
+                raise OSError("serverul adb a închis conexiunea")
+            buffer += chunk
+        return buffer
+
+    def _connect(self) -> socket.socket:
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=3)
+        sock.settimeout(6)
+        return sock
+
+    @staticmethod
+    def _frame(payload: bytes) -> bytes:
+        return f"{len(payload):04x}".encode() + payload
+
+    def _status(self, sock: socket.socket) -> bool:
+        return self._recv_exact(sock, 4) == b"OKAY"
+
+    def _framed_body(self, sock: socket.socket) -> bytes:
+        size = int(self._recv_exact(sock, 4), 16)
+        return self._recv_exact(sock, size) if size else b""
+
+    def _select_transport(self, sock: socket.socket) -> None:
+        target = (
+            f"host:tport:serial:{self.serial}" if self.serial else "host:tport:any"
+        )
+        sock.sendall(self._frame(target.encode()))
+        if not self._status(sock):
+            raise OSError(f"transportul adb «{target}» nu e disponibil")
+        # după OKAY, `tport` trimite id-ul transportului ales: 8 octeți binari
+        self._recv_exact(sock, 8)
+
+    # ---- api -----------------------------------------------------------
+    def shell(self, command: str, timeout: float = 10.0) -> str:
+        sock = self._connect()
+        sock.settimeout(timeout)
+        try:
+            self._select_transport(sock)
+            sock.sendall(self._frame(f"shell:{command}".encode()))
+            if not self._status(sock):
+                raise OSError("shell adb refuzat")
+            buffer = bytearray()
+            try:
+                while True:
+                    chunk = sock.recv(65536)
+                    if not chunk:
+                        break
+                    buffer += chunk
+            except socket.timeout:
+                pass
+            return buffer.decode("utf-8", "replace")
+        finally:
+            sock.close()
+
+    def devices(self) -> List[str]:
+        sock = self._connect()
+        try:
+            sock.sendall(self._frame(b"host:devices"))
+            if not self._status(sock):
+                raise OSError("host:devices refuzat")
+            body = self._framed_body(sock).decode("utf-8", "replace")
+        finally:
+            sock.close()
+        serials: List[str] = []
+        for line in body.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == "device":
+                serials.append(parts[0])
+        return serials
+
+    def ping(self) -> Tuple[bool, str]:
+        try:
+            out = self.shell("echo procwatch-ok", timeout=6.0)
+        except OSError:
+            return False, f"serverul adb de pe 127.0.0.1:{self.port} nu răspunde"
+        if "procwatch-ok" in out:
+            return True, self.serial or f"127.0.0.1:{self.port}"
+        return False, "shell adb nu răspunde"
+
 
 class AdbBackend:
     """Adapter: expune aceleași primitive ca citirea locală a /proc."""
 
-    def __init__(self, serial: Optional[str] = None) -> None:
+    def __init__(
+        self, serial: Optional[str] = None, socket_client: Optional[SocketAdb] = None
+    ) -> None:
         self.serial = serial
         self._failed = False
+        self._socket = socket_client
         base = ["adb"]
         if serial:
             base += ["-s", serial]
@@ -298,6 +412,14 @@ class AdbBackend:
 
     # ---- intern -------------------------------------------------------
     def _run(self, remote_command: str, timeout: float = 15.0) -> str:
+        if self._socket is not None:
+            try:
+                output = self._socket.shell(remote_command, timeout=min(timeout, 20.0))
+            except OSError:
+                self._failed = True
+                return ""
+            self._failed = False
+            return output
         command = self._base + ["shell", remote_command]
         try:
             result = subprocess.run(
@@ -1861,6 +1983,14 @@ def parse_args():
         help="serialul dispozitivului adb (ex. 127.0.0.1:40383 pentru Shizuku); "
         "implicit primul dispozitiv conectat",
     )
+    parser.add_argument(
+        "--adb-port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="portul serverului adb local când binarul `adb` lipsește "
+        "(implicit: încearcă 5037, 5040, 5555, 20000-20006)",
+    )
     parser.add_argument("--once", action="store_true", help="execută o singură mostră")
     parser.add_argument("--plain", action="store_true", help="dezactivează interfața full-screen")
     parser.add_argument("--no-color", action="store_true", help="dezactivează culorile când este posibil")
@@ -1953,6 +2083,30 @@ def _cleanup_offline_transports() -> None:
             _adb_run(["disconnect", parts[0]])
 
 
+def detect_socket_backend(port: Optional[int] = None) -> Optional[AdbBackend]:
+    """Găsește un server adb local și întoarce un backend care vorbește direct cu el.
+
+    Folosit când binarul `adb` lipsește (ex. într-un guest PRoot), dar există un
+    server adb pe loopback: Termux (port propriu, 5040 pe acest telefon), adb
+    clasic (5037) sau Shizuku (20000-20006).
+    """
+    ports = [port] if port else list(ADB_SOCKET_PORTS)
+    for candidate in ports:
+        if not candidate or not _tcp_open("127.0.0.1", str(candidate)):
+            continue
+        client = SocketAdb(candidate)
+        try:
+            serials = client.devices()
+        except OSError:
+            continue
+        for serial in serials:
+            client.serial = serial
+            ok, _message = client.ping()
+            if ok:
+                return AdbBackend(serial=serial, socket_client=client)
+    return None
+
+
 def auto_detect_serial() -> Optional[str]:
     """Caută un server Shizuku local (adb over TCP) și îl întoarce ca serial.
 
@@ -2000,28 +2154,50 @@ def main() -> int:
         args.once = True
         args.plain = True
     if args.adb:
-        serial = args.serial
-        if serial is None:
-            serial = auto_detect_serial()
-            if serial is not None:
-                print(f"Shizuku detectat automat: {serial}", file=sys.stderr)
-                args.serial = serial
-        backend = AdbBackend(serial=serial)
-        ok, message = backend.ping()
-        if not ok and serial is None:
-            # „more than one device/emulator”: adb refuză apelurile fără -s;
-            # alegem automat primul dispozitiv disponibil.
-            serial = _first_device_serial()
-            if serial is not None:
-                backend = AdbBackend(serial=serial)
-                ok, message = backend.ping()
-                if ok:
+        if shutil.which("adb"):
+            serial = args.serial
+            if serial is None:
+                serial = auto_detect_serial()
+                if serial is not None:
+                    print(f"Shizuku detectat automat: {serial}", file=sys.stderr)
                     args.serial = serial
-                    print(f"Dispozitiv ales automat: {serial}", file=sys.stderr)
-        if not ok:
-            print(f"Eroare adb: {message}", file=sys.stderr)
-            return 2
-        set_adb_backend(backend)
+            backend = AdbBackend(serial=serial)
+            ok, message = backend.ping()
+            if not ok and serial is None:
+                # „more than one device/emulator”: adb refuză apelurile fără -s;
+                # alegem automat primul dispozitiv disponibil.
+                serial = _first_device_serial()
+                if serial is not None:
+                    backend = AdbBackend(serial=serial)
+                    ok, message = backend.ping()
+                    if ok:
+                        args.serial = serial
+                        print(f"Dispozitiv ales automat: {serial}", file=sys.stderr)
+            if not ok:
+                print(f"Eroare adb: {message}", file=sys.stderr)
+                return 2
+            set_adb_backend(backend)
+        else:
+            # Fără binar `adb`: vorbim direct cu un server adb de pe loopback.
+            backend = detect_socket_backend(args.adb_port)
+            if backend is None:
+                ports = (
+                    str(args.adb_port)
+                    if args.adb_port
+                    else ", ".join(str(item) for item in ADB_SOCKET_PORTS)
+                )
+                print(
+                    f"Eroare adb: nu am găsit nici binarul `adb`, nici un server adb "
+                    f"pe 127.0.0.1 ({ports}). Pornește un server adb sau rulează fără --adb.",
+                    file=sys.stderr,
+                )
+                return 2
+            print(
+                f"Server adb local: dispozitiv {backend.serial}",
+                file=sys.stderr,
+            )
+            args.serial = backend.serial
+            set_adb_backend(backend)
     if args.pid is not None:
         existing, _ = scan_processes()
         if args.pid not in existing:
