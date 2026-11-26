@@ -62,7 +62,7 @@ class AppUpdater(
     }
 
     private fun parseManifest(body: String): AppUpdateCheck =
-        UpdateManifest.parse(body, BuildConfig.APP_VARIANT, BuildConfig.VERSION_CODE)
+        UpdateManifest.parse(body, BuildConfig.APP_VARIANT, BuildConfig.VERSION_CODE.toLong())
 
     fun download(info: AppUpdateInfo, progress: (Long, Long) -> Unit): File {
         val directory = File(context.filesDir, "updates").also { it.mkdirs() }
