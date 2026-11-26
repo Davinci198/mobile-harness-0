@@ -58,6 +58,7 @@ cat > "$serve_dir/mobile-harness-update.json" <<JSON
   "versionCode": $version_code,
   "versionName": "$version_name",
   "notes": "Local test build served from $serve_dir.",
+  "channel": "local-test",
   "artifacts": {
     "$flavor": {
       "url": "$base_url/$apk_name",

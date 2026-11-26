@@ -1,0 +1,15 @@
+# Hand-written startup baseline profile (human-readable form).
+# AGP compiles this into assets/dexopt/baseline.prof; the androidx.profileinstaller
+# dependency in app/build.gradle.kts installs it on first run, so ART has these
+# paths AOT-compiled instead of interpreted on a cold start.
+# Keep entries limited to code that really runs during launch.
+HSPLcom/jarves/mh/MainActivity;->onCreate(Landroid/os/Bundle;)V
+HSPLcom/jarves/mh/MainActivity;-><init>()V
+HSPLcom/jarves/mh/ui/MainViewModel;-><init>(Landroid/app/Application;)V
+HSPLcom/jarves/mh/data/AppPreferences;-><init>(Landroid/content/Context;)V
+HSPLcom/jarves/mh/data/AppPreferences;->loadProjects()Ljava/util/List;
+HSPLcom/jarves/mh/data/AppPreferences;->loadProjectChats(Ljava/lang/String;)Ljava/util/List;
+HSPLcom/jarves/mh/runtime/RuntimeInstaller;-><init>(Landroid/content/Context;)V
+HSPLcom/jarves/mh/runtime/RuntimeInstaller;->isInstalled()Z
+HSPLcom/jarves/mh/ui/theme/ThemeKt;->PocketTheme(Lcom/jarves/mh/ui/theme/AppThemeMode;Lcom/jarves/mh/ui/theme/AppColorTheme;IILkotlin/jvm/functions/Function2;Landroidx/compose/runtime/Composer;II)V
+HSPLcom/jarves/mh/ui/PocketDevAppKt;->PocketDevApp(Lcom/jarves/mh/ui/MainViewModel;Landroidx/compose/runtime/Composer;I)V

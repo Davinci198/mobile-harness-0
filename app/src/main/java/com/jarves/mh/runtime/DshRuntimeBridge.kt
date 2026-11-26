@@ -3,6 +3,7 @@ package com.jarves.mh.runtime
 import android.content.Context
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.jarves.mh.BuildConfig
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.DevStack
@@ -705,7 +706,9 @@ class DshRuntimeBridge(
         projectSlug: String,
     ) {
         withContext(Dispatchers.IO) {
-            Log.d("Prewarm", "enter: activeSessionId=$activeSessionId kind=${provider.kind} secretLen=${secretFor(provider)?.length ?: 0}")
+            if (BuildConfig.DEBUG) {
+                Log.d("Prewarm", "enter: activeSessionId=$activeSessionId kind=${provider.kind} hasSecret=${secretFor(provider)?.isNotBlank() == true}")
+            }
             if (activeSessionId != null) return@withContext
             val secret = secretFor(provider).orEmpty()
             if (secret.isBlank() && provider.kind != ProviderKind.KILO_FREE && !isLoopbackBaseUrl(provider.resolvedBaseUrl)) return@withContext

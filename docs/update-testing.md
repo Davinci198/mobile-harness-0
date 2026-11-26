@@ -1,11 +1,44 @@
-# Testing the in-app updater without publishing to GitHub
+# The in-app update channel
 
-The in-app updater is wired to a hard-coded manifest URL
-(`BuildConfig.APP_UPDATE_MANIFEST_URL`) that points at the latest GitHub
-release. Debug builds add a Settings entry that overrides this URL so the
-full download / SHA-256 / package / signature / installer flow can be
-exercised against a locally-built APK exposed via a temporary HTTPS
-tunnel. Nothing has to be uploaded to GitHub.
+## How the shipped channel works
+
+The app reads
+
+```
+https://github.com/Davinci198/mobile-harness-0/releases/latest/download/mobile-harness-update.json
+```
+
+(`BuildConfig.APP_UPDATE_MANIFEST_URL`, set in `app/build.gradle.kts`).
+
+That asset is produced by `.github/workflows/dany-debug-apk.yml` when the
+workflow is dispatched **from `main`**:
+
+1. `assembleOnlineRelease` + `assembleOfflineRelease` build signed release APKs
+   (minified — `app/proguard-rules.pro` keeps the JNI entry points and the
+   components referenced only from the manifest).
+2. `scripts/generate_update_manifest.py` writes `mobile-harness-update.json`
+   with the real size and SHA-256 of both APKs; the version comes from
+   `app/build.gradle.kts`.
+3. The `update-channel` release is recreated with both APKs and the manifest
+   and marked *latest*, so the URL above always resolves to the current
+   channel. Never hand-edit `mobile-harness-update.json` in the repo: the
+   checked-in file is only a template.
+
+`UpdateManifestTest` pins the parser contract: a newer version needs a
+variant-matching **https** URL and a non-empty checksum, an older/equal version
+is *up to date*, and anything malformed is a **failure** shown in
+Settings → Updates (a broken channel used to look identical to "up to date").
+
+`AppUpdater.download` still enforces the checksum, the package name, the
+manifest version code and the signing certificate before handing the APK to the
+installer.
+
+## Testing the updater without publishing
+
+Debug builds add a Settings entry that overrides the manifest URL, so the full
+download / SHA-256 / package / signature / installer flow can be exercised
+against a locally-built APK exposed via a temporary HTTPS tunnel. Nothing has to
+be uploaded to GitHub.
 
 ## What you need
 
@@ -73,6 +106,7 @@ to the default GitHub manifest URL on the next check.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Manifest returns 404 | Tunnel points at the wrong port | Confirm Cloudflare/ngrok URL resolves to `localhost:<port>` |
+| Settings shows "Could not check for updates" | The channel asset is missing (release not published, or the `update-channel` release was deleted) | Dispatch **dany-debug-apk** from `main` |
 | Download never starts | Phone can't reach the tunnel | Visit the URL in the phone's browser to verify |
 | "Update package name does not match" | The new APK was signed with a different key | Rebuild the test APK with the same debug keystore |
 | "Downloaded APK failed its SHA-256 verification" | Manifest hash stale | Rerun the script after the rebuild |

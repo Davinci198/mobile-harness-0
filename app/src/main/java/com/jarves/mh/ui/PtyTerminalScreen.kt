@@ -95,8 +95,8 @@ private fun showKeyboardWhenServed(
  * [TerminalView]/[TerminalSession] din termux, cu procesul lansat in PRoot
  * cu exact argv/env din [RuntimeInstaller.process].
  *
- * Nu atinge fluxul vechi (TerminalScreen pe linii); inlocuirea tabului se
- * face in spate cu flagul [USE_PTY_TERMINAL] din PocketDevApp.
+ * Este singurul terminal al aplicatiei: ecranul vechi pe linii a fost sters
+ * odata cu flagul [USE_PTY_TERMINAL] din PocketDevApp.
  */
 @Composable
 fun PtyTerminalScreen(
@@ -342,7 +342,23 @@ private object PtyTerminalRegistry {
         }
         if (backends.isEmpty()) KeepAliveTracker.release(PTY_SESSION_HOLD)
     }
+
+    fun killAll() {
+        backends.toList().forEach(::kill)
+        activeByProject.clear()
+    }
 }
+
+/**
+ * Closes every live PTY session (guest shells + the agent TUI processes they
+ * own) and drops their scrollback. Settings → "Clear terminal history" uses
+ * this; the shells used to survive the wipe because the only state they keep
+ * lives in [PtyTerminalRegistry], not in the ViewModel.
+ *
+ * Must run on the main thread: [PtyTerminalRegistry.backends] is a Compose
+ * snapshot list, like every other mutation there.
+ */
+fun clearPtyTerminalSessions() = PtyTerminalRegistry.killAll()
 
 /** Stare partajata intre clientul TerminalView si randul de taste extra. */
 private class PtyViewState {

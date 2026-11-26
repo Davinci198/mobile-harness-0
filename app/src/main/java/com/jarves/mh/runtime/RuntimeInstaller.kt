@@ -2778,6 +2778,16 @@ fi
         internal val CORE_BUNDLE_SHA256_FOR_TEST get() = CORE_BUNDLE.sha256
         internal val CORE_BUNDLE_COMPRESSED_BYTES_FOR_TEST get() = CORE_BUNDLE.compressedBytes
 
+        /**
+         * Every runtime bundle the installer can fetch, in the same shape the
+         * release channel publishes. Used by the tests that keep
+         * dist/runtime-bundles/manifest.json honest: a bundle whose name or
+         * checksum drifts from the manifest fails the build instead of the
+         * first install on a phone.
+         */
+        internal val BUNDLES_FOR_TEST: List<RuntimeBundle>
+            get() = listOf(CORE_BUNDLE, CLAUDE_BUNDLE, PYTHON_BUNDLE, ANDROID_BUNDLE, DSH_BUNDLE, AGY_BUNDLE)
+
         // PATH dirs a guest `command:` is resolved from (Debian default plus
         // the user-local bin hermes installs into).
         private val GUEST_PATH_DIRS = listOf(

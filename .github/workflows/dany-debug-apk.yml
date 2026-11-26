@@ -10,17 +10,29 @@ on:
       - 'ci/**'
       - 'refactor/**'
       - 'test/**'
+      - 'arena/**'
   pull_request:
     branches: [main]
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Release notes for the in-app update prompt'
+        required: false
+        default: 
+  group: dany-debug-apk-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     permissions:
       contents: write
     runs-on: ubuntu-latest
+    env:
+      # Release builds are minified; keep R8 off the daemon heap limit so it can
+      # finish on the 7 GB runners.
+      GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -44,9 +56,23 @@ jobs:
       - name: Unit tests
         if: github.event_name != 'release'
         run: ./gradlew :app:testOnlineDebugUnitTest :app:testOfflineDebugUnitTest
-      # APKs are built only on branch pushes, release tagging and manual runs —
-      # merges to main and PR updates run tests only. Only the online debug
-      # variant is produced.
+      # Android Lint runs on the online debug variant: it is the variant that
+      # needs no runtime bundles, so it can be analysed on a clean runner.
+      - name: Android Lint
+        if: github.event_name != 'release'
+        run: ./gradlew :app:lintOnlineDebug
+      - name: Upload lint report
+        if: always() && github.event_name != 'release'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-*.html
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # --- debug APK (branch pushes, manual runs, releases) ------------------
+      # Only the online debug variant is produced here; it is the developer
+      # build users install from the debug-main rolling release.
       - name: Build debug APK
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'release' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
         run: ./gradlew assembleOnlineDebug
@@ -72,24 +98,67 @@ jobs:
           name: mh-dany-debug
           path: app/build/outputs/apk/online/debug-named/*.apk
           retention-days: 7
-      # The debug-main rolling release is manual now: run this workflow from
-      # main (workflow_dispatch) to replace it with a fresh online debug APK.
-      - name: Drop previous rolling release
+
+      # --- release APKs + update manifest (manual main run) ------------------
+      # Every APK and the in-app update manifest are published together: the
+      # app reads releases/latest/download/mobile-harness-update.json, which
+      # used to be a 404 because nothing generated it.
+      - name: Build release APKs
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        env:
+          MH_UPLOAD_STORE_FILE: ${{ secrets.MH_UPLOAD_STORE_FILE }}
+          MH_UPLOAD_STORE_PASSWORD: ${{ secrets.MH_UPLOAD_STORE_PASSWORD }}
+          MH_UPLOAD_KEY_ALIAS: ${{ secrets.MH_UPLOAD_KEY_ALIAS }}
+          MH_UPLOAD_KEY_PASSWORD: ${{ secrets.MH_UPLOAD_KEY_PASSWORD }}
+        run: ./gradlew assembleOnlineRelease assembleOfflineRelease
+      - name: Collect release APKs and write the update manifest
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        env:
+          MH_RELEASE_NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          VERSION_CODE=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' app/build.gradle.kts | head -1)
+          VERSION_NAME=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          CHANNEL="${RELEASE_CHANNEL_TAG:-update-channel}"
+          OUT=app/build/outputs/apk/release-named
+          mkdir -p "$OUT"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${CHANNEL}"
+          for variant in online offline; do
+            src=$(ls app/build/outputs/apk/$variant/release/*.apk | head -1)
+            cp "$src" "$OUT/mobile-harness-$variant-v${VERSION_NAME}.apk"
+            echo "$variant -> mobile-harness-$variant-v${VERSION_NAME}.apk ($(stat -c%s "$OUT/mobile-harness-$variant-v${VERSION_NAME}.apk") bytes)"
+          done
+          # The manifest is generated from the APKs themselves (checksums), so a
+          # manual edit cannot drift from the binaries it advertises.
+          python3 scripts/generate_update_manifest.py \
+            "$OUT" "$VERSION_CODE" "$VERSION_NAME" "$BASE" \
+            --notes "$MH_RELEASE_NOTES" --channel "$CHANNEL"
+          echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "--- manifest ---"
+          cat "$OUT/mobile-harness-update.json"
+      - name: Publish release APKs and the in-app update manifest
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete debug-main --yes --cleanup-tag 2>/dev/null || echo "no previous rolling release"
-      - name: Publish main release
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          tag_name: debug-main
-          name: Mobile Harness (latest main)
-          make_latest: true
-          files: |
-            app/build/outputs/apk/online/debug-named/*.apk
-          fail_on_unmatched_files: true
+          set -euo pipefail
+          OUT=app/build/outputs/apk/release-named
+          # The channel release is recreated on every run and owns the
+          # "latest" pointer, so the manifest URL the app reads stays a stable
+          # .../releases/latest/download/mobile-harness-update.json path while
+          # the APK URLs inside point at this run's tag.
+          CHANNEL="${RELEASE_CHANNEL_TAG:-update-channel}"
+          gh release delete "$CHANNEL" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$CHANNEL" \
+            "$OUT"/*.apk \
+            "$OUT/mobile-harness-update.json" \
+            --title "Mobile Harness stable channel" \
+            --notes "Rolling channel: current stable APKs and the in-app update manifest." \
+            --latest
+          echo "Published channel $CHANNEL"
+          gh release view "$CHANNEL" --json assets --jq '.assets[].name'
+      # --- tagged release (release event) ------------------------------------
       - name: Attach APKs to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2

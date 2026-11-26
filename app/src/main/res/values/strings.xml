@@ -829,7 +829,6 @@
         <item quantity="other">%1$d attachments</item>
     </plurals>
     <string name="an_process_project_terminal">Project terminal</string>
-    <string name="an_process_quick_terminal">Quick terminal</string>
     <string name="diagnostics_inactive_stopped">Inactive processes stopped</string>
     <string name="diagnostics_cache_busy">Wait for active work to finish before clearing output</string>
     <string name="diagnostics_cache_cleared">Disposable runtime output cleared</string>
@@ -1237,4 +1236,8 @@
     <string name="drawer_update_available">Version %1$s is available.</string>
     <string name="drawer_install_update">Install update</string>
     <string name="drawer_update_installing">Installing update…</string>
+    <string name="drawer_update_checking">Checking for updates…</string>
+    <string name="drawer_up_to_date">You are on the latest version.</string>
+    <string name="update_check_failed">Could not check for updates</string>
+    <string name="app_firmware_version">v%1$s</string>
 </resources>

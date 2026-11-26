@@ -29,6 +29,11 @@ val hasUploadSigning = listOf(
 val runtimeReleaseBaseUrl =
     findProperty("runtimeReleaseBaseUrl") as String?
         ?: "https://github.com/Davinci198/Proxmox-VE-Laptop-Hybrid-Setup/releases/download/runtime-2026.10.1"
+// The in-app updater reads the rolling channel release published by
+// .github/workflows/dany-debug-apk.yml (tag `update-channel`, always marked
+// latest, carrying both flavours + this manifest). The URL used to 404 because
+// nothing ever uploaded the asset, and AppUpdater collapsed every failure into
+// "up to date"; the workflow and UpdateManifestTest now own that contract.
 val appUpdateManifestUrl =
     "https://github.com/Davinci198/mobile-harness-0/releases/latest/download/mobile-harness-update.json"
 val runtimeBundleDir = rootProject.layout.projectDirectory.dir("dist/runtime-bundles")
@@ -146,7 +151,8 @@ android {
             signingConfigs.findByName("stableDebug")?.let { signingConfig = it }
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             if (hasUploadSigning) {
                 signingConfig = signingConfigs.getByName("upload")
             }
@@ -175,6 +181,19 @@ android {
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     packaging.jniLibs.useLegacyPackaging = true
     androidResources.noCompress += "zst"
+
+    lint {
+        // Advisory first: this project has never run lint, so the report (CI
+        // uploads it on every push) has to be read before findings can gate the
+        // build. Flip abortOnError once a baseline exists.
+        abortOnError = false
+        warningsAsErrors = false
+        checkReleaseBuilds = false
+        // targetSdk 28 is deliberate for the direct APK: it keeps the proven
+        // PRoot execution path that the Play build (36) has not validated yet.
+        disable += "ExpiredTargetSdkVersion"
+        htmlReport = true
+    }
 }
 
 tasks.matching { it.name.startsWith("mergeOffline") && it.name.endsWith("Assets") }
@@ -221,6 +240,9 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("com.github.luben:zstd-jni:1.5.6-9@aar")
     implementation(project(":third_party:termux-terminal-view"))
+    // Ships the compiled baseline profile above: ART pre-compiles the startup
+    // and chat-composer paths on install instead of interpreting them.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.room:room-runtime:2.7.0")
     implementation("androidx.room:room-ktx:2.7.0")
     ksp("androidx.room:room-compiler:2.7.0")

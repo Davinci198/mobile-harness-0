@@ -72,6 +72,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * The transcript writer batches live deltas for a short window; leaving the
+     * app must not drop the last of them (the process can be killed while
+     * backgrounded).
+     */
+    override fun onStop() {
+        viewModel.flushTranscriptWrites()
+        super.onStop()
+    }
+
     @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)

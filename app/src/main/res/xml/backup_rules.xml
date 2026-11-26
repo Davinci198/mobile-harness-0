@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup is off (android:allowBackup="false"): the guest filesystem is a
+  PRoot rootfs with setuid bits and hard links that an Android backup would
+  restore corrupt. These rules are the pre-Android-12 counterpart of
+  data_extraction_rules.xml, so a future allowBackup flip cannot silently ship
+  the runtime or the credential store into a backup.
+-->
+<full-backup-content>
+    <!-- Credentials: never leave the device. -->
+    <exclude domain="sharedpref" path="pocket_secrets.xml" />
+    <exclude domain="database" path="mh_secrets.db" />
+    <exclude domain="database" path="mh_secrets.db-shm" />
+    <exclude domain="database" path="mh_secrets.db-wal" />
+    <!-- PRoot guest: rootfs, hard-linked binaries, agent sessions. -->
+    <exclude domain="file" path="runtime/" />
+    <exclude domain="file" path="workspaces/" />
+</full-backup-content>

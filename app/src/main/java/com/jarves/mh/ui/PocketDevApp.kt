@@ -291,7 +291,6 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlin.concurrent.thread
 
@@ -325,10 +324,6 @@ private enum class WorkspaceTab(@StringRes val labelRes: Int, val icon: ImageVec
  * settings categories, over whatever screen was underneath.
  */
 private enum class HomeTool { NONE, DASHBOARD, STUDIO }
-
-/** PLAN-TERMINAL pas 3: true = TerminalView VT real (PtyTerminalScreen),
- * false = ecranul vechi pe linii. Revenire instant la nevoie. */
-private const val USE_PTY_TERMINAL = true
 
 @Composable
 fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
@@ -476,14 +471,10 @@ fun PocketDevApp(viewModel: MainViewModel = viewModel()) {
             onKeepFileChange = viewModel::keepFileChange,
             onCreateChat = viewModel::createChat,
             onSwitchChat = viewModel::switchChat,
-            onTerminalRun = viewModel::requestProjectTerminalCommand,
-            onTerminalInput = viewModel::sendProjectTerminalInput,
-            onTerminalInterrupt = viewModel::interruptProjectTerminalCommand,
             onTerminalPrepare = viewModel::prepareProjectTerminalCommand,
             onTerminalDraftConsumed = viewModel::consumeProjectTerminalDraft,
             onTerminalOpened = viewModel::openProjectTerminal,
             onTerminalStop = viewModel::stopProjectTerminalCommand,
-            onTerminalClear = viewModel::clearProjectTerminal,
             onTerminalConfirm = viewModel::confirmProjectTerminalCommand,
             onTerminalCancel = viewModel::cancelProjectTerminalCommand,
             onUseSuggestedProjectRoot = viewModel::useSuggestedProjectRoot,
@@ -4448,14 +4439,10 @@ private fun WorkspaceScreen(
     onKeepFileChange: (String) -> Unit,
     onCreateChat: () -> Unit,
     onSwitchChat: (String) -> Unit,
-    onTerminalRun: (String) -> Unit,
-    onTerminalInput: (String) -> Unit,
-    onTerminalInterrupt: () -> Unit,
     onTerminalPrepare: (String) -> Unit,
     onTerminalDraftConsumed: () -> Unit,
     onTerminalOpened: () -> Unit,
     onTerminalStop: () -> Unit,
-    onTerminalClear: () -> Unit,
     onTerminalConfirm: () -> Unit,
     onTerminalCancel: () -> Unit,
     onUseSuggestedProjectRoot: () -> Unit,
@@ -4847,7 +4834,7 @@ private fun WorkspaceScreen(
                         exportProjectLauncher.launch("${state.activeProject?.slug ?: "project"}.zip")
                     },
                 )
-                 WorkspaceTab.TERMINAL -> if (USE_PTY_TERMINAL) {
+                WorkspaceTab.TERMINAL -> {
                     val ptyContext = LocalContext.current
                     PtyTerminalScreen(
                         installer = remember(ptyContext) {
@@ -4856,27 +4843,7 @@ private fun WorkspaceScreen(
                         projectSlug = state.activeProject?.slug ?: "pocket",
                         projectId = state.activeProject?.id,
                     )
-                } else TerminalScreen(
-                    lines = state.projectTerminalLines,
-                    isRunning = state.projectTerminalRunning,
-                    onRun = onTerminalRun,
-                    onInput = onTerminalInput,
-                    onInterrupt = onTerminalInterrupt,
-                    onClear = onTerminalClear,
-                    onToggleTheme = {},
-                    themeMode = state.themeMode,
-                    title = stringResource(R.string.proj_terminal_title),
-                    subtitle = "${state.projectTerminalCwd} · Ubuntu PRoot",
-                    liveOutput = state.projectTerminalLiveOutput,
-                    currentCommand = state.projectTerminalCommand,
-                    commandDraft = state.projectTerminalDraft,
-                    onCommandDraftConsumed = onTerminalDraftConsumed,
-                    promptPath = state.projectTerminalCwd,
-                    onStop = onTerminalStop,
-                    showThemeAction = false,
-                    showQuickCommands = false,
-                    compactHeader = true,
-                )
+                }
                 WorkspaceTab.CHANGES -> ChangesTab(
                     state.changes,
                     onUndoChanges,
@@ -7431,6 +7398,8 @@ private fun StudioTab(installer: RuntimeInstaller) {
     var attempt by remember { mutableIntStateOf(0) }
 
     val manager = remember(installer) { StudioServerManager(installer) }
+    // Cancelled automatically if the tab leaves the composition mid-install.
+    val installScope = rememberCoroutineScope()
 
     var progressLine by remember { mutableStateOf("") }
 
@@ -7477,14 +7446,17 @@ private fun StudioTab(installer: RuntimeInstaller) {
     fun install() {
         uiState = StudioUiState.INSTALLING
         errorMessage = null
-        thread(name = "studio-install") {
-            val proot = runCatching { installer.installedRuntime() }.getOrNull()
+        // The installer is already a suspend function; launching it here used to
+        // wrap it in runBlocking, which pinned a whole thread for the duration of
+        // the download and made cancellation impossible.
+        installScope.launch {
+            val proot = withContext(Dispatchers.IO) { runCatching { installer.installedRuntime() }.getOrNull() }
             if (proot == null) {
                 uiState = StudioUiState.FAILED
                 errorMessage = context.getString(R.string.studio_core_not_ready)
-                return@thread
+                return@launch
             }
-            val result = runBlocking {
+            val result = withContext(Dispatchers.IO) {
                 runCatching {
                     installer.ensureStudioInstalled(
                         proot = proot.proot,
@@ -7656,6 +7628,8 @@ private fun DashboardTab(installer: RuntimeInstaller) {
     var attempt by remember { mutableIntStateOf(0) }
 
     val manager = remember(installer) { HermesDashboardManager(installer) }
+    // Cancelled automatically if the tab leaves the composition mid-install.
+    val installScope = rememberCoroutineScope()
 
     var progressLine by remember { mutableStateOf("") }
 
@@ -7704,8 +7678,8 @@ private fun DashboardTab(installer: RuntimeInstaller) {
     fun install() {
         uiState = StudioUiState.INSTALLING
         errorMessage = null
-        thread(name = "dashboard-install") {
-            val result = runBlocking {
+        installScope.launch {
+            val result = withContext(Dispatchers.IO) {
                 runCatching {
                     installer.ensureAgentInstalled(AgentKind.HERMES) { progress ->
                         android.os.Handler(android.os.Looper.getMainLooper()).post { progressLine = progress.message }

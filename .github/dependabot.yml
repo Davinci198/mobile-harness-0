@@ -1,0 +1,39 @@
+version: 2
+
+updates:
+  # Gradle dependencies and plugin versions (versions live in
+  # gradle/libs.versions.toml, so one PR moves the whole graph).
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      androidx:
+        patterns:
+          - "androidx.*"
+      kotlin:
+        patterns:
+          - "org.jetbrains.kotlin*"
+          - "com.google.devtools.ksp"
+    labels:
+      - "dependencies"
+
+  # Workflow action versions are pinned to commit SHAs; Dependabot keeps the
+  # pins (and their version comments) current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
+      - "ci"
+
+  # Git submodules: proot and libandroid-shmem are vendored from termux.
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    labels:
+      - "dependencies"
