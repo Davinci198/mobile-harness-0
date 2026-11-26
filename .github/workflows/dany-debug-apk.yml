@@ -57,7 +57,16 @@ jobs:
           ls -la "$HOME/.android/"
       - name: Unit tests
         if: github.event_name != 'release'
-        run: ./gradlew :app:testOnlineDebugUnitTest :app:testOfflineDebugUnitTest
+        run: |
+          set -o pipefail
+          mkdir -p dist/ci
+          ./gradlew :app:testOnlineDebugUnitTest :app:testOfflineDebugUnitTest 2>&1 \
+            | tee dist/ci/unit-tests.log
+      # The Gradle log is not always retrievable from the Actions API, so the
+      # failure is also surfaced as check-run annotations.
+      - name: Annotate test failures
+        if: failure() && github.event_name != 'release'
+        run: python3 scripts/ci/emit-failure-annotations.py dist/ci/unit-tests.log app/build/test-results
       # Unit-test reports: a red test run is otherwise invisible from the CLI
       # unless the job log is downloadable.
       - name: Upload unit test reports
@@ -74,7 +83,12 @@ jobs:
       # needs no runtime bundles, so it can be analysed on a clean runner.
       - name: Android Lint
         if: github.event_name != 'release'
-        run: ./gradlew :app:lintOnlineDebug
+        run: |
+          set -o pipefail
+          ./gradlew :app:lintOnlineDebug 2>&1 | tee dist/ci/lint.log
+      - name: Annotate lint failures
+        if: failure() && github.event_name != 'release'
+        run: python3 scripts/ci/emit-failure-annotations.py dist/ci/lint.log
       - name: Upload lint report
         if: always() && github.event_name != 'release'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
