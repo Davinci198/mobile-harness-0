@@ -1,0 +1,26 @@
+name: ci-diag
+
+on:
+  push:
+    branches: ['arena/**']
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Gradle probe
+        run: |
+          set -o pipefail
+          ./gradlew :app:testOnlineDebugUnitTest --no-daemon 2>&1 | tee /tmp/probe.log || true
+          echo "=== tail ==="
+          tail -n 80 /tmp/probe.log
+          echo "=== errors ==="
+          grep -nE "^e: |FAILURE:|What went wrong|Execution failed|error:" /tmp/probe.log | head -40
