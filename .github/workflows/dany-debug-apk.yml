@@ -58,6 +58,18 @@ jobs:
       - name: Unit tests
         if: github.event_name != 'release'
         run: ./gradlew :app:testOnlineDebugUnitTest :app:testOfflineDebugUnitTest
+      # Unit-test reports: a red test run is otherwise invisible from the CLI
+      # unless the job log is downloadable.
+      - name: Upload unit test reports
+        if: always() && github.event_name != 'release'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unit-test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
       # Android Lint runs on the online debug variant: it is the variant that
       # needs no runtime bundles, so it can be analysed on a clean runner.
       - name: Android Lint
