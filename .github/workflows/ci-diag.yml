@@ -1,0 +1,61 @@
+name: ci-diag
+
+# Compile/test probe kept for debugging CI without a local JDK.
+#
+# `dany-debug-apk` is the real pipeline, but it stops at the first red step and
+# the Actions job log is not always downloadable (the log host can time out,
+# even for green runs). This workflow runs the unit-test compilation and tests
+# on its own, never fails the branch, and reports every Kotlin compiler error
+# and failing test as a check annotation plus a `probe-log` artifact.
+#
+# Use it when `dany-debug-apk` goes red and the log is unavailable:
+# open the run, read the annotations or download the artifact.
+
+on:
+  push:
+    branches:
+      - main
+      - 'dany/**'
+      - 'arena/**'
+      - 'ci/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-diag-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: false
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Compile and run unit tests
+        run: |
+          set -o pipefail
+          ./gradlew :app:testOnlineDebugUnitTest --no-daemon 2>&1 | tee probe.log || true
+          python3 - <<'PY'
+          import re
+          lines = open('probe.log', encoding='utf-8', errors='replace').read().splitlines()
+          keep = [l for l in lines if re.match(r'^(e: |> Task .*FAILED|FAILURE:|\* What went wrong|Execution failed)', l)]
+          if not keep:
+              keep = lines[-40:]
+          for line in keep[:20]:
+              print('::error::' + line.replace('%', '%25').replace('\r', '')[:900])
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: probe-log
+          path: probe.log
+          if-no-files-found: ignore
+          retention-days: 7
