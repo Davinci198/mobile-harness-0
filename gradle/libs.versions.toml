@@ -18,7 +18,7 @@ room = "2.7.0"
 profileinstaller = "1.4.1"
 shizuku = "13.1.5"
 commonsCompress = "1.27.1"
-zstd = "1.5.6-9"
+zstd = "1.5.7-29"
 junit = "4.13.2"
 json = "20250107"
 
