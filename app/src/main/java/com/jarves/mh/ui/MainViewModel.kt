@@ -3645,6 +3645,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .getOrElse { AppUpdateCheck.Failed(it.message ?: s(R.string.update_check_failed)) }
             preferences.lastAppUpdateCheckMillis = System.currentTimeMillis()
             _state.update { current ->
+                // The channel was already checked, so any stale error from a
+                // previous attempt is replaced by this attempt's outcome.
                 when (result) {
                     is AppUpdateCheck.Available -> current.copy(
                         appUpdateChecking = false,

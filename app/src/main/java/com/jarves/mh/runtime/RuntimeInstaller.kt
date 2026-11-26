@@ -165,7 +165,7 @@ internal fun rewriteGuestHosts(hostsFile: File, ipv4Pin: String?) {
 }
 
 
-private data class RuntimeBundle(
+internal data class RuntimeBundle(
     val label: String,
     val fileName: String,
     val sha256: String,
