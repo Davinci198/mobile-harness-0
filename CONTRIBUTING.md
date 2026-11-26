@@ -50,3 +50,18 @@ both flavours, generates `mobile-harness-update.json` from the APKs, and
 republishes the `update-channel` release; the in-app updater reads
 `releases/latest/download/mobile-harness-update.json`, so never hand-edit that
 file.
+
+The same dispatch on a **branch** builds the minified release variants but
+publishes nothing: it uploads them as `mh-release-validation` (plus
+`mapping.txt`). That is the way to prove a proguard change before merging.
+
+Signing: `release` uses the `MH_UPLOAD_*` secrets when all four are present and
+falls back to the stable debug keystore otherwise. The fallback matters —
+everything shipped so far is debug-signed, so a brand-new upload key would
+upgrade-over-install fail for the existing user base. The workflow verifies the
+APK signature before writing the manifest and fails rather than publish an
+unsigned build.
+
+**Bump `versionCode` before publishing from `main`.** The in-app updater only
+offers a build whose `versionCode` is strictly greater than the installed one,
+so republishing with the current value reaches nobody.
