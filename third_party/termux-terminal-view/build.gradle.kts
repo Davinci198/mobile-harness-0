@@ -15,6 +15,6 @@ android {
 }
 
 dependencies {
-    implementation("androidx.annotation:annotation:1.9.0")
+    implementation("androidx.annotation:annotation:1.11.0")
     api(project(":third_party:termux-terminal-emulator"))
 }
