@@ -164,6 +164,10 @@ jobs:
           python3 scripts/generate_update_manifest.py \
             "$OUT" "$VERSION_CODE" "$VERSION_NAME" "$BASE" \
             --notes "$MH_RELEASE_NOTES" --channel "$CHANNEL"
+          # An unsigned release still builds; it just cannot be installed.
+          # Publishing it would offer every user an update that fails, so the
+          # signature is verified before the manifest is written.
+          python3 scripts/ci/verify-apk-signing.py "$OUT"/*.apk
           echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "--- manifest ---"
