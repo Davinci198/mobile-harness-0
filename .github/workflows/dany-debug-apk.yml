@@ -148,6 +148,10 @@ jobs:
           MH_RELEASE_NOTES: ${{ inputs.notes }}
         run: |
           set -euo pipefail
+          mkdir -p dist/ci
+          # Everything this step decides (signature check, manifest contents) is
+          # worth reading afterwards, and the job log is not always fetchable.
+          exec > >(tee -a dist/ci/release.log) 2>&1
           VERSION_CODE=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' app/build.gradle.kts | head -1)
           VERSION_NAME=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
           CHANNEL="${RELEASE_CHANNEL_TAG:-update-channel}"
@@ -204,6 +208,16 @@ jobs:
             --latest
           echo "Published channel $CHANNEL"
           gh release view "$CHANNEL" --json assets --jq '.assets[].name'
+      - name: Annotate release failures
+        if: failure() && github.event_name == 'workflow_dispatch'
+        run: python3 scripts/ci/emit-failure-annotations.py dist/ci/release.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && github.event_name == 'workflow_dispatch'
+        with:
+          name: release-log
+          path: dist/ci/release.log
+          if-no-files-found: ignore
+          retention-days: 7
       # --- tagged release (release event) ------------------------------------
       - name: Attach APKs to release
         if: github.event_name == 'release'
