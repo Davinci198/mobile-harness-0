@@ -3,7 +3,7 @@
 # referencing it as libs.<alias> is a one-line change, done incrementally so the
 # build stays green.
 [versions]
-agp = "8.13.2"
+agp = "9.5.3"
 kotlin = "2.2.21"
 ksp = "2.2.21-2.0.5"
 composeBom = "2025.02.00"
