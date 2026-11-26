@@ -20,7 +20,9 @@ on:
       notes:
         description: 'Release notes for the in-app update prompt'
         required: false
-        default: 
+        default: ''
+
+concurrency:
   group: dany-debug-apk-${{ github.ref }}
   cancel-in-progress: true
 
