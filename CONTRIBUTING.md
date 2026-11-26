@@ -24,6 +24,13 @@ update channel, the runtime bundle names/checksums, or the terminal/settings
 surfaces should also mention which of the guard tests covers it
 (`UpdateManifestTest`, `RuntimeBundleManifestTest`, `I18nGuardTest`).
 
+When a CI run goes red and the job log will not load (the Actions log host is
+occasionally unreachable), `dany-debug-apk` publishes the failing compiler
+errors and test names as check annotations and uploads `unit-test-reports`.
+There is also `.github/workflows/ci-diag.yml`: a non-blocking probe that runs
+the unit-test compilation alone and attaches `probe-log` as an artifact. It is
+the fastest way to see a Kotlin compile error without a local JDK.
+
 ## Where things live
 
 | Path | What |
