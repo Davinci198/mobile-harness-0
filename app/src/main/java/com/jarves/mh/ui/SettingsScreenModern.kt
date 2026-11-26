@@ -155,7 +155,6 @@ fun SettingsScreen(
     onSetCustomColors: (Int, Int) -> Unit,
     onResetColorTheme: () -> Unit,
     onPing: () -> Unit,
-    onClearTerminal: () -> Unit,
     getSavedApiKey: (ProviderKind) -> String,
     getSavedApiKeys: (ProviderKind) -> List<ApiKeyInfo>,
     onAddApiKey: (ProviderKind, String, String) -> List<ApiKeyInfo>,
@@ -713,7 +712,7 @@ fun SettingsScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
-                        onClick = { onClearTerminal(); terminalCleared = true },
+                        onClick = { clearPtyTerminalSessions(); terminalCleared = true },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Default.DeleteSweep, null, Modifier.size(17.dp))
@@ -910,7 +909,6 @@ internal fun SettingsScreenFromViewModel(
         onSetCustomColors = viewModel::setCustomColors,
         onResetColorTheme = viewModel::resetColorTheme,
         onPing = viewModel::pingApi,
-        onClearTerminal = viewModel::clearTerminal,
         getSavedApiKey = viewModel::getSavedApiKey,
         getSavedApiKeys = viewModel::getSavedApiKeys,
         onAddApiKey = viewModel::addApiKey,

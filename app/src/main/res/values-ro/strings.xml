@@ -829,7 +829,6 @@
         <item quantity="other">%1$d atașamente</item>
     </plurals>
     <string name="an_process_project_terminal">Terminalul proiectului</string>
-    <string name="an_process_quick_terminal">Terminal rapid</string>
     <string name="diagnostics_inactive_stopped">Procesele inactive au fost oprite</string>
     <string name="diagnostics_cache_busy">Așteaptă finalizarea activității înainte de a goli ieșirea</string>
     <string name="diagnostics_cache_cleared">Ieșirea reutilizabilă a runtime-ului a fost golită</string>
@@ -1237,4 +1236,8 @@
     <string name="drawer_update_available">Versiunea %1$s este disponibilă.</string>
     <string name="drawer_install_update">Instalează actualizarea</string>
     <string name="drawer_update_installing">Se instalează actualizarea…</string>
+    <string name="drawer_update_checking">Se verifică actualizările…</string>
+    <string name="drawer_up_to_date">Aveți cea mai recentă versiune.</string>
+    <string name="update_check_failed">Verificarea actualizărilor a eșuat</string>
+    <string name="app_firmware_version">v%1$s</string>
 </resources>

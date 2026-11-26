@@ -96,6 +96,7 @@ import com.jarves.mh.runtime.parseAndroidBuildIssues
 import com.jarves.mh.runtime.diagnoseAndroidBuildFailure
 import com.jarves.mh.runtime.inferAndroidBuildStage
 import com.jarves.mh.runtime.readTailText
+import com.jarves.mh.update.AppUpdateCheck
 import com.jarves.mh.update.AppUpdateInfo
 import com.jarves.mh.update.AppUpdater
 import java.io.File
@@ -118,6 +119,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -204,7 +206,8 @@ private data class RuntimeRetryRequest(
 private data class TranscriptWrite(
     val projectId: String,
     val chatId: String,
-    val messages: List<ChatMessage>,
+    /** Null when only a flush of the pending transcript was requested. */
+    val messages: List<ChatMessage>? = null,
 )
 
 private data class ImportedZipProject(
@@ -471,6 +474,7 @@ data class AppUiState(
     val androidHealthMessage: String? = null,
     val appUpdate: AppUpdateInfo? = null,
     val appUpdateStatus: AppUpdateStatus? = null,
+    val appUpdateChecking: Boolean = false,
     val appUpdateDownloadedBytes: Long = 0L,
     val appUpdateTotalBytes: Long = -1L,
     val appUpdateError: String? = null,
@@ -484,6 +488,13 @@ private const val MAX_ARCHIVE_DEPTH = 6
 
 /** How long a workflow replay waits for the approval card answer. */
 private const val WORKFLOW_APPROVAL_TIMEOUT_MS = 10 * 60_000L
+
+/**
+ * Quiet window the transcript writer waits before persisting a live chat.
+ * Long enough to collapse token-by-token deltas, short enough that a process
+ * kill loses at most this much of the visible timeline.
+ */
+private const val TRANSCRIPT_WRITE_DEBOUNCE_MS = 500L
 
 /** A single file may not be bigger than this inside an archive. */
 private val perFileCap: Long = com.jarves.mh.storage.FsLimits.MAX_ARCHIVE_BYTES / 2
@@ -530,7 +541,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (BuildConfig.DEBUG) preferences.debugUpdateManifestUrl else "",
     )
     @Volatile private var projectTerminalProcess: Process? = null
-    @Volatile private var terminalProcess: Process? = null
     @Volatile private var projectTerminalProjectId: String? = null
     @Volatile private var projectTerminalStopRequested: Boolean = false
     @Volatile private var setupCompletionHandled: Boolean = false
@@ -629,8 +639,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) { discoverPlugins() }
         RuntimeSetupController.restore(application)
         viewModelScope.launch(Dispatchers.IO) {
-            for (write in transcriptWrites) {
-                preferences.saveMessages(write.projectId, write.chatId, write.messages)
+            // Streaming deltas used to rewrite the whole transcript on every
+            // token. The newest payload per chat is now held for a short quiet
+            // window and written once, unless a boundary (work segment, session
+            // end, user action) asks for an immediate flush.
+            val pending = HashMap<String, TranscriptWrite>()
+            fun chatKey(write: TranscriptWrite) = write.projectId + "/" + write.chatId
+            fun writePending() {
+                pending.values.forEach { write ->
+                    write.messages?.let { messages ->
+                        preferences.writeMessages(write.projectId, write.chatId, preferences.encodeMessages(messages))
+                    }
+                }
+                pending.clear()
+            }
+            while (true) {
+                val first = transcriptWrites.receiveCatching().getOrNull() ?: break
+                if (first.messages == null) {
+                    writePending()
+                    continue
+                }
+                pending[chatKey(first)] = first
+                var flushRequested = false
+                val deadline = System.currentTimeMillis() + TRANSCRIPT_WRITE_DEBOUNCE_MS
+                while (true) {
+                    val remaining = deadline - System.currentTimeMillis()
+                    if (remaining <= 0L) break
+                    val next = withTimeoutOrNull(remaining) {
+                        transcriptWrites.receiveCatching().getOrNull()
+                    } ?: break
+                    if (next.messages == null) {
+                        flushRequested = true
+                        break
+                    }
+                    pending[chatKey(next)] = next
+                }
+                if (flushRequested) {
+                    // Anything queued before the flush marker lands must not be
+                    // left behind; keep the newest payload per chat.
+                    while (true) {
+                        val extra = transcriptWrites.tryReceive().getOrNull() ?: break
+                        if (extra.messages != null) pending[chatKey(extra)] = extra
+                    }
+                }
+                writePending()
             }
         }
         viewModelScope.launch {
@@ -716,109 +768,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val state: StateFlow<AppUiState> = _state.asStateFlow()
-
-    private val _terminalLines = MutableStateFlow<List<TerminalOutputLine>>(
-        listOf(
-            TerminalOutputLine(
-                command = "uname -a",
-                output = "Linux pocket-dev 6.1.0-arm64 #1 SMP aarch64 GNU/Linux (PRoot Sandbox)",
-                exitCode = 0,
-            ),
-        ),
-    )
-    val terminalLines: StateFlow<List<TerminalOutputLine>> = _terminalLines.asStateFlow()
-
-    private val _isTerminalRunning = MutableStateFlow(false)
-    val isTerminalRunning: StateFlow<Boolean> = _isTerminalRunning.asStateFlow()
-
-    private val _terminalLiveOutput = MutableStateFlow("")
-    val terminalLiveOutput: StateFlow<String> = _terminalLiveOutput.asStateFlow()
-
-    private val _terminalCurrentCommand = MutableStateFlow<String?>(null)
-    val terminalCurrentCommand: StateFlow<String?> = _terminalCurrentCommand.asStateFlow()
-
-    fun runTerminalCommand(cmd: String) {
-        val command = cmd.trim()
-        if (command.isBlank() || _isTerminalRunning.value) return
-        if (command == "clear") {
-            _terminalLines.value = emptyList()
-            return
-        }
-        _isTerminalRunning.value = true
-        _terminalCurrentCommand.value = command
-        _terminalLiveOutput.value = ""
-        viewModelScope.launch {
-            val (output, exitCode) = withContext(Dispatchers.IO) {
-                runCatching {
-                    if (!installer.isInstalled()) {
-                        return@runCatching "Linux environment is not ready yet." to 1
-                    }
-                    val runtime = installer.installedRuntime()
-                    val workspace = File(getApplication<Application>().filesDir, "workspaces/terminal").apply { mkdirs() }
-                    val preparedCommand = prepareInteractiveShellCommand(command)
-                    val proc = installer.process(
-                        proot = runtime.proot,
-                        rootfs = runtime.rootfs,
-                        workspace = workspace,
-                        environment = emptyMap(),
-                        guestCommand = listOf("/usr/bin/bash", "-c", preparedCommand),
-                    )
-                    terminalProcess = proc
-                    val native = proc as? NativeSpawnProcess
-                    var offset = 0L
-                    val streamed = StringBuilder()
-                    var autoConfirmed = false
-                    while (proc.isAlive || (native?.outputFile?.length() ?: 0L) > offset) {
-                        val file = native?.outputFile
-                        val available = (file?.length() ?: 0L) - offset
-                        if (file == null || available <= 0) {
-                            Thread.sleep(50)
-                            continue
-                        }
-                        val bytes = ByteArray(minOf(available, 16L * 1024).toInt())
-                        val count = RandomAccessFile(file, "r").use { input ->
-                            input.seek(offset)
-                            input.read(bytes)
-                        }
-                        if (count > 0) {
-                            offset += count
-                            streamed.append(bytes.decodeToString(0, count))
-                            _terminalLiveOutput.value = sanitizeTerminalOutput(streamed.toString())
-                                .trimEnd()
-                                .takeLast(MAX_PROJECT_TERMINAL_OUTPUT)
-                            if (!autoConfirmed && shouldAutoConfirmPackageCommand(command, streamed.toString())) {
-                                proc.outputStream.write("y\n".toByteArray())
-                                proc.outputStream.flush()
-                                autoConfirmed = true
-                            }
-                        }
-                    }
-                    val exit = proc.waitFor()
-                    runCatching { proc.outputStream.close() }
-                    val out = sanitizeTerminalOutput(streamed.toString()).trim()
-                    val finalOut = if (out.isNotEmpty() || exit == 0) out else "Process exited with code $exit"
-                    finalOut to exit
-                }.getOrElse { "Error: ${it.message}" to 1 }
-            }
-            _terminalLines.update { it + TerminalOutputLine(command = command, output = output, exitCode = exitCode) }
-            _terminalLiveOutput.value = ""
-            _terminalCurrentCommand.value = null
-            _isTerminalRunning.value = false
-            terminalProcess = null
-        }
-    }
-
-    fun sendTerminalInput(text: String) {
-        sendProcessInput(terminalProcess, text)
-    }
-
-    fun interruptTerminalCommand() {
-        interruptProcess(terminalProcess)
-    }
-
-    fun clearTerminal() {
-        _terminalLines.value = emptyList()
-    }
 
     fun requestProjectTerminalCommand(command: String) {
         val normalized = command.trim()
@@ -1239,7 +1188,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val active = buildList {
             if (current.isRunning) add(current.agentKind.title)
             if (current.projectTerminalRunning || projectTerminalProcess?.isAlive == true) add(s(R.string.an_process_project_terminal))
-            if (terminalProcess?.isAlive == true) add(s(R.string.an_process_quick_terminal))
             if (current.androidBuildRunning || androidBuildProcess?.isAlive == true) add(s(R.string.build_building))
         }
         val runtimeCache = getApplication<Application>().cacheDir.listFiles().orEmpty()
@@ -3690,12 +3638,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun checkForAppUpdate(force: Boolean = false) {
         if (!force && System.currentTimeMillis() - preferences.lastAppUpdateCheckMillis < 24L * 60L * 60L * 1000L) return
+        if (_state.value.appUpdateChecking) return
+        _state.update { it.copy(appUpdateChecking = true) }
         viewModelScope.launch(Dispatchers.IO) {
-            val update = runCatching { appUpdater().check() }.getOrNull()
+            val result = runCatching { appUpdater().check() }
+                .getOrElse { AppUpdateCheck.Failed(it.message ?: s(R.string.update_check_failed)) }
             preferences.lastAppUpdateCheckMillis = System.currentTimeMillis()
-            if (update != null) {
-                _state.update {
-                    it.copy(appUpdate = update, appUpdateStatus = AppUpdateStatus.AVAILABLE, appUpdateError = null)
+            _state.update { current ->
+                // The channel was already checked, so any stale error from a
+                // previous attempt is replaced by this attempt's outcome.
+                when (result) {
+                    is AppUpdateCheck.Available -> current.copy(
+                        appUpdateChecking = false,
+                        appUpdate = result.info,
+                        appUpdateStatus = AppUpdateStatus.AVAILABLE,
+                        appUpdateError = null,
+                    )
+                    // Being up to date must also clear a stale offer, otherwise a
+                    // downgraded channel keeps advertising the previous version.
+                    AppUpdateCheck.UpToDate -> current.copy(
+                        appUpdateChecking = false,
+                        appUpdate = null,
+                        appUpdateStatus = null,
+                        appUpdateError = null,
+                    )
+                    is AppUpdateCheck.Failed -> current.copy(
+                        appUpdateChecking = false,
+                        appUpdateError = result.reason,
+                    )
                 }
             }
         }
@@ -6562,7 +6532,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.d("WorkflowReplay", "ask approval id=${request.approvalId} tool=${request.toolName}")
         onRuntimeEvent(RuntimeEvent.ToolRequested(request.sessionId, request))
         return try {
-            kotlinx.coroutines.withTimeoutOrNull(WORKFLOW_APPROVAL_TIMEOUT_MS) { deferred.await() }
+            withTimeoutOrNull(WORKFLOW_APPROVAL_TIMEOUT_MS) { deferred.await() }
                 ?.also { approved -> Log.d("WorkflowReplay", "approval id=${request.approvalId} approved=$approved") }
                 ?: false
         } finally {
@@ -7089,7 +7059,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Save every visible reasoning/tool transition, not only assistant text and
         // final results. If Android kills the process, the last displayed timeline
         // is restored as an interrupted work block rather than disappearing.
-        persistMessages(includeLiveProcess = true)
+        // Streaming deltas stay on the writer's debounce; a turn boundary writes
+        // immediately so a finished turn is never left in the buffer.
+        val boundary = event !is RuntimeEvent.AssistantDelta && event !is RuntimeEvent.ReasoningProgress
+        persistMessages(includeLiveProcess = true, immediate = boundary)
     }
 
     private fun retryWithNextApiKey(event: RuntimeEvent.SessionFailed): Boolean {
@@ -7144,7 +7117,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.saveProjects(_state.value.projects)
     }
 
-    private fun persistMessages(includeLiveProcess: Boolean = true) {
+    private fun persistMessages(includeLiveProcess: Boolean = true, immediate: Boolean = true) {
         val current = _state.value
         val project = current.activeProject ?: return
         val chatId = current.activeChatId ?: return
@@ -7168,6 +7141,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         transcriptWrites.trySend(TranscriptWrite(project.id, chatId, messages))
+        if (immediate) transcriptWrites.trySend(TranscriptWrite(project.id, chatId, null))
+    }
+
+    /**
+     * Forces everything still buffered by the transcript writer (a chat that
+     * just left the visible screen, app going to background) to reach disk
+     * without waiting for the debounce window.
+     */
+    fun flushTranscriptWrites() {
+        transcriptWrites.trySend(TranscriptWrite("", "", null))
     }
 
     private fun updateActiveChatTitle(prompt: String) {

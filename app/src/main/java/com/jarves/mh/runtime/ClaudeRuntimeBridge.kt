@@ -3,6 +3,7 @@ package com.jarves.mh.runtime
 import android.content.Context
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.jarves.mh.BuildConfig
 import com.jarves.mh.model.AgentKind
 import com.jarves.mh.model.ChatMessage
 import com.jarves.mh.model.ProviderKind
@@ -157,8 +158,12 @@ class ClaudeRuntimeBridge(
                     com.jarves.mh.model.ProviderProtocol.OPENAI_RESPONSES,
                 )) LocalFormatGateway(provider, if (provider.kind == ProviderKind.KILO_FREE) "" else credential).start() else null
             val launch = RuntimeLaunchConfigBuilder.build(provider, authToken = credential, localGatewayUrl = formatGateway?.url)
-            Log.d("ClaudeBridge", "Provider: ${provider.kind}, Model: ${provider.model}, BaseUrl: ${provider.baseUrl}")
-            Log.d("ClaudeBridge", "Launch environment keys: ${launch.environment.keys}")
+            if (BuildConfig.DEBUG) {
+                // Release builds do not log endpoint/environment shape: logcat is
+                // readable by other tooling and the base URL fingerprints the account.
+                Log.d("ClaudeBridge", "Provider: ${provider.kind}, Model: ${provider.model}, BaseUrl: ${provider.baseUrl}")
+                Log.d("ClaudeBridge", "Launch environment keys: ${launch.environment.keys}")
+            }
 
             // Build a context-aware prompt that includes conversation history
             val guestWorkspacePath = "/workspace/$projectSlug"

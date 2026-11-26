@@ -2810,7 +2810,7 @@ private fun ToolsPanel(state: AppUiState, viewModel: MainViewModel) {
                 stringResource(R.string.settings_clear_terminal)
             },
             onClick = {
-                viewModel.clearTerminal()
+                clearPtyTerminalSessions()
                 terminalCleared = true
             },
             modifier = Modifier.fillMaxWidth(),
@@ -2940,7 +2940,16 @@ private fun UpdatePanel(state: AppUiState, viewModel: MainViewModel) {
     val busy = state.appUpdateStatus == AppUpdateStatus.DOWNLOADING || state.appUpdateStatus == AppUpdateStatus.INSTALLING
     PanelCard {
         PanelLabel(stringResource(R.string.drawer_updates))
-        RuntimeInfoRow(stringResource(R.string.drawer_version), "v${BuildConfig.VERSION_NAME}")
+        RuntimeInfoRow(stringResource(R.string.drawer_version), stringResource(R.string.app_firmware_version, BuildConfig.VERSION_NAME))
+        if (!BuildConfig.DEBUG) {
+            // Debug builds can override the channel further down this panel; a
+            // normal build always follows the published release channel.
+            Text(
+                stringResource(R.string.settings_update_default),
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (update != null) {
             Text(
                 stringResource(R.string.drawer_update_available, update.versionName),
@@ -2979,17 +2988,33 @@ private fun UpdatePanel(state: AppUiState, viewModel: MainViewModel) {
                 Text(stringResource(R.string.drawer_install_update))
             }
         }
-        state.appUpdateError?.let { error ->
-            Text(error, fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+        // An unreachable manifest used to look exactly like "up to date".
+        if (state.appUpdateError != null) {
+            Text(state.appUpdateError, fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+        } else if (state.appUpdateChecking) {
+            Text(stringResource(R.string.drawer_update_checking), fontSize = 11.sp, color = PocketAccent)
+        } else if (update == null && state.appUpdateStatus == null) {
+            Text(
+                stringResource(R.string.drawer_up_to_date),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         OutlinedButton(
             onClick = { viewModel.checkForAppUpdate(force = true) },
-            enabled = !busy,
+            enabled = !busy && !state.appUpdateChecking,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
+            if (state.appUpdateChecking) {
+                CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
+            }
             Spacer(Modifier.width(7.dp))
-            Text(stringResource(R.string.drawer_check_updates), fontSize = 12.sp)
+            Text(
+                stringResource(if (state.appUpdateChecking) R.string.drawer_update_checking else R.string.drawer_check_updates),
+                fontSize = 12.sp,
+            )
         }
     }
 }

@@ -5,19 +5,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import com.jarves.mh.BuildConfig
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
-import org.json.JSONObject
-
-data class AppUpdateInfo(
-    val versionCode: Long,
-    val versionName: String,
-    val apkUrl: String,
-    val sha256: String,
-    val sizeBytes: Long,
-    val notes: String,
-)
 
 class AppUpdater(
     private val context: Context,
@@ -29,39 +20,49 @@ class AppUpdater(
      * publishing a release to GitHub.
      */
     private val manifestUrlOverride: String = "",
+    private val attempts: Int = 2,
 ) {
-    fun check(): AppUpdateInfo? {
+    fun check(): AppUpdateCheck {
         val manifestUrl = manifestUrlOverride.ifBlank { BuildConfig.APP_UPDATE_MANIFEST_URL }
-        if (!manifestUrl.startsWith("https://")) return null
+        if (!manifestUrl.startsWith("https://")) {
+            return AppUpdateCheck.Failed("Update channel is not an HTTPS URL")
+        }
+        var lastFailure: String? = null
+        for (attempt in 1..attempts.coerceAtLeast(1)) {
+            if (attempt > 1) Thread.sleep(RETRY_DELAY_MS)
+            when (val result = checkOnce(manifestUrl)) {
+                is AppUpdateCheck.Failed -> lastFailure = result.reason
+                else -> return result
+            }
+        }
+        return AppUpdateCheck.Failed(lastFailure ?: "Update check failed")
+    }
+
+    private fun checkOnce(manifestUrl: String): AppUpdateCheck {
         val connection = URL(manifestUrl).openConnection() as HttpURLConnection
         return try {
-            connection.connectTimeout = 8_000
-            connection.readTimeout = 10_000
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Cache-Control", "no-cache")
             val code = connection.responseCode
-            if (code !in 200..299) return null
+            if (code !in 200..299) {
+                return AppUpdateCheck.Failed("Update manifest returned HTTP $code")
+            }
             val body = connection.inputStream.bufferedReader().use { it.readText() }
-            val root = JSONObject(body)
-            val versionCode = root.optLong("versionCode")
-            if (versionCode <= BuildConfig.VERSION_CODE) return null
-            val artifact = root.optJSONObject("artifacts")?.optJSONObject(BuildConfig.APP_VARIANT)
-                ?: root.optJSONObject(BuildConfig.APP_VARIANT)
-                ?: root
-            val url = artifact.optString("url").ifBlank { artifact.optString("apkUrl") }
-            if (!url.startsWith("https://")) return null
-            AppUpdateInfo(
-                versionCode = versionCode,
-                versionName = root.optString("versionName", versionCode.toString()),
-                apkUrl = url,
-                sha256 = artifact.optString("sha256").lowercase(),
-                sizeBytes = artifact.optLong("sizeBytes", -1L),
-                notes = root.optString("notes"),
-            )
+            parseManifest(body)
+        } catch (error: IOException) {
+            AppUpdateCheck.Failed(error.message ?: "Network error")
+        } catch (error: RuntimeException) {
+            AppUpdateCheck.Failed(error.message ?: "Invalid update manifest")
         } finally {
             connection.disconnect()
         }
     }
+
+    private fun parseManifest(body: String): AppUpdateCheck =
+        UpdateManifest.parse(body, BuildConfig.APP_VARIANT, BuildConfig.VERSION_CODE.toLong())
 
     fun download(info: AppUpdateInfo, progress: (Long, Long) -> Unit): File {
         val directory = File(context.filesDir, "updates").also { it.mkdirs() }
@@ -91,10 +92,8 @@ class AppUpdater(
         } finally {
             connection.disconnect()
         }
-        if (info.sha256.isNotBlank()) {
-            val actual = sha256(partial)
-            check(actual.equals(info.sha256, ignoreCase = true)) { "Downloaded APK failed its SHA-256 verification" }
-        }
+        val actual = sha256(partial)
+        check(actual.equals(info.sha256, ignoreCase = true)) { "Downloaded APK failed its SHA-256 verification" }
         verifyApk(partial, info.versionCode)
         if (target.exists()) target.delete()
         check(partial.renameTo(target)) { "Could not prepare the downloaded update" }
@@ -130,4 +129,10 @@ class AppUpdater(
 
     private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
         .digest(bytes).joinToString("") { "%02x".format(it) }
+
+    private companion object {
+        const val CONNECT_TIMEOUT_MS = 8_000
+        const val READ_TIMEOUT_MS = 10_000
+        const val RETRY_DELAY_MS = 750L
+    }
 }

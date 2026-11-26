@@ -49,6 +49,17 @@
 
 <br />
 
+## Project status
+
+- **Build/test CI:** every push runs unit tests and Android Lint; `main` also
+  builds the online debug APK.
+- **Releases:** signed **online** and **offline** APKs plus the in-app update
+  manifest are published together by the release workflow, so
+  *Settings → Updates* always reflects a real channel.
+- **Contributing:** see [CONTRIBUTING.md](CONTRIBUTING.md) and
+  [SECURITY.md](SECURITY.md). Closed audits and historical reports live in
+  [`docs/archive/`](docs/archive).
+
 ## Download Mobile Harness
 
 <div align="center">

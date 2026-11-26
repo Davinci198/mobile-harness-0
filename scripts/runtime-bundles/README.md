@@ -1,5 +1,21 @@
 # PocketDev runtime bundles
 
+## Where the app downloads them from
+
+`BuildConfig.RUNTIME_RELEASE_BASE_URL` (overridable with
+`-PruntimeReleaseBaseUrl=…`) points at one release host; the app fetches
+`manifest.json` from it and verifies every archive against the SHA-256 pinned in
+`RuntimeInstaller`. That host is a single point of failure:
+
+- the URL and a `mirrors` list are recorded in
+  `dist/runtime-bundles/manifest.json`;
+- `RuntimeBundleManifestTest` fails the build if a bundle's file name,
+  checksum or compressed size drifts between `RuntimeInstaller` and that
+  manifest.
+
+If you publish to a new host, update both the Gradle property default and the
+manifest's `source`/`mirrors` entries in the same change.
+
 Runtime bundles are release artifacts, not device backups. They are built from
 the official Ubuntu ARM64 base and architecture-matched upstream tool archives,
 so they are portable across Android phones that expose the `arm64-v8a` ABI.

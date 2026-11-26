@@ -1,5 +1,6 @@
 package com.jarves.mh.model
 
+import androidx.compose.runtime.Immutable
 import java.time.Instant
 import java.text.Normalizer
 import java.util.Locale
@@ -8,8 +9,10 @@ import kotlin.random.Random
 import org.json.JSONArray
 import org.json.JSONObject
 
+@Immutable
 enum class ProviderProtocol { CLAUDE_LOGIN, ANTHROPIC, ANTHROPIC_GATEWAY, OPENROUTER, OPENAI_RESPONSES, OPENAI_CHAT }
 
+@Immutable
 enum class ProviderKind(
     val title: String,
     val subtitle: String,
@@ -74,6 +77,7 @@ enum class ProviderKind(
  * Coding agent engine installed in the private Linux runtime.
  * Each coding agent is installed independently on demand over the shared Core runtime.
  */
+@Immutable
 enum class AgentKind(
     val stableId: String,
     val title: String,
@@ -217,6 +221,7 @@ fun providersForAgent(agent: AgentKind): List<ProviderKind> = when (agent) {
     AgentKind.ANTIGRAVITY -> emptyList()
 }
 
+@Immutable
 data class ProviderProfile(
     val kind: ProviderKind,
     val baseUrl: String = kind.defaultBaseUrl,
@@ -229,6 +234,7 @@ data class ProviderProfile(
     val resolvedBaseUrl: String get() = if (kind.fixedBaseUrl) kind.defaultBaseUrl else baseUrl
 }
 
+@Immutable
 data class CustomEndpoint(
     val id: String = UUID.randomUUID().toString(),
     val label: String,
@@ -274,8 +280,10 @@ fun decodeCustomEndpoints(raw: String?): List<CustomEndpoint> {
     }.getOrDefault(emptyList())
 }
 
+@Immutable
 enum class ProjectKind { PROJECT, QUICK_PROJECT }
 
+@Immutable
 data class Project(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -319,6 +327,7 @@ fun projectSlug(name: String): String {
     return ascii.ifBlank { "project" }
 }
 
+@Immutable
 data class QuickChatIdentity(val displayName: String, val slug: String)
 
 fun generateQuickChatIdentity(usedSlugs: Set<String>, random: Random = Random.Default): QuickChatIdentity {
@@ -337,6 +346,7 @@ private fun String.toDisplayName(): String = split('-').joinToString(" ") { word
     word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
 }
 
+@Immutable
 data class WorkspaceEntry(
     val path: String,
     val name: String,
@@ -345,6 +355,7 @@ data class WorkspaceEntry(
     val sizeBytes: Long = 0,
 )
 
+@Immutable
 enum class RiskLevel { SAFE, REVIEW, HIGH }
 
 /** Risk chip for a pending-approval card: [command] sharpens the rating when known. */
@@ -362,6 +373,7 @@ fun classifyRisk(tool: String, command: String?): RiskLevel {
  * Node.js, npm, Git, and Claude Code itself are always installed because the
  * agent runtime depends on them; these stacks add heavier extras on demand.
  */
+@Immutable
 enum class DevStack(
     val label: String,
     val description: String,
@@ -394,6 +406,7 @@ enum class DevStack(
     ),
 }
 
+@Immutable
 data class ToolRequest(
     val approvalId: String = UUID.randomUUID().toString(),
     val sessionId: String,
@@ -404,11 +417,13 @@ data class ToolRequest(
     val risk: RiskLevel,
 )
 
+@Immutable
 data class QuestionOption(
     val label: String,
     val description: String? = null,
 )
 
+@Immutable
 data class QuestionItem(
     val id: String,
     val question: String,
@@ -419,6 +434,7 @@ data class QuestionItem(
 )
 
 /** One `ask_user_question` call waiting for the user's answer batch. */
+@Immutable
 data class QuestionRequest(
     val callId: String = UUID.randomUUID().toString(),
     val sessionId: String,
@@ -426,12 +442,14 @@ data class QuestionRequest(
 )
 
 /** One item of the answer batch; empty selected and no custom means skipped. */
+@Immutable
 data class QuestionAnswer(
     val id: String,
     val selected: List<String> = emptyList(),
     val custom: String? = null,
 )
 
+@Immutable
 sealed interface RuntimeEvent {
     val sessionId: String
 
@@ -469,6 +487,7 @@ sealed interface RuntimeEvent {
     data class SessionFailed(override val sessionId: String, val reason: String) : RuntimeEvent
 }
 
+@Immutable
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val fromUser: Boolean,
@@ -479,6 +498,7 @@ data class ChatMessage(
     val workedMillis: Long = 0L,
 )
 
+@Immutable
 data class ChatAttachment(
     val id: String = UUID.randomUUID().toString(),
     val displayName: String,
@@ -487,6 +507,7 @@ data class ChatAttachment(
     val sizeBytes: Long,
 )
 
+@Immutable
 data class ProjectChat(
     val id: String = UUID.randomUUID().toString(),
     val title: String = "New chat",
@@ -494,8 +515,10 @@ data class ProjectChat(
     val updatedAtMillis: Long = System.currentTimeMillis(),
 )
 
+@Immutable
 enum class DiffLineType { CONTEXT, ADDITION, DELETION, INFO }
 
+@Immutable
 data class DiffLine(
     val type: DiffLineType,
     val text: String,
@@ -503,6 +526,7 @@ data class DiffLine(
     val newLine: Int? = null,
 )
 
+@Immutable
 data class ChangeItem(
     val path: String,
     val additions: Int,
@@ -512,6 +536,7 @@ data class ChangeItem(
     val accepted: Boolean? = null,
 )
 
+@Immutable
 data class ActivityItem(
     val title: String,
     val detail: String,

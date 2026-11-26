@@ -512,6 +512,9 @@ class AppPreferences(private val context: Context) {
 
     private val chatsDir = File(context.filesDir, "chats").also { it.mkdirs() }
 
+    /** Last payload fingerprint written per "projectId/chatId", see [writeMessages]. */
+    private val lastWrittenStamp = HashMap<String, Int>()
+
     fun saveProjectChats(projectId: String, chats: List<ProjectChat>) {
         val projectDir = File(chatsDir, projectId).also { it.mkdirs() }
         val arr = JSONArray()
@@ -561,6 +564,10 @@ class AppPreferences(private val context: Context) {
 
     @Synchronized
     fun saveMessages(projectId: String, chatId: String, messages: List<ChatMessage>) {
+        writeMessages(projectId, chatId, encodeMessages(messages))
+    }
+
+    fun encodeMessages(messages: List<ChatMessage>): String {
         val arr = JSONArray()
         messages.forEach { m ->
             arr.put(JSONObject().apply {
@@ -592,14 +599,30 @@ class AppPreferences(private val context: Context) {
                 })
             })
         }
+        return arr.toString()
+    }
+
+    /**
+     * Atomic transcript write. Takes the already-serialized payload so the
+     * caller can encode once and write later (or keep the previous file when
+     * two saves carry the same content).
+     */
+    @Synchronized
+    fun writeMessages(projectId: String, chatId: String, payload: String) {
+        val key = "$projectId/$chatId"
+        val stamp = payload.length * 31 + payload.hashCode()
+        // Streaming saves arrive several times per second with an unchanged
+        // transcript; skip the rewrite when the payload is identical.
+        if (synchronized(lastWrittenStamp) { lastWrittenStamp[key] } == stamp) return
         val projectDir = File(chatsDir, projectId).also { it.mkdirs() }
         val destination = File(projectDir, "$chatId.json")
         val temporary = File(projectDir, ".$chatId.json.tmp")
-        temporary.writeText(arr.toString())
+        temporary.writeText(payload)
         if (!temporary.renameTo(destination)) {
             temporary.copyTo(destination, overwrite = true)
             temporary.delete()
         }
+        synchronized(lastWrittenStamp) { lastWrittenStamp[key] = stamp }
     }
 
     fun loadMessages(projectId: String, chatId: String): List<ChatMessage> {
@@ -610,6 +633,9 @@ class AppPreferences(private val context: Context) {
     fun deleteProjectChats(projectId: String) {
         File(chatsDir, projectId).deleteRecursively()
         File(chatsDir, "$projectId.json").delete()
+        synchronized(lastWrittenStamp) {
+            lastWrittenStamp.keys.removeAll { it.startsWith("$projectId/") }
+        }
     }
 
     private fun loadLegacyMessages(file: File): List<ChatMessage> {
