@@ -78,7 +78,16 @@ def main() -> int:
         return 0
     from_log = annotations_from_log(log_path)
     if not from_log:
-        emit("Gradle failed without a parsable error; check the build log.", title="ci")
+        # Shell steps fail with whatever the last command printed; keeping the
+        # tail is what makes an unparsable failure readable at all.
+        tail = []
+        if os.path.isfile(log_path):
+            with open(log_path, encoding="utf-8", errors="replace") as handle:
+                tail = [line.strip() for line in handle if line.strip()][-8:]
+        if not tail:
+            tail = ["Step failed without output; no log was captured."]
+        for line in tail:
+            emit(line[:900], title="step output")
         return 0
     for line in from_log:
         emit(line, title="gradle")

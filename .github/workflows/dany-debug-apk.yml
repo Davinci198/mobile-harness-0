@@ -208,9 +208,8 @@ jobs:
             --latest
           echo "Published channel $CHANNEL"
           gh release view "$CHANNEL" --json assets --jq '.assets[].name'
-      - name: Annotate release failures
-        if: failure() && github.event_name == 'workflow_dispatch'
-        run: python3 scripts/ci/emit-failure-annotations.py dist/ci/release.log
+      # Uploaded before the annotation step so the log survives even when the
+      # annotator itself breaks; artifacts are easier to fetch than job logs.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && github.event_name == 'workflow_dispatch'
         with:
@@ -218,6 +217,9 @@ jobs:
           path: dist/ci/release.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: Annotate release failures
+        if: failure() && github.event_name == 'workflow_dispatch'
+        run: python3 scripts/ci/emit-failure-annotations.py dist/ci/release.log
       # --- tagged release (release event) ------------------------------------
       - name: Attach APKs to release
         if: github.event_name == 'release'

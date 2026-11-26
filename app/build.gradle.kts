@@ -153,8 +153,15 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            if (hasUploadSigning) {
-                signingConfig = signingConfigs.getByName("upload")
+            // Without MH_UPLOAD_* the variant would come out unsigned and every
+            // published update would fail to install. Everything shipped so far
+            // (the debug-main / v1.0.12 APKs) is signed with the stable debug
+            // keystore, so falling back to it keeps upgrades installable; a new
+            // upload key only works for fresh installs, not for the existing
+            // user base.
+            signingConfig = when {
+                hasUploadSigning -> signingConfigs.getByName("upload")
+                else -> signingConfigs.findByName("stableDebug")
             }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
