@@ -13,13 +13,13 @@ https://github.com/Davinci198/mobile-harness-0/releases/latest/download/mobile-h
 That asset is produced by `.github/workflows/dany-debug-apk.yml` when the
 workflow is dispatched **from `main`**:
 
-1. `assembleOnlineRelease` + `assembleOfflineRelease` build signed release APKs
-   (minified — `app/proguard-rules.pro` keeps the JNI entry points and the
-   components referenced only from the manifest).
+1. `assembleOnlineRelease` builds the signed release APK (minified —
+   `app/proguard-rules.pro` keeps the JNI entry points and the components
+   referenced only from the manifest).
 2. `scripts/generate_update_manifest.py` writes `mobile-harness-update.json`
-   with the real size and SHA-256 of both APKs; the version comes from
+   with the real size and SHA-256 of the APK; the version comes from
    `app/build.gradle.kts`.
-3. The `update-channel` release is recreated with both APKs and the manifest
+3. The `update-channel` release is recreated with the APK and the manifest
    and marked *latest*, so the URL above always resolves to the current
    channel. Never hand-edit `mobile-harness-update.json` in the repo: the
    checked-in file is only a template.

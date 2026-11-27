@@ -18,8 +18,7 @@
 
   <br />
 
-  [**Download Online APK**](https://github.com/Davinci198/mobile-harness-0/releases) &nbsp;•&nbsp;
-  [**Download Offline APK**](https://github.com/Davinci198/mobile-harness-0/releases) &nbsp;•&nbsp;
+  [**Download APK**](https://github.com/Davinci198/mobile-harness-0/releases) &nbsp;•&nbsp;
   [**Watch Walkthrough (3 min)**](https://youtu.be/QzAau52Z7yQ) &nbsp;•&nbsp;
   [**Quickstart Guide**](#quickstart) &nbsp;•&nbsp;
   [**Architecture**](#architecture) &nbsp;•&nbsp;
@@ -53,9 +52,9 @@
 
 - **Build/test CI:** every push runs unit tests and Android Lint; `main` also
   builds the online debug APK.
-- **Releases:** signed **online** and **offline** APKs plus the in-app update
-  manifest are published together by the release workflow, so
-  *Settings → Updates* always reflects a real channel.
+- **Releases:** the signed APK and the in-app update manifest are published
+  together by the release workflow, so *Settings → Updates* always reflects a
+  real channel.
 - **Contributing:** see [CONTRIBUTING.md](CONTRIBUTING.md) and
   [SECURITY.md](SECURITY.md). Closed audits and historical reports live in
   [`docs/archive/`](docs/archive).
@@ -63,30 +62,12 @@
 ## Download Mobile Harness
 
 <div align="center">
-  <h3>Choose the edition that fits your setup</h3>
-  <p>Both editions contain the complete Mobile Harness app and support secure in-app updates beginning with v1.0.3.</p>
+  <h3>One app, one download</h3>
+  <p>Secure in-app updates beginning with v1.0.3. The development runtime is fetched on first setup, so the APK stays small.</p>
+  <a href="https://github.com/Davinci198/mobile-harness-0/releases">
+    <img src="https://img.shields.io/badge/Download_APK-F28C52?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" />
+  </a>
 </div>
-
-<table>
-  <tr>
-    <td width="50%" valign="top" align="center">
-      <h3>Online Edition</h3>
-      <p><strong>Recommended</strong></p>
-      <p>Start with the smaller APK. Core, Python, and Android runtime bundles are downloaded only when needed.</p>
-      <a href="https://github.com/Davinci198/mobile-harness-0/releases">
-        <img src="https://img.shields.io/badge/Download-Online_APK-F28C52?style=for-the-badge&logo=android&logoColor=white" alt="Download Online APK" />
-      </a>
-    </td>
-    <td width="50%" valign="top" align="center">
-      <h3>Offline Edition</h3>
-      <p><strong>Everything included</strong></p>
-      <p>Includes the Core, Python, and Android runtime bundles for setup with limited or unavailable internet.</p>
-      <a href="https://github.com/Davinci198/mobile-harness-0/releases">
-        <img src="https://img.shields.io/badge/Download-Offline_APK-5B8DEF?style=for-the-badge&logo=android&logoColor=white" alt="Download Offline APK" />
-      </a>
-    </td>
-  </tr>
-</table>
 
 <p align="center">
   <strong>ARM64 Android 9+</strong><br />

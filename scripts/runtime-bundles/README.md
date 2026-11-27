@@ -23,21 +23,6 @@ so they are portable across Android phones that expose the `arm64-v8a` ABI.
 The rooted phone is only an ARM64 build host. No Motorola system files, Android
 partitions, Magisk files, device identifiers, or user data are included.
 
-## Building the offline APK in CI
-
-`offline` embeds these archives under `assets/runtime/`, but they are gitignored
-(`dist/runtime-bundles/*.tar.zst`), so a clean runner has none of them and
-`prepareOfflineRuntimeAssets` syncs an empty directory — the build still
-succeeds and the "offline" APK is byte-for-byte as small as the online one.
-1.0.13 shipped exactly like that (both variants 6.35 MB while the archives
-total ~286 MB).
-
-Until CI fetches the archives before `assembleOfflineRelease`,
-`scripts/ci/verify-offline-bundles.py` fails the release when a bundle is
-missing from the APK. Build a real offline APK by downloading the archives into
-`dist/runtime-bundles/` first (their names and checksums are in
-`manifest.json`), then `./gradlew assembleOfflineRelease`.
-
 ## Core bundle build hosts
 
 Two interchangeable hosts produce the same Core payload:
@@ -63,14 +48,12 @@ Two interchangeable hosts produce the same Core payload:
 - `claude`: Anthropic's checksum-verified Claude Code ARM64 binary. Build it
   with `scripts/runtime-bundles/build-claude-from-installed-android.sh`; the
   export excludes authentication, settings, conversations, projects, and all
-  device data. Online builds download it only when selected, while offline
-  builds embed the same verified overlay.
+  device data. The app downloads it only when selected.
 - `dsh`: the pinned official DeepSeek Harness npm payload and launcher. Build it
   from a verified PocketDev installation with
   `scripts/runtime-bundles/build-dsh-from-installed-android.sh`; the export
   intentionally excludes provider settings, credentials, sessions, and projects.
-  Online builds download this artifact from the runtime GitHub release; offline
-  builds embed the identical checksum-verified artifact in the APK.
+  The app downloads this artifact from the runtime GitHub release on demand.
 - `agy`: Google's checksum-pinned official Linux ARM64 Antigravity CLI binary.
   Build it with `scripts/runtime-bundles/build-agy-from-official.sh`. The overlay
   excludes OAuth credentials, settings, conversations, projects, and all device

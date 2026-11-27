@@ -20,7 +20,9 @@ import json
 import os
 import sys
 
-VARIANTS = ("online", "offline")
+# Only the online flavour is built; the offline one was removed because it could
+# never ship its bundles (gitignored archives, no fetch on a clean runner).
+VARIANTS = ("online",)
 
 
 def sha256(path: str) -> str:

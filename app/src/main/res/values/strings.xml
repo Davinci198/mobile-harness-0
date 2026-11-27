@@ -587,7 +587,6 @@
     <string name="onb_complete">Complete</string>
     <string name="onb_continue_tools">Continue to tool setup</string>
     <string name="onb_core_download">Core runtime · 68.8 MB download</string>
-    <string name="onb_core_offline">Core runtime · 68.8 MB</string>
     <string name="onb_device_check">DEVICE CHECK</string>
     <string name="onb_device_not_supported">Device not supported</string>
     <string name="onb_device_ready">Your device is ready</string>
@@ -732,7 +731,6 @@
     <string name="dash_stopped">Dashboard stopped</string>
     <string name="dash_stopped_desc">The Hermes dashboard server was stopped. Start it again when you need the web UI.</string>
     <string name="dash_unknown_error">Unknown error</string>
-    <string name="sum_all_offline">All selected bundles are included in this offline app</string>
     <string name="sum_download_prefix">Download</string>
     <string name="sum_later_suffix">C/PHP packages download later</string>
     <string name="sum_wifi_suffix">Wi-Fi recommended</string>

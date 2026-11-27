@@ -17,7 +17,6 @@ import android.webkit.WebViewClient
 import android.webkit.WebChromeClient
 import android.widget.Toast
 import androidx.core.content.FileProvider
-import com.jarves.mh.BuildConfig
 import com.jarves.mh.R
 import androidx.annotation.StringRes
 import androidx.activity.compose.BackHandler
@@ -1209,7 +1208,7 @@ private fun RuntimeSetupPromptScreen(
                         Spacer(Modifier.width(11.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
-                                if (BuildConfig.OFFLINE_RUNTIME_BUNDLES) stringResource(R.string.onb_core_offline) else stringResource(R.string.onb_core_download),
+                                stringResource(R.string.onb_core_download),
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 13.5.sp,
@@ -1365,15 +1364,13 @@ private fun setupTimeEstimate(selected: Set<DevStack>): String {
 @Composable
 private fun stackDownloadLabel(stack: DevStack): String = when {
     stack == DevStack.WEB -> " · " + stringResource(R.string.onb_included_lcase)
-    BuildConfig.OFFLINE_RUNTIME_BUNDLES && stack in setOf(DevStack.PYTHON, DevStack.ANDROID) -> " · " + stringResource(R.string.onb_included_lcase)
-    !BuildConfig.OFFLINE_RUNTIME_BUNDLES && stack == DevStack.PYTHON -> " · 55 MB"
-    !BuildConfig.OFFLINE_RUNTIME_BUNDLES && stack == DevStack.ANDROID -> " · 570 MB"
+    stack == DevStack.PYTHON -> " · 55 MB"
+    stack == DevStack.ANDROID -> " · 570 MB"
     else -> ""
 }
 
 @Composable
 private fun toolchainDownloadSummary(selected: Set<DevStack>, agent: AgentKind): String {
-    if (BuildConfig.OFFLINE_RUNTIME_BUNDLES) return stringResource(R.string.sum_all_offline)
     val total = CORE_RUNTIME_DOWNLOAD_MB +
         when (agent) {
             AgentKind.CLAUDE_CODE -> CLAUDE_RUNTIME_DOWNLOAD_MB
