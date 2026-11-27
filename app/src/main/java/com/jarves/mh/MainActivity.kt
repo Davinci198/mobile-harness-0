@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
                 PocketDevApp(viewModel)
             }
         }
-        relaunchAfterUpdate()
+        relaunchAfterUpdate(savedInstanceState)
     }
 
     /**
@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
      * limits), a notification carries the same intent so the update is not a
      * dead end.
      */
-    private fun relaunchAfterUpdate() {
+    private fun relaunchAfterUpdate(savedInstanceState: Bundle?) {
         val from = UpdateRestart.pendingRestartFrom(this) ?: return
         if (!UpdateRestart.updateApplied(from, BuildConfig.VERSION_NAME)) return
         if (savedInstanceState == null) {
