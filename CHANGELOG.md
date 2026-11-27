@@ -9,6 +9,11 @@ the machine-readable version code.
 First published build of the stable channel. `versionCode` 13 is the first
 value the in-app updater will offer, since 12 is what the installed APKs carry.
 
+The release variants are signed with the same stable debug keystore as every
+previous APK: the `MH_UPLOAD_*` secrets are not configured, and a new upload key
+would fail to install over an existing app. The workflow verifies the signature
+before publishing, so this cannot silently regress into an unsigned build.
+
 ## [Unreleased]
 
 ### Fixed
