@@ -23,6 +23,21 @@ so they are portable across Android phones that expose the `arm64-v8a` ABI.
 The rooted phone is only an ARM64 build host. No Motorola system files, Android
 partitions, Magisk files, device identifiers, or user data are included.
 
+## Building the offline APK in CI
+
+`offline` embeds these archives under `assets/runtime/`, but they are gitignored
+(`dist/runtime-bundles/*.tar.zst`), so a clean runner has none of them and
+`prepareOfflineRuntimeAssets` syncs an empty directory — the build still
+succeeds and the "offline" APK is byte-for-byte as small as the online one.
+1.0.13 shipped exactly like that (both variants 6.35 MB while the archives
+total ~286 MB).
+
+Until CI fetches the archives before `assembleOfflineRelease`,
+`scripts/ci/verify-offline-bundles.py` fails the release when a bundle is
+missing from the APK. Build a real offline APK by downloading the archives into
+`dist/runtime-bundles/` first (their names and checksums are in
+`manifest.json`), then `./gradlew assembleOfflineRelease`.
+
 ## Core bundle build hosts
 
 Two interchangeable hosts produce the same Core payload:
