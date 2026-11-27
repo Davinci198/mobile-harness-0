@@ -486,12 +486,12 @@ class RuntimeExecutionService : Service() {
         fun ensureNotificationChannels(context: android.content.Context) {
             val manager = context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
-                NotificationChannel(RUNNING_CHANNEL_ID, "Running coding tasks", NotificationManager.IMPORTANCE_LOW).apply {
+                NotificationChannel(RUNNING_CHANNEL_ID, context.getString(R.string.notification_channel_running), NotificationManager.IMPORTANCE_LOW).apply {
                     description = "Shows progress while Mobile Harness is working in the background"
                 },
             )
             manager.createNotificationChannel(
-                NotificationChannel(RESULT_CHANNEL_ID, "Task results", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                NotificationChannel(RESULT_CHANNEL_ID, context.getString(R.string.notification_channel_results), NotificationManager.IMPORTANCE_DEFAULT).apply {
                     description = "Notifies you when a coding task finishes or needs attention"
                 },
             )

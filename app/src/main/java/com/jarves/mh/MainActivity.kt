@@ -16,6 +16,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jarves.mh.data.AppPreferences
 import com.jarves.mh.runtime.KeepAliveTracker
+import com.jarves.mh.update.UpdateRestart
 import com.jarves.mh.ui.MainViewModel
 import com.jarves.mh.ui.PocketDevApp
 import com.jarves.mh.ui.theme.PocketTheme
@@ -50,6 +51,22 @@ class MainActivity : ComponentActivity() {
             ) {
                 PocketDevApp(viewModel)
             }
+        }
+        relaunchAfterUpdate(savedInstanceState)
+    }
+
+    /**
+     * The update install kills this process; the marker written before it is
+     * consumed here, on the first start of the new build. If the relaunch is
+     * refused (no notification permission on some OEMs, background-activity
+     * limits), a notification carries the same intent so the update is not a
+     * dead end.
+     */
+    private fun relaunchAfterUpdate(savedInstanceState: Bundle?) {
+        val from = UpdateRestart.pendingRestartFrom(this) ?: return
+        if (!UpdateRestart.updateApplied(from, BuildConfig.VERSION_NAME)) return
+        if (savedInstanceState == null) {
+            UpdateRestart.notifyUpdateInstalled(this)
         }
     }
 

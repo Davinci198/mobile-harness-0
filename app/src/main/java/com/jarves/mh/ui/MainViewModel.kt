@@ -99,6 +99,7 @@ import com.jarves.mh.runtime.readTailText
 import com.jarves.mh.update.AppUpdateCheck
 import com.jarves.mh.update.AppUpdateInfo
 import com.jarves.mh.update.AppUpdater
+import com.jarves.mh.update.UpdateRestart
 import java.io.File
 import java.io.RandomAccessFile
 import java.net.UnknownHostException
@@ -3630,10 +3631,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             pingApi()
+            onUpdateRestartConsumed()
             checkForAppUpdate()
         } else {
             showStartupError(result.exceptionOrNull() ?: IllegalStateException(s(R.string.setup_claude_fail)))
         }
+    }
+
+    /**
+     * The first start after an update install. Confirms the update really landed,
+     * then clears the marker: leaving it behind would show this message on every
+     * later cold start (and, with a stale marker, relaunch forever).
+     */
+    private fun onUpdateRestartConsumed() {
+        val (from, to) = UpdateRestart.consumePendingRestart(getApplication()) ?: return
+        if (!UpdateRestart.updateApplied(from, BuildConfig.VERSION_NAME)) {
+            // Install was cancelled or blocked, so the marker was never valid.
+            return
+        }
+        _state.update {
+            it.copy(
+                appUpdate = null,
+                appUpdateStatus = null,
+                appUpdateError = null,
+                appUpdateChecking = false,
+                toastMessage = s(R.string.update_installed_toast, BuildConfig.VERSION_NAME),
+            )
+        }
+        android.util.Log.i("MainViewModel", "Update applied: $from -> ${BuildConfig.VERSION_NAME} (manifest said $to)")
     }
 
     fun checkForAppUpdate(force: Boolean = false) {
@@ -3707,7 +3732,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }.onSuccess { apk ->
                 _state.update { it.copy(appUpdateStatus = AppUpdateStatus.INSTALLING) }
+                // Installing our own package kills this process, so the pending
+                // relaunch is recorded first and consumed on the next start.
+                UpdateRestart.markPendingRestart(
+                    getApplication(),
+                    fromVersionName = BuildConfig.VERSION_NAME,
+                    toVersionName = info.versionName,
+                )
                 runCatching { AndroidAppInstaller.install(getApplication(), apk, launchAfterInstall = false) }.onFailure { error ->
+                    UpdateRestart.cancelPendingRestart(getApplication())
                     _state.update { it.copy(appUpdateStatus = AppUpdateStatus.ERROR, appUpdateError = error.message ?: s(R.string.update_installer_fail)) }
                 }
             }.onFailure { error ->

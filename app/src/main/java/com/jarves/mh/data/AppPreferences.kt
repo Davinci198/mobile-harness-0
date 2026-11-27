@@ -188,6 +188,15 @@ class AppPreferences(private val context: Context) {
         set(value) { preferences.edit().putLong("last_app_update_check_millis", value).apply() }
 
     /**
+     * "<fromVersionName>\u0000<toVersionName>" while an in-app update is being
+     * installed, empty otherwise. Installing our own package kills the process,
+     * so this survives in SharedPreferences and is consumed on the next start.
+     */
+    var pendingUpdateRestart: String
+        get() = preferences.getString("pending_update_restart", "").orEmpty()
+        set(value) { preferences.edit().putString("pending_update_restart", value).apply() }
+
+    /**
      * Debug-only manifest URL override. Empty in release builds; populated via
      * Settings → Update channel in debug builds so a local server (exposed via
      * Cloudflare Tunnel or ngrok) can be tested without publishing a release.

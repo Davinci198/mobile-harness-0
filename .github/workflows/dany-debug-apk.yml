@@ -67,6 +67,27 @@ jobs:
       - name: Annotate test failures
         if: failure() && github.event_name != 'release'
         run: python3 scripts/ci/emit-failure-annotations.py dist/ci/unit-tests.log app/build/test-results
+      - name: Report test results
+        if: always() && github.event_name != 'release'
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          files = glob.glob("app/build/test-results/**/TEST-*.xml", recursive=True)
+          print(f"::notice title=report files::{len(files)}")
+          for f in sorted(files):
+              root = ET.parse(f).getroot()
+              name = root.get("name", "").split(".")[-1]
+              fails = root.get("failures", "0")
+              if fails not in ("0", None) or root.get("errors", "0") not in ("0", None):
+                  detail = []
+                  for case in root.iter("testcase"):
+                      for bad in list(case.iter("failure")) + list(case.iter("error")):
+                          msg = (bad.get("message") or bad.text or "").strip().splitlines()
+                          detail.append(f"{case.get('name')}: {(msg[0] if msg else 'failed')[:300]}")
+                  print(f"::error title={name}::{'; '.join(detail)[:900]}")
+              elif name in ("UpdateRestartPolicyTest", "UpdateManifestTest", "RuntimeBundleManifestTest", "TranscriptWritePolicyTest"):
+                  print(f"::notice title={name}::tests={root.get('tests')} failures=0")
+          PY
       # Unit-test reports: a red test run is otherwise invisible from the CLI
       # unless the job log is downloadable.
       - name: Upload unit test reports
