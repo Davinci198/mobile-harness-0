@@ -67,6 +67,22 @@ jobs:
       - name: Annotate test failures
         if: failure() && github.event_name != 'release'
         run: python3 scripts/ci/emit-failure-annotations.py dist/ci/unit-tests.log app/build/test-results
+      - name: Report new guard tests
+        if: always() && github.event_name != 'release'
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          want = ("UpdateRestartPolicyTest", "UpdateManifestTest", "RuntimeBundleManifestTest", "TranscriptWritePolicyTest")
+          seen = 0
+          for f in glob.glob("app/build/test-results/**/TEST-*.xml", recursive=True):
+              root = ET.parse(f).getroot()
+              name = root.get("name", "").split(".")[-1]
+              if name in want:
+                  seen += 1
+                  print(f"::notice title={name}::tests={root.get('tests')} failures={root.get('failures')} errors={root.get('errors')} skipped={root.get('skipped')}")
+          if seen == 0:
+              print("::error::no guard test reports found")
+          PY
       # Unit-test reports: a red test run is otherwise invisible from the CLI
       # unless the job log is downloadable.
       - name: Upload unit test reports
