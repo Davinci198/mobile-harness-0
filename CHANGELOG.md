@@ -4,6 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The app's
 `versionName` is the release identifier; `mobile-harness-update.json` carries
 the machine-readable version code.
 
+## [1.0.14] - 2026-11-26
+
+Removes the "offline" flavour, which never contained the bundles it advertised
+(see Removed). `1.0.13` stays in history because it is what the channel
+published first; this is the build that makes the published channel honest.
+
 ## [1.0.13] - 2026-11-26
 
 First published build of the stable channel. `versionCode` 13 is the first
