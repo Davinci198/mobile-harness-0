@@ -1,6 +1,6 @@
 {
-  "versionCode": 12,
-  "versionName": "1.0.12",
+  "versionCode": 13,
+  "versionName": "1.0.13",
   "notes": "Placeholder template for the stable channel. The release workflow overwrites it with real version data and SHA-256 checksums on every publish; see docs/update-testing.md.",
   "channel": "update-channel",
   "artifacts": {
