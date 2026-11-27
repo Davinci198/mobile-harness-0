@@ -60,7 +60,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p dist/ci
-          ./gradlew :app:testOnlineDebugUnitTest :app:testOfflineDebugUnitTest 2>&1 \
+          ./gradlew :app:testOnlineDebugUnitTest 2>&1 \
             | tee dist/ci/unit-tests.log
       # The Gradle log is not always retrievable from the Actions API, so the
       # failure is also surfaced as check-run annotations.
@@ -141,7 +141,7 @@ jobs:
           MH_UPLOAD_STORE_PASSWORD: ${{ secrets.MH_UPLOAD_STORE_PASSWORD }}
           MH_UPLOAD_KEY_ALIAS: ${{ secrets.MH_UPLOAD_KEY_ALIAS }}
           MH_UPLOAD_KEY_PASSWORD: ${{ secrets.MH_UPLOAD_KEY_PASSWORD }}
-        run: ./gradlew assembleOnlineRelease assembleOfflineRelease
+        run: ./gradlew assembleOnlineRelease
       - name: Collect release APKs and write the update manifest
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -158,11 +158,9 @@ jobs:
           OUT=app/build/outputs/apk/release-named
           mkdir -p "$OUT"
           BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${CHANNEL}"
-          for variant in online offline; do
-            src=$(ls app/build/outputs/apk/$variant/release/*.apk | head -1)
-            cp "$src" "$OUT/mobile-harness-$variant-v${VERSION_NAME}.apk"
-            echo "$variant -> mobile-harness-$variant-v${VERSION_NAME}.apk ($(stat -c%s "$OUT/mobile-harness-$variant-v${VERSION_NAME}.apk") bytes)"
-          done
+          src=$(ls app/build/outputs/apk/online/release/*.apk | head -1)
+          cp "$src" "$OUT/mobile-harness-online-v${VERSION_NAME}.apk"
+          echo "online -> mobile-harness-online-v${VERSION_NAME}.apk ($(stat -c%s "$OUT/mobile-harness-online-v${VERSION_NAME}.apk") bytes)"
           # The manifest is generated from the APKs themselves (checksums), so a
           # manual edit cannot drift from the binaries it advertises.
           python3 scripts/generate_update_manifest.py \

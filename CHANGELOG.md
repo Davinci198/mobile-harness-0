@@ -31,8 +31,8 @@ before publishing, so this cannot silently regress into an unsigned build.
 - Provider endpoint/environment logging is debug-only.
 
 ### Changed
-- Release pipeline publishes signed **online and offline** APKs; it previously
-  shipped debug-signed APKs only and never an offline one.
+- Release pipeline publishes a signed, minified APK; it previously shipped a
+  debug-signed APK only.
 - Android Lint runs in CI on every push.
 - Transcript persistence is debounced (500 ms) instead of rewriting the whole
   chat JSON on every streamed token, with an explicit flush on turn boundaries
@@ -42,6 +42,13 @@ before publishing, so this cannot silently regress into an unsigned build.
 - Baseline profile + `profileinstaller` for faster cold start.
 
 ### Removed
+- **The "offline" flavour.** It could never ship its bundles: the archives are
+  gitignored, nothing fetched them on a clean runner, and `Sync` with a missing
+  source is a no-op — so `1.0.13` published an "offline" APK identical in size to
+  the online one that silently downloaded everything, while the onboarding
+  promised "all selected bundles are included". There is one APK now, always
+  fetching bundles from the release host and verifying them against the pinned
+  SHA-256.
 - `ui/SettingsScreen.kt` (871 lines) — `LegacySettingsScreen` was private and
   unreferenced.
 - `ui/TerminalScreen.kt` (545 lines) — only reachable through the hardcoded

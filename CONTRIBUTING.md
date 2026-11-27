@@ -15,7 +15,7 @@
 ## Before you open a PR
 
 ```bash
-./gradlew :app:testOnlineDebugUnitTest :app:testOfflineDebugUnitTest
+./gradlew :app:testOnlineDebugUnitTest
 ./gradlew :app:lintOnlineDebug
 ```
 
@@ -46,7 +46,7 @@ the fastest way to see a Kotlin compile error without a local JDK.
 ## Release
 
 Run **dany-debug-apk** from `main` with `workflow_dispatch`. It builds and signs
-both flavours, generates `mobile-harness-update.json` from the APKs, and
+the release APK, generates `mobile-harness-update.json` from the APKs, and
 republishes the `update-channel` release; the in-app updater reads
 `releases/latest/download/mobile-harness-update.json`, so never hand-edit that
 file.

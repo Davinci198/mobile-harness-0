@@ -324,7 +324,6 @@ class RuntimeInstaller(private val context: Context) {
             onProgress(RuntimeInstallProgress("Preparing the private development runtime", 0.03f))
             val archive = obtainRuntimeBundle(
                 CORE_BUNDLE,
-                preferEmbedded = BuildConfig.OFFLINE_RUNTIME_BUNDLES,
                 from = 0.03f,
                 to = 0.25f,
                 onProgress,
@@ -543,9 +542,6 @@ class RuntimeInstaller(private val context: Context) {
     /** Installs GitHub's official ARM64 CLI on demand; it is not bundled in the APK. */
     suspend fun ensureGitHubCliInstalled(onProgress: suspend (RuntimeInstallProgress) -> Unit) {
         if (isGitHubCliInstalled()) return
-        check(!BuildConfig.OFFLINE_RUNTIME_BUNDLES) {
-            "GitHub sign-in needs the PocketDev online APK."
-        }
         writeResolver()
         downloads.mkdirs()
         val downloaded = File(downloads, "gh-$GITHUB_CLI_VERSION-linux-arm64.tar.gz")
@@ -991,7 +987,6 @@ class RuntimeInstaller(private val context: Context) {
             from = fraction,
             to = 0.995f,
             onProgress = onProgress,
-            forceEmbedded = true,
         )
         verifyGuest(proot, "$AGY_GUEST_PATH --version", "Antigravity CLI verification failed")
         agyMarker.writeText(AGY_VERSION)
@@ -1094,8 +1089,7 @@ class RuntimeInstaller(private val context: Context) {
             "Studio bundle checksum is not configured yet; publish pocketdev-studio-arm64-$STUDIO_VERSION.tar.zst and fill STUDIO_BUNDLE"
         }
         if (isStudioInstalled()) return
-        // forceDownload: the offline APK embeds the other bundles as assets, but
-        // the Studio bundle is never among them, so embedding must stay off.
+        // Studio lives on its own host, so it always sets baseUrl explicitly.
         installRuntimeOverlay(
             bundle = STUDIO_BUNDLE,
             message = "Installing Ekko Studio $STUDIO_VERSION",
@@ -1412,14 +1406,12 @@ class RuntimeInstaller(private val context: Context) {
         from: Float,
         to: Float,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
-        forceEmbedded: Boolean = false,
         forceDownload: Boolean = false,
         baseUrl: String = BuildConfig.RUNTIME_RELEASE_BASE_URL,
     ) {
-        // Stack overlays honor the same offline/online flavor as the Core bundle:
-        // the offline APK ships every stack bundle inside its assets, while the
-        // online APK fetches each one from the release URL on demand.
-        val archive = obtainRuntimeBundle(bundle, preferEmbedded = forceEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES, from, to * 0.8f + from * 0.2f, onProgress, forceDownload, baseUrl)
+        // Every bundle is fetched from the release host and verified against the
+        // SHA-256 pinned in this file.
+        val archive = obtainRuntimeBundle(bundle, from, to * 0.8f + from * 0.2f, onProgress, forceDownload, baseUrl)
         onProgress(RuntimeInstallProgress(message, to * 0.8f + from * 0.2f, indeterminate = true))
         extractZstdTar(archive, rootfs, preserveCoreSystemPaths = true)
         stripMacosMetadataArtifacts(rootfs)
@@ -1479,9 +1471,14 @@ class RuntimeInstaller(private val context: Context) {
         }
     }
 
+    /**
+     * Downloads [bundle] from the release host and verifies it against the pinned
+     * SHA-256. There is no embedded copy: the old "offline" flavour pretended to
+     * ship the archives, but they are gitignored, so CI always assembled an APK
+     * without them and every "included" build silently downloaded everything.
+     */
     private suspend fun obtainRuntimeBundle(
         bundle: RuntimeBundle,
-        preferEmbedded: Boolean,
         from: Float,
         to: Float,
         onProgress: suspend (RuntimeInstallProgress) -> Unit,
@@ -1490,40 +1487,6 @@ class RuntimeInstaller(private val context: Context) {
     ): File {
         downloads.mkdirs()
         val destination = File(downloads, bundle.fileName)
-        // Only the offline flavor ships the bundle archives as assets; the online
-        // build has an empty assets/runtime/. Reading one there throws and takes the
-        // whole install down, so fall back to the release URL when it is absent.
-        val wantsEmbedded = !forceDownload && (preferEmbedded || BuildConfig.OFFLINE_RUNTIME_BUNDLES)
-        val useEmbedded = wantsEmbedded && hasEmbeddedBundle(bundle)
-        if (wantsEmbedded && !useEmbedded) {
-            android.util.Log.w("RuntimeInstaller", "Embedded ${bundle.fileName} is missing; downloading it")
-        }
-        if (useEmbedded) {
-            onProgress(RuntimeInstallProgress("Loading ${bundle.label} bundle", from, 0, bundle.compressedBytes))
-            val temporary = File(downloads, "${bundle.fileName}.part")
-            context.assets.open("runtime/${bundle.fileName}").use { input ->
-                FileOutputStream(temporary).use { output ->
-                    val buffer = ByteArray(256 * 1024)
-                    var copied = 0L
-                    while (true) {
-                        coroutineContext.ensureActive()
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        copied += count
-                        val ratio = (copied.toFloat() / bundle.compressedBytes).coerceIn(0f, 1f)
-                        onProgress(RuntimeInstallProgress("Loading ${bundle.label} bundle", from + ratio * (to - from), copied, bundle.compressedBytes))
-                    }
-                }
-            }
-            require(digest(temporary, "SHA-256").equals(bundle.sha256, ignoreCase = true)) {
-                "${bundle.label} bundle checksum mismatch"
-            }
-            if (destination.exists()) destination.delete()
-            check(temporary.renameTo(destination)) { "Could not stage the ${bundle.label} bundle" }
-            return destination
-        }
-
         val url = "$baseUrl/${bundle.fileName}"
         downloadVerified(url, destination, bundle.sha256) { downloaded, total ->
             val ratio = if (total > 0) downloaded.toFloat() / total else 0f
@@ -1531,10 +1494,6 @@ class RuntimeInstaller(private val context: Context) {
         }
         return destination
     }
-
-    private fun hasEmbeddedBundle(bundle: RuntimeBundle): Boolean =
-        runCatching { context.assets.list("runtime").orEmpty().contains(bundle.fileName) }
-            .getOrDefault(false)
 
     private suspend fun installZipAsset(
         url: String,

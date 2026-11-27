@@ -44,17 +44,6 @@ val prepareBundledAgentAssets = tasks.register<Sync>("prepareBundledAgentAssets"
     into(generatedRuntimeAssets.map { it.dir("shared/runtime") })
 }
 
-val prepareOfflineRuntimeAssets = tasks.register<Sync>("prepareOfflineRuntimeAssets") {
-    from(
-        runtimeBundleDir.file("pocketdev-core-arm64-2026.10.1.tar.zst"),
-        runtimeBundleDir.file("pocketdev-claude-arm64-2026.09.1.tar.zst"),
-        runtimeBundleDir.file("pocketdev-python-arm64-2026.09.2.tar.zst"),
-        runtimeBundleDir.file("pocketdev-android-arm64-2026.09.1.tar.zst"),
-        runtimeBundleDir.file("pocketdev-dsh-arm64-2026.09.1.tar.zst"),
-    )
-    into(generatedRuntimeAssets.map { it.dir("offline/runtime") })
-}
-
 fun buildConfigString(value: String): String =
     "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
@@ -120,25 +109,20 @@ android {
         )
     }
 
+    // Single flavour: the runtime bundles are always fetched from the release
+    // host on demand. The old "offline" flavour could never actually ship them
+    // (the archives are gitignored, so CI assembled an APK without them), and
+    // the fallback turned every "included" promise into a 500 MB download.
     flavorDimensions += "runtimeDelivery"
     productFlavors {
         create("online") {
             dimension = "runtimeDelivery"
-            buildConfigField("boolean", "OFFLINE_RUNTIME_BUNDLES", "false")
             buildConfigField("String", "RUNTIME_RELEASE_BASE_URL", buildConfigString(runtimeReleaseBaseUrl))
             buildConfigField("String", "APP_UPDATE_MANIFEST_URL", buildConfigString(appUpdateManifestUrl))
             buildConfigField("String", "APP_VARIANT", "\"online\"")
         }
-        create("offline") {
-            dimension = "runtimeDelivery"
-            buildConfigField("boolean", "OFFLINE_RUNTIME_BUNDLES", "true")
-            buildConfigField("String", "RUNTIME_RELEASE_BASE_URL", buildConfigString(runtimeReleaseBaseUrl))
-            buildConfigField("String", "APP_UPDATE_MANIFEST_URL", buildConfigString(appUpdateManifestUrl))
-            buildConfigField("String", "APP_VARIANT", "\"offline\"")
-        }
     }
 
-    sourceSets.getByName("offline").assets.srcDir(generatedRuntimeAssets.map { it.dir("offline") })
     sourceSets.getByName("main").assets.srcDir(generatedRuntimeAssets.map { it.dir("shared") })
 
     buildTypes {
@@ -203,17 +187,11 @@ android {
     }
 }
 
-tasks.matching { it.name.startsWith("mergeOffline") && it.name.endsWith("Assets") }
-    .configureEach { dependsOn(prepareOfflineRuntimeAssets) }
-
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }
     .configureEach { dependsOn(prepareBundledAgentAssets) }
 
 tasks.matching { it.name.contains("lint", ignoreCase = true) }
     .configureEach { dependsOn(prepareBundledAgentAssets) }
-
-tasks.matching { it.name.contains("Offline") && it.name.contains("lint", ignoreCase = true) }
-    .configureEach { dependsOn(prepareOfflineRuntimeAssets) }
 
 tasks.register("playReadinessCheck") {
     group = "verification"

@@ -587,7 +587,6 @@
     <string name="onb_complete">Finalizează</string>
     <string name="onb_continue_tools">Continuă spre configurarea instrumentelor</string>
     <string name="onb_core_download">Runtime de bază · 68.8 MB de descărcat</string>
-    <string name="onb_core_offline">Runtime de bază · 68.8 MB</string>
     <string name="onb_device_check">VERIFICARE DISPOZITIV</string>
     <string name="onb_device_not_supported">Dispozitiv neacceptat</string>
     <string name="onb_device_ready">Dispozitivul tău este gata</string>
@@ -732,7 +731,6 @@
     <string name="dash_stopped">Panou oprit</string>
     <string name="dash_stopped_desc">Serverul Hermes a fost oprit. Pornește-l din nou când ai nevoie de interfața web.</string>
     <string name="dash_unknown_error">Eroare necunoscută</string>
-    <string name="sum_all_offline">Toate bundle-urile selectate sunt incluse în această aplicație offline</string>
     <string name="sum_download_prefix">Descărcare</string>
     <string name="sum_later_suffix">Pachetele C/PHP se descarcă mai târziu</string>
     <string name="sum_wifi_suffix">Wi-Fi recomandat</string>

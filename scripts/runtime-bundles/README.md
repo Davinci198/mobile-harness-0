@@ -48,14 +48,12 @@ Two interchangeable hosts produce the same Core payload:
 - `claude`: Anthropic's checksum-verified Claude Code ARM64 binary. Build it
   with `scripts/runtime-bundles/build-claude-from-installed-android.sh`; the
   export excludes authentication, settings, conversations, projects, and all
-  device data. Online builds download it only when selected, while offline
-  builds embed the same verified overlay.
+  device data. The app downloads it only when selected.
 - `dsh`: the pinned official DeepSeek Harness npm payload and launcher. Build it
   from a verified PocketDev installation with
   `scripts/runtime-bundles/build-dsh-from-installed-android.sh`; the export
   intentionally excludes provider settings, credentials, sessions, and projects.
-  Online builds download this artifact from the runtime GitHub release; offline
-  builds embed the identical checksum-verified artifact in the APK.
+  The app downloads this artifact from the runtime GitHub release on demand.
 - `agy`: Google's checksum-pinned official Linux ARM64 Antigravity CLI binary.
   Build it with `scripts/runtime-bundles/build-agy-from-official.sh`. The overlay
   excludes OAuth credentials, settings, conversations, projects, and all device
