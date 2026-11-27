@@ -1,5 +1,11 @@
 <resources>
     <string name="app_name">Mobile Harness</string>
+    <string name="update_installed_toast">Actualizat la %1$s</string>
+    <string name="update_installed_notification_title">Actualizare instalată</string>
+    <string name="update_installed_notification_text">Mobile Harness repornește singur. Dacă nu se deschide, atinge aici.</string>
+    <string name="notification_channel_running">Sarcini care rulează</string>
+    <string name="notification_channel_results">Rezultatele sarcinilor</string>
+    <string name="notification_channel_updates">Actualizări ale aplicației</string>
     <string name="accessibility_service_label">Acces UI Mobile Harness</string>
     <string name="accessibility_service_description">Permite Mobile Harness să citească arborele UI de pe ecran și să atingă elemente, pentru ca agentul să poată opera aplicațiile pe care i le cereți. Niciun text nu părăsește dispozitivul.</string>
     <string name="settings_language_title">Limbă</string>
