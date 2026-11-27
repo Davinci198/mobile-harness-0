@@ -4,6 +4,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The app's
 `versionName` is the release identifier; `mobile-harness-update.json` carries
 the machine-readable version code.
 
+## [1.0.15] - 2026-11-26
+
+### Fixed
+- **The app no longer disappeared after updating itself.** The update was
+  installed with `launchAfterInstall = false`, and installing our own package
+  kills the process before any callback runs, so the user was left on the
+  launcher with the offer consumed and nothing in Settings. The pending relaunch
+  is now recorded in `SharedPreferences` before the install is committed and
+  consumed on the next start; if the relaunch is refused (missing notification
+  permission, OEM background-activity limits) a notification carries the same
+  intent.
+- Notification channel names are translated (EN/RO) instead of hardcoded.
+
 ## [1.0.14] - 2026-11-26
 
 Removes the "offline" flavour, which never contained the bundles it advertised
