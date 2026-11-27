@@ -4,6 +4,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The app's
 `versionName` is the release identifier; `mobile-harness-update.json` carries
 the machine-readable version code.
 
+## [1.0.13] - 2026-11-26
+
+First published build of the stable channel. `versionCode` 13 is the first
+value the in-app updater will offer, since 12 is what the installed APKs carry.
+
 ## [Unreleased]
 
 ### Fixed
