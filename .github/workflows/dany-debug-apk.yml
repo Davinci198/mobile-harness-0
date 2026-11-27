@@ -172,6 +172,12 @@ jobs:
           # Publishing it would offer every user an update that fails, so the
           # signature is verified before the manifest is written.
           python3 scripts/ci/verify-apk-signing.py "$OUT"/*.apk
+          # "Offline" only means something if the archives are inside the APK,
+          # and they are gitignored, so a clean runner has none: Sync with a
+          # missing source is a no-op that still builds. Checked here because a
+          # missed bundle is a 500 MB download for the user, not a crash.
+          python3 scripts/ci/verify-offline-bundles.py \
+            "$OUT/mobile-harness-offline-v${VERSION_NAME}.apk"
           echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "--- manifest ---"
